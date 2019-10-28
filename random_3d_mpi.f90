@@ -3,103 +3,103 @@ PROGRAM random_3d_RAM_MPI
 !
 ! Description:
 !
-!   This program generates a 3D medium with randomly distributed velocity heterogeneities. 
+!   This program generates a 3D medium with randomly distributed velocity heterogeneities.
 !   Calculations occur in the spectral domain following the approach of Pardo-Iguzquiza et
-!   Chica-Olmo (1994). 
-!   The random field can be characterised by a Gaussian, exponential or von Karman 
-!   autocorrelation function. The random field can be tapered and/or muted at the sides, 
+!   Chica-Olmo (1994).
+!   The random field can be characterised by a Gaussian, exponential or von Karman
+!   autocorrelation function. The random field can be tapered and/or muted at the sides,
 !   except the free-surface (z=0). Eventually, a reference point can be defined: the random
 !   field can be tapered/muted around this point or it can be tapered/muted everywhere except
 !   around the point.
-!   The random field can be either written to disk or can be superimposed to a background 
+!   The random field can be either written to disk or can be superimposed to a background
 !   velocity model (1D or 3D). In the latter case, the background velocity model is resampled
 !   on the grid of the random field.
-!  
+!
 !
 !   MKS system of units is assumed.
 !
-!   A right-hand reference system is assumed: 
-!  
-!          *------------------*   
-!         /|                 /|   
-!      X / |                / |   
-!       /  |     Y         /  |   O indicates axes origin 
-!      O------------------*   |   
-!      |   *--------------|---*   
-!      |  /               |  / 
+!   A right-hand reference system is assumed:
+!
+!          *------------------*
+!         /|                 /|
+!      X / |                / |
+!       /  |     Y         /  |   O indicates axes origin
+!      O------------------*   |
+!      |   *--------------|---*
+!      |  /               |  /
 !    Z | /                | /
 !      |/                 |/
-!      *------------------*              
-!  
-!   If a background velocity model is provided, it must cover the entire grid where the 
-!   random field is computed. If a 1D velocity model is provided, it must cover the whole 
+!      *------------------*
+!
+!   If a background velocity model is provided, it must cover the entire grid where the
+!   random field is computed. If a 1D velocity model is provided, it must cover the whole
 !   vertical axis. The code returns an error message if this condition is not met.
 !
 !   In a first step, the X axis is split amongst the MPI tasks. Spectrum and IFFTs are computed
 !   on Y-Z planes. In a second step, data are redistributed on X-Y planes and final IFFTs
 !   are performed along X direction. Normally, each single X-Y plane is assigned to a different
-!   MPI task; however, if not enough RAM is available, the Y axis is divided into N chunks 
-!   and a MPI task owns the subregion X-Y/N.   
+!   MPI task; however, if not enough RAM is available, the Y axis is divided into N chunks
+!   and a MPI task owns the subregion X-Y/N.
 !
 !   The desired continuous standard deviation, specified in input, differs from the discrete
 !   one (i.e. the standard deviation of the output random field) because of spectral truncation
-!   (see Frenje et Julin, 2000, for further details). Furthermore, we apply a taper between 
-!   Knyquist/2 and Knyquist to avoid aliasing.   
+!   (see Frenje et Julin, 2000, for further details). Furthermore, we apply a taper between
+!   Knyquist/2 and Knyquist to avoid aliasing.
 !
 !   Input parameters:
 !
-!      acf       [char]        --> autocorrelation function, either "VK" (Von Karman) or "GS" 
-!                                  (Gaussian). 
+!      acf       [char]        --> autocorrelation function, either "VK" (Von Karman) or "GS"
+!                                  (Gaussian).
 !      acf_cl    [3*real]      --> correlation length.
-!      sigma     [real]        --> desired continuous standard deviation.  
+!      sigma     [real]        --> desired continuous standard deviation.
 !      v         [real]        --> Hurst exponent. If acf=VK and v=0.5, an exponential auto-
 !                                  correlation function is produced.
 !      iseed     [int]         --> seed number to initialise the random generator.
 !      output_N  [3*real]      --> number of points along X,Y,Z to be saved to disk.
-!      output_dx [real]        --> grid-spacing of the grid where the random field is computed. 
-!                                  This is also the grid-spacing used for output. 
+!      output_dx [real]        --> grid-spacing of the grid where the random field is computed.
+!                                  This is also the grid-spacing used for output.
 !      output_Vp [char]        --> name of output file containing Vp values.
 !      output_Vs [char]        --> name of output file containing Vs values.
 !      RAM       [real]        --> memory available to each MPI task.
-!      backgr_Vp [char]        --> background velocity model (Vp values).      
+!      backgr_Vp [char]        --> background velocity model (Vp values).
 !      backgr_Vs [char]        --> background velocity model (Vs values).
-!      backgr_mode [char]      --> kind of background velocity: 't' for text, 'b' for binary, 
+!      backgr_mode [char]      --> kind of background velocity: 't' for text, 'b' for binary,
 !                                  'n' for none.
 !      backgr_N  [3*int]       --> number of points along X,Y,Z in the background velocity model.
 !                                  Used only for binary files (3D velocity models).
 !      backgr_dx [3*real] 	   --> grid-spacing of the grid where the background velocity model
 !                                  is defined. Used only for binary files (3D velocity models).
 !      taper_side [2*int]      --> grid points to be tapered (1) and muted (2).
-!      ref_point_xyz [3*real]  --> position of reference point in absolute coordinates.   
+!      ref_point_xyz [3*real]  --> position of reference point in absolute coordinates.
 !      ref_point_taper [2*int] --> grid points to be tapered (1) and muted (2).
 !      ref_point_mode [int]    --> define how the tapering/muting is applied: 0 - around the
-!                                  the reference point; 1 - everywhere except around the 
+!                                  the reference point; 1 - everywhere except around the
 !                                  reference point.
 !
 !   Output:
 !
 !      A single file with Vs values (either random field or random field superimposed to a
-!      background velocity model) or two single files with Vp and Vs values (random field 
+!      background velocity model) or two single files with Vp and Vs values (random field
 !      superimposed to a background velocity model)
-! 
+!
 ! Author: W. Imperatori (walter.imperatori@sed.ethz.ch)
 !
 ! Version: Created on August 2011, v1.0
 !          Modified on December 2011, v1.1 - 3D background velocity model added
-!          Modified on February 2012, v1.2 - Gaussian ACF added 
-!          Modified on December 2017, v1.3 - Structure of input file modified, several check- 
-!                                            points introduced, more comments added  
-!          Modified on August 2018, v1.4   - Removed bug leading to wrong random field amplitude 
+!          Modified on February 2012, v1.2 - Gaussian ACF added
+!          Modified on December 2017, v1.3 - Structure of input file modified, several check-
+!                                            points introduced, more comments added
+!          Modified on August 2018, v1.4   - Removed bug leading to wrong random field amplitude
 !                                            when "output_N" is not power of 2
 !
-! Notes: 
+! Notes:
 !       A) With OpenMPI 3.0, an IO error prevents writing results correctly to disk if the
-!       Y axis is split into a large number of chunks. Adding the option "--mca io romio314" 
+!       Y axis is split into a large number of chunks. Adding the option "--mca io romio314"
 !       to the mpirun command avoids such error (see also https://github.com/open-mpi/ompi/
 !       issues/4336)
 !
-!       B) Please report any bug to walter.imperatori@sed.ethz.ch  
-!  
+!       B) Please report any bug to walter.imperatori@sed.ethz.ch
+!
 !=========================================================================================
 
 use mpi
@@ -111,7 +111,7 @@ use interfaces, only: four1d
 
 implicit none
 
-!include "mpif.h"   
+!include "mpif.h"
 
 ! constants
 real(rsp) :: pi
@@ -140,13 +140,13 @@ character(len=99)         :: backgr_Vp, backgr_Vs
 character(len=1)          :: backgr_mode
 integer(isp)              :: n_layers
 integer(isp),dimension(3) :: backgr_N
-real(rsp),dimension(3)    :: backgr_dx  
+real(rsp),dimension(3)    :: backgr_dx
 real(rsp),allocatable,dimension(:) :: depth1D, vs1D, vp1D
 
 ! output random model stuff
-character(len=99)         :: output_Vp, output_Vs   
+character(len=99)         :: output_Vp, output_Vs
 !integer(isp)              :: output_mode
-integer(isp),dimension(3) :: output_N   
+integer(isp),dimension(3) :: output_N
 real(rsp)                 :: output_dx
 
 ! reference point stuff
@@ -179,7 +179,7 @@ real(rdp) :: exec_time, tic, tac, tic2, tac2, io_tic, io_tac
 
 ! IO stuff
 logical                              :: lwrite = .false.
-logical,dimension(5)                 :: lprint  
+logical,dimension(5)                 :: lprint
 real(rsp),allocatable,dimension(:,:) :: IOar
 
 ! system stuff
@@ -190,7 +190,7 @@ real(rsp) :: RAM, task_memory, By2Gy
 ! Initialise MPI
 call MPI_INIT(err)
 
-! Duplicate communicator (i.e. MPI_COMM_WORLD into MCW) 
+! Duplicate communicator (i.e. MPI_COMM_WORLD into MCW)
 call MPI_COMM_DUP(MPI_COMM_WORLD,MCW,err)
 
 ! Get rank number
@@ -211,7 +211,7 @@ backgr_Vp = 'none'
 call set_pi(pi)
 
 ! set factor to convert from Byte to GByte
-By2Gy = 1. / 1024. / 1024. / 1024. 
+By2Gy = 1. / 1024. / 1024. / 1024.
 
 ! Master rank reads input file
 if (rank .eq. 0) then
@@ -221,21 +221,21 @@ if (rank .eq. 0) then
    read(1,*); read(1,*) acf_cl             ! correlation length, 					3 real
    read(1,*); read(1,*) sigma              ! standard deviation, 					1 real
    read(1,*); read(1,*) v                  ! Hurst exponent,     					1 real
-   read(1,*); read(1,*) iseed              ! seed number,        					1 integer    
+   read(1,*); read(1,*) iseed              ! seed number,        					1 integer
    read(1,*); read(1,*) output_N           ! points to save,     		 			3 integer
-   read(1,*); read(1,*) output_dx          ! grid spacing,       					1 real   
-   read(1,*); read(1,*) output_Vp          ! filename for Vs,    		  			99 char 
+   read(1,*); read(1,*) output_dx          ! grid spacing,       					1 real
+   read(1,*); read(1,*) output_Vp          ! filename for Vs,    		  			99 char
    read(1,*); read(1,*) output_Vs          ! filename for Vp,    		   			99 char
    !read(1,*) output_mode        ! describe output mode,			        1 integer
    read(1,*); read(1,*) RAM                ! available memory per task, 			1 real
-   read(1,*); read(1,*) backgr_Vp          ! b.v.m. for Vp,                        99  char                       
+   read(1,*); read(1,*) backgr_Vp          ! b.v.m. for Vp,                        99  char
    read(1,*); read(1,*) backgr_Vs          ! b.v.m. for Vs,                        99  char
-   read(1,*); read(1,*) backgr_mode        ! specify b.v.m. type,                  1  char   
+   read(1,*); read(1,*) backgr_mode        ! specify b.v.m. type,                  1  char
    read(1,*); read(1,*) backgr_N           ! points in background velocity model,  3 integer
    read(1,*); read(1,*) backgr_dx          ! grid spacing of b.v.m.,               3 real
    read(1,*); read(1,*) taper_side         ! specify tapering of sides,            2 integer
    read(1,*); read(1,*) ref_point_xyz      ! position of r.p. and tapering,        3 real
-   read(1,*); read(1,*) ref_point_taper            
+   read(1,*); read(1,*) ref_point_taper
    read(1,*); read(1,*) ref_point_mode
 
    close(1)
@@ -248,11 +248,11 @@ if (rank .eq. 0) then
    print*,'Hurst exponent (v): ',v
    print*,'Seed number: ',iseed
    print*,'Points in output model: ',output_N
-   print*,'Grid-step (m): ',output_dx   
+   print*,'Grid-step (m): ',output_dx
    print*,'Output file for Vp: ',trim(output_Vp)
    print*,'Output file for Vs: ',trim(output_Vs)
    !print*,'Output type: ',output_mode
-   print*,'Available RAM: ',RAM   
+   print*,'Available RAM: ',RAM
    print*,'Backgr model for Vp: ',trim(backgr_Vp)
    print*,'Backgr model for Vs: ',trim(backgr_Vs)
    print*,'Backgr model type: ',backgr_mode
@@ -266,7 +266,7 @@ if (rank .eq. 0) then
    endif
    print*,'***************************************************'
    print*,''
-           
+
 endif
 
 call MPI_BARRIER(MCW,err)
@@ -320,7 +320,7 @@ if (any(output_dx .gt. acf_cl/2.)) then
 endif
 
 ! if a background model is given, check whether it is large enough (3D) or load it into
-! memory (1D)  
+! memory (1D)
 if (backgr_mode .ne. 'n') call check_domain
 
 ! set number of points to work in spectral domain (FFT)
@@ -329,13 +329,13 @@ N = output_N
 ! check power of 2 requirement for FFT. Increase N if necessary
 do i = 1,3
    exponent = log(real(N(i))) / log(2.0)
-   if (exponent /= nint(exponent))  N(i) = 2**(ceiling(exponent))   
+   if (exponent /= nint(exponent))  N(i) = 2**(ceiling(exponent))
 enddo
 
 ! compute delta-k in each direction
-dk = (1. / real(N)) * (2.*pi / output_dx)               
+dk = (1. / real(N)) * (2.*pi / output_dx)
 
-! compute Nyquist wavenumber 
+! compute Nyquist wavenumber
 K_nyq = pi/output_dx
 
 ! set maximum wavenumber to half of Nyquist wavenumber. Spectrum values above this will
@@ -361,16 +361,16 @@ if(rank .eq. 0) then
    print*,'Upper wavenumbers before tapering: ',K_max
 endif
 
-! Split loop over x-axis amongst MPI tasks. Some tasks may get larger x-intervals than 
-! others  
-i_min = 1 + nint( real(N(1)/2+1) / real(ntasks) * real(rank) ) 
+! Split loop over x-axis amongst MPI tasks. Some tasks may get larger x-intervals than
+! others
+i_min = 1 + nint( real(N(1)/2+1) / real(ntasks) * real(rank) )
 i_max = nint( real(N(1)/2+1) / real(ntasks) * real(rank+1) )
 i_size = i_max - i_min + 1
 
 ! Rough estimate of max memory consumption (GB) per task
 ! Add complex arrays for spectrum (SPEC_STORE and SPEC)
 task_memory = 2. * kind(SPEC) * (output_N(2)*output_N(3)*i_size + N(2)*N(3))
-      
+
 ! Add real array for random phase (R)
 task_memory = task_memory + kind(R) * N(2)*N(3)
 
@@ -383,7 +383,7 @@ if (task_memory .gt. RAM) then
    if (rank .eq. 0) print*,'Required memory (GB): ',task_memory
    call MPI_BARRIER(MCW,err)
    call MPI_ABORT(MCW,errcode,err)
-endif   
+endif
 
 if(rank .eq. 0) print*,''
 if(rank .eq. 0) write(*,'(X,A,F5.1)') 'Estimated memory per MPI task (GB): ',task_memory
@@ -405,7 +405,7 @@ endif
 scaling = 1. / sqrt(N(1) * N(2) * N(3) * output_dx**3)
 
 ! prepare random numbers generator
-call random_seed(size=seed_size)                       
+call random_seed(size=seed_size)
 allocate(tmp_seed(seed_size))
 
 ! Timing for computing spectrum
@@ -417,7 +417,7 @@ allocate(R(N(2),N(3)))
 ! allocate array for spectrum
 allocate(SPEC(N(2),N(3)))
 
-! Loop along x-axis to fill 2D (Y-Z) array 
+! Loop along x-axis to fill 2D (Y-Z) array
 do i = i_min,i_max
 
    ! Update seed with x-level index and initialise random generator accordingly. This way
@@ -433,9 +433,9 @@ do i = i_min,i_max
       if(rank .eq. 0) print*,''
    endif
 
-   !if(rank .eq. 0) print*,'Working on YZ array, x-index: ',i - i_min + 1,' of: ',i_max - i_min + 1 
+   !if(rank .eq. 0) print*,'Working on YZ array, x-index: ',i - i_min + 1,' of: ',i_max - i_min + 1
 
-   ! generate random numbers 
+   ! generate random numbers
    call random_number(R)
 
    tic2 = MPI_Wtime()
@@ -445,47 +445,47 @@ do i = i_min,i_max
       do j = 1,N(2)
 
          Kr = sqrt( (Kx(i)**2 * acf_cl(1)**2) + (Ky(j)**2 * acf_cl(2)**2) + (Kz(k)**2 * acf_cl(3)**2) )
-         
+
          ! VON KARMAN (or EXPONENTIAL if v=0.5)
          if (acf .eq. 'VK') then
             PWR = num / ( gamma * (1 + Kr**2)**(v + 3./2.) )
          ! GAUSSIAN
          elseif (acf .eq. 'GS') then
             PWR = exp(0.25*Kr**2); PWR = num / PWR
-         endif   
-         
+         endif
+
          ! now we apply a separable window taper (Hann) to reduce risk of aliasing at high
          ! wave-numbers. Tapering occurs between Knyq/2 (i.e. Kmax) and Knyq
 
          ! x-direction
          if (Kx(i) .gt. K_max(1)) then
-            hanning = 0.5 * (1. - cos(2. * pi * Kx(i) / K_nyq(1)))  
+            hanning = 0.5 * (1. - cos(2. * pi * Kx(i) / K_nyq(1)))
          else
             hanning = 1.
          endif
 
          ! y-direction
          if (Ky(j) .gt. K_max(2)) then
-            hanning = 0.5 * (1. - cos(2. * pi * Ky(j) / K_nyq(2))) * hanning  
+            hanning = 0.5 * (1. - cos(2. * pi * Ky(j) / K_nyq(2))) * hanning
          else
             hanning = 1. * hanning
-         endif         
-         
+         endif
+
          ! z-direction
          if (Kz(k) .gt. K_max(3)) then
-            hanning = 0.5 * (1. - cos(2. * pi * Kz(k) / K_nyq(3))) * hanning  
+            hanning = 0.5 * (1. - cos(2. * pi * Kz(k) / K_nyq(3))) * hanning
          else
             hanning = 1. * hanning
-         endif         
-                     
-         ! apply taper             
+         endif
+
+         ! apply taper
          PWR = PWR * hanning
-                            
+
          ! putting together amplitude spectrum and random phase
          SPEC(j,k) = cmplx(sqrt(real(PWR))*cos(R(j,k)*2*pi),sqrt(real(PWR))*sin(R(j,k)*2*pi))
-                        
+
       enddo
-   enddo   
+   enddo
    !$OMP END PARALLEL DO
 
    tac2 = MPI_Wtime(); tac2 = tac2 - tic2
@@ -496,8 +496,8 @@ do i = i_min,i_max
    if ( (i .eq. 1) .or. (i .eq. N(1)/2+1) ) then
       SPEC(1,1) = 0.0
       SPEC(N(2)/2+1,1) = real(SPEC(N(2)/2+1,1))
-      SPEC(1,N(3)/2+1) = real(SPEC(1,N(3)/2+1)) 
-      SPEC(N(2)/2+1,N(3)/2+1) = real(SPEC(N(2)/2+1,N(3)/2+1)) 
+      SPEC(1,N(3)/2+1) = real(SPEC(1,N(3)/2+1))
+      SPEC(N(2)/2+1,N(3)/2+1) = real(SPEC(N(2)/2+1,N(3)/2+1))
 
       !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(k)
       do k=2,N(3)/2
@@ -525,7 +525,7 @@ do i = i_min,i_max
             SPEC(N(2)-j+2,N(3)-k+2) = conjg(SPEC(j,k))
             SPEC(N(2)-j+2,N(3)/2-k+2) = conjg(SPEC(j,N(3)/2+k))
          enddo
-      enddo   
+      enddo
       !$OMP END PARALLEL DO
    endif
 
@@ -534,30 +534,30 @@ do i = i_min,i_max
    ! Inverse FFT along Y (no cache misses -> fast)
    !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(k)
    do k = 1,N(3)
-      call four1d(SPEC(:,k),-1)  
-   enddo 
+      call four1d(SPEC(:,k),-1)
+   enddo
    !$OMP END PARALLEL DO
 
    ! Inverse FFT along Z (cache misses -> slow)
    !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(j)
    do j = 1,N(2)
-      call four1d(SPEC(j,:),-1)   
-   enddo    
+      call four1d(SPEC(j,:),-1)
+   enddo
    !$OMP END PARALLEL DO
 
    tac2 = MPI_Wtime(); tac2 = tac2 - tic2
    if ( (rank .eq. 0) .and. (i .eq. i_min) ) print*,'{IFFTs computed in ',real(tac2),' sec}'
-   
-   
+
+
    if (.not.allocated(SPEC_STORE)) allocate(SPEC_STORE(output_N(2),output_N(3),i_size))
-     
+
    SPEC_STORE(:,:,i - i_min + 1) = SPEC(1:output_N(2),1:output_N(3))
-      
+
 enddo
 
 call MPI_BARRIER(MCW,err)
 
-! deallocate some arrays 
+! deallocate some arrays
 deallocate(R,SPEC)
 
 ! elapsed time for computing spectrum
@@ -573,12 +573,12 @@ deallocate(Kx,Ky,Kz,tmp_seed)
 
 ! Here below we compute how many pieces ('y_chunks') the Y-axis should be divided into. The
 ! total number of blocks (output_N(3)*y_chunks) are assigned to each MPI task in a round-robin
-! fashion 
+! fashion
 
 ! allocate arrays
 allocate(counts(0:ntasks-1),displacement(0:ntasks-1))
 
-! store in 'counts' the number of Y-Z arrays (i.e. X-slices) for each MPI process 
+! store in 'counts' the number of Y-Z arrays (i.e. X-slices) for each MPI process
 call MPI_ALLGATHER(i_size,1,MPI_INTEGER,counts,1,MPI_INTEGER,MCW,err)
 
 ! compute stride between each X-block. Basically, we are measuring the distance of each
@@ -586,12 +586,12 @@ call MPI_ALLGATHER(i_size,1,MPI_INTEGER,counts,1,MPI_INTEGER,MCW,err)
 displacement(0) = 0
 do i = 1,ntasks - 1
    displacement(i) = counts(i - 1) + displacement(i - 1)
-enddo   
+enddo
 
-! remove R... 
+! remove R...
 task_memory = task_memory - kind(R) * N(2)*N(3) * By2Gy
 ! ...and SPEC from memory requirement
-task_memory = task_memory - 2. * kind(SPEC) * N(2)*N(3) * By2Gy 
+task_memory = task_memory - 2. * kind(SPEC) * N(2)*N(3) * By2Gy
 
 ! compute 'y_chunks', i.e. the amount of pieces the Y axis is split into in order to not
 ! exceed the available memory
@@ -601,8 +601,8 @@ y_chunks = ceiling(2. * kind(SPEC) * output_N(2)*(N(1) + i_size) * By2Gy / (RAM 
 if (rank .eq. 0) then
    write(*,'(X,A,X,I2,X,A)'),'Y-axis will be divided into',y_chunks,'chunk(s)'
    print*,''
-endif   
- 
+endif
+
 ! total number of blocks in the Y-Z plane
 blocks = y_chunks * output_N(3)
 
@@ -612,15 +612,15 @@ allocate(npts_ychunk(blocks))
 do i = 1,blocks
    npts_ychunk(i) = output_N(2) / y_chunks
    if (mod(i,y_chunks) .eq. 0) npts_ychunk(i) = output_N(2) / y_chunks + mod(output_N(2),y_chunks)
-enddo    
+enddo
 
 ! assign each block to each task in a round-robin fashion
 allocate(proc(blocks))
 do j = 0,ntasks - 1
-   do i = j,blocks - 1,ntasks 
+   do i = j,blocks - 1,ntasks
       proc(i + 1) = j
    enddo
-enddo      
+enddo
 
 ! allocate vectors where we'll store Z-level and Y-level for each MPI task
 allocate(z_level(0:ntasks - 1),y_level(0:ntasks - 1,2))
@@ -640,8 +640,8 @@ lprint(:) = .true.
 ! start timing
 tic = MPI_Wtime()
 
-! Now we loop over all blocks to perform missing IFFT along X-direction. 
-! Note: some MPI tasks may not write data to disk, depending on 'proc' 
+! Now we loop over all blocks to perform missing IFFT along X-direction.
+! Note: some MPI tasks may not write data to disk, depending on 'proc'
 do l = 1,output_N(3)
 
    ! Partial timing: get a rough estimate to code completion
@@ -653,14 +653,14 @@ do l = 1,output_N(3)
    endif
 
    tic2 = MPI_Wtime()
- 
+
    j_first = 0; j_last = 0
- 
+
    ! Loop over the pieces the Y-axis has been divided into
    do u = 1,y_chunks
 
       ! compute current block number
-      c_block = (l - 1) * y_chunks + u 
+      c_block = (l - 1) * y_chunks + u
 
       ! numer of points along Y for current task
       if (rank .eq. proc(c_block)) mypoints = npts_ychunk(c_block)
@@ -668,36 +668,36 @@ do l = 1,output_N(3)
       ! first index along Y
       !j_first = (u - 1) * npts_ychunk(c_block) + 1
       j_first = j_last + 1
-     
-      ! last index along Y 
+
+      ! last index along Y
       !j_last = u * npts_ychunk(c_block)
-      j_last = j_last + npts_ychunk(c_block) 
-      
-      ! allocate array where results from previous calculations will be stored. Shape of 
+      j_last = j_last + npts_ychunk(c_block)
+
+      ! allocate array where results from previous calculations will be stored. Shape of
       ! 'SPEC_Z' is irrelevant to all tasks except to task owing current block
       if ( .not.allocated(SPEC_Z) .and. (rank .ne. proc(c_block)) ) then
          allocate(SPEC_Z(npts_ychunk(c_block),N(1)))
          SPEC_Z = cmplx(0.,0.)
-      endif   
+      endif
 
       ! correct allocation for current task
       if ( .not.allocated(SPEC_Z) .and. (rank .eq. proc(c_block)) ) then
          allocate(SPEC_Z(mypoints,N(1)))
-         SPEC_Z = cmplx(0.,0.)      
+         SPEC_Z = cmplx(0.,0.)
       endif
-   
+
       ! allocate temporary array to store task-specific partial results
-      allocate(SPEC(npts_ychunk(c_block),i_size))    
-   
+      allocate(SPEC(npts_ychunk(c_block),i_size))
+
       ! read previous partial results
       do i = 1,i_size
          SPEC(:,i) = SPEC_STORE(j_first:j_last,l,i)
-      enddo    
-      
+      enddo
+
       ! elements received
       allocate(recvcounts(0:ntasks - 1))
-      recvcounts = counts * npts_ychunk(c_block) 
-      
+      recvcounts = counts * npts_ychunk(c_block)
+
       ! displacement relative to SPEC_Z
       allocate(displ(0:ntasks - 1))
       displ = displacement * npts_ychunk(c_block)
@@ -715,10 +715,10 @@ do l = 1,output_N(3)
       ! will be used during interpolation
       z_level(proc(c_block))   = l
       y_level(proc(c_block),1) = j_first
-      y_level(proc(c_block),2) = j_last 
+      y_level(proc(c_block),2) = j_last
 
 
-      ! Once all MPI tasks have 'SPEC_Z' loaded with data or there are no blocks left, 
+      ! Once all MPI tasks have 'SPEC_Z' loaded with data or there are no blocks left,
       ! continue with calculations (otherwise keep looping over blocks to load data). Note
       ! that all tasks enter the instruction set below
       if ( (proc(c_block) .eq. (ntasks - 1)) .or. (c_block .eq. blocks) ) then
@@ -729,25 +729,25 @@ do l = 1,output_N(3)
              print*,'{Data for IO gathered in ',real(tac2),' sec}'
              print*,''
              lprint(2) = .false.
-         endif   
-               
+         endif
+
          forall (i = 1:mypoints, j = 2:N(1)/2)
             SPEC_Z(i,N(1) - j + 2) = conjg(SPEC_Z(i,j))
-         end forall   
+         end forall
 
-         ! IFFT over X-direction 
+         ! IFFT over X-direction
          !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i)
          do i = 1,mypoints
             call four1d(SPEC_Z(i,:),-1)
-         enddo     
-         !$OMP END PARALLEL DO 
-      
+         enddo
+         !$OMP END PARALLEL DO
+
          ! apply scaling factor. The random field is now in the real part of 'SPEC_Z'
          do j = 1,output_N(1)
             SPEC_Z(:,j) = cmplx( real(SPEC_Z(:,j)) * scaling, 0. )
          enddo
-         
-         ! Do we need to apply a taper and/or mute sides of the random field?      
+
+         ! Do we need to apply a taper and/or mute sides of the random field?
          if(any(taper_side .ne. 0)) then
             !if(rank .eq. 0) print*,'Tapering and muting edges'
             !tic2 = MPI_Wtime()
@@ -756,7 +756,7 @@ do l = 1,output_N(3)
             !if(rank .eq. 0) print*,'{Taper applied in ',real(tac2),' sec}'
          endif
 
-         ! Do we need to apply a taper and/or mute a region around a PoI?     
+         ! Do we need to apply a taper and/or mute a region around a PoI?
          if(all(ref_point_xyz(1:3) .ge. 0)) then
             !if(rank .eq. 0) print*,'Tapering and muting point of interest'
             !tic2 = MPI_Wtime()
@@ -767,42 +767,42 @@ do l = 1,output_N(3)
 
          ! Complete previous writing process (only tasks in WRT_COMM enter this IF)
          if(lwrite) then
-            
+
             ! finish writing results and close file
             call MPI_FILE_WRITE_ORDERED_END(filep,IOar,status,err)
             call MPI_FILE_CLOSE(filep,err)
- 
+
             io_tac = MPI_Wtime(); io_tac = io_tac - io_tic
             if ( (rank .eq. 0) .and. lprint(3) ) then
                print*,'{Data written in ',real(io_tac),' sec}'
                print*,''
                lprint(3) = .false.
-            endif 
- 
+            endif
+
             ! deallocate array used to write result to disk
             deallocate(IOar)
- 
+
             ! Release group and communicator created for writing
             call MPI_GROUP_FREE(WRT_GR,err)
             call MPI_COMM_FREE(WRT_COMM,err)
-            
+
             ! reset flag
             lwrite = .false.
          endif
 
-         ! Here below we create a sub-group and communicator for MPI I/O, i.e. we setup a 
+         ! Here below we create a sub-group and communicator for MPI I/O, i.e. we setup a
          ! group made by only those tasks with data to be written to disk
-         
+
          ! find number of tasks that must be write to disk. Normally, this is equal to 'ntasks',
          ! unless we are toward the end of the blocks
          nwriters = proc(c_block) + 1
-         
+
          ! allocate array with rank of IO tasks
          allocate(writers(nwriters))
          do i = 0,proc(c_block)
             writers(i + 1) = i
-         enddo   
-         
+         enddo
+
          ! create group
          call MPI_COMM_GROUP(MCW,MCW_GR,err)
          call MPI_GROUP_INCL(MCW_GR,nwriters,writers,WRT_GR,err)
@@ -813,81 +813,81 @@ do l = 1,output_N(3)
 
          ! Only tasks belonging to the group can execute the instructions below
          if(rank .le. proc(c_block)) then
- 
+
             ! do some statistics on current block of data
             do j = 1,output_N(1)
                do i = 1,mypoints
                   call online_variance(real(SPEC_Z(i,j)), var, mu, npts)
                enddo
-            enddo   
-         
+            enddo
+
             ! min / max
             loc_min = min( minval(real(SPEC_Z(:,1:output_N(1)))), loc_min )
             loc_max = max( maxval(real(SPEC_Z(:,1:output_N(1)))), loc_max )
- 
+
             ! Read, resample and add values from a background velocity model
-            if(backgr_mode .ne. 'n') then 
+            if(backgr_mode .ne. 'n') then
                !if(rank .eq. 0) print*,'Resampling background model'
                tic2 = MPI_Wtime()
-               call resample_deterministic_model     
+               call resample_deterministic_model
                tac2 = MPI_Wtime(); tac2 = tac2 - tic2
                if ( (rank .eq. 0) .and. lprint(4) ) then
                   print*,'{Background model read&resampled in ',real(tac2),' sec}'
                   print*,''
                   lprint(4) = .false.
-               endif    
+               endif
             endif
-            
-            !if (rank .eq. 0) print*,'Writing files to disk' 
-            
+
+            !if (rank .eq. 0) print*,'Writing files to disk'
+
             ! allocate array for writing to disk
             allocate(IOar(output_N(1),mypoints))
-            
+
             io_tic = MPI_Wtime()
-            
+
             ! start non-blocking IO
             call write_to_disk
-            
+
             ! complete writing to disk immediately if we are at last block
             if (c_block .eq. blocks) then
-           
+
                call MPI_FILE_WRITE_ORDERED_END(filep,IOar,status,err)
                call MPI_FILE_CLOSE(filep,err)
- 
+
                ! deallocate array used to write result to disk
                deallocate(IOar)
- 
+
                ! release group and communicator created for writing
                call MPI_GROUP_FREE(WRT_GR,err)
                call MPI_COMM_FREE(WRT_COMM,err)
-           
+
             endif
 
             deallocate(SPEC_Z)
 
-            !tac2 = MPI_Wtime(); tac2 = tac2 - tic2 
+            !tac2 = MPI_Wtime(); tac2 = tac2 - tic2
             !if (rank .eq. 0) print*,'{Files written in: ',real(tac2),'sec}'
 
          endif  ! end block for writing to disk
-         
+
          deallocate(writers)
-         
+
          ! reset number of points for current task
          mypoints = 0
 
       endif  ! end block for assigning blocks to MPI tasks
 
-      ! make sure 'SPEC_Z' is deallocated 
+      ! make sure 'SPEC_Z' is deallocated
       if ( allocated(SPEC_Z) .and. (mypoints .eq. 0) ) deallocate(SPEC_Z)
 
    enddo ! end loop over Y-chunks
-   
-enddo ! end loop over Z-levels   
+
+enddo ! end loop over Z-levels
 
 ! deallocate pending arrays
 deallocate(SPEC_STORE)
 
-! deallocate arrays for 1D velocity model  
+! deallocate arrays for 1D velocity model
 if (backgr_mode .eq. 't') deallocate(depth1D,vs1D,vp1D)
 
 ! retrieve info above min/max values of random field
@@ -901,30 +901,30 @@ endif
 
 ! retrieve info above min/max values of composed velocity model
 if (backgr_mode .ne. 'n') then
-   
+
    call MPI_REDUCE(compos_Vs_min,glob_min,1,MPI_REAL,MPI_MIN,0,MCW,err)
    call MPI_REDUCE(compos_Vs_max,glob_max,1,MPI_REAL,MPI_MAX,0,MCW,err)
 
    if (rank .eq. 0) then
       print*,'Minimum value for Vs: ',glob_min
-      print*,'Maximum value for Vs: ',glob_max   
+      print*,'Maximum value for Vs: ',glob_max
    endif
-   
+
    if (backgr_Vp .ne. 'none') then
-      
+
       call MPI_REDUCE(compos_Vp_min,glob_min,1,MPI_REAL,MPI_MIN,0,MCW,err)
       call MPI_REDUCE(compos_Vp_max,glob_max,1,MPI_REAL,MPI_MAX,0,MCW,err)
 
       if (rank .eq. 0) then
          print*,'Minimum value for Vp: ',glob_min
-         print*,'Maximum value for Vp: ',glob_max   
-      endif   
-   
+         print*,'Maximum value for Vp: ',glob_max
+      endif
+
    endif
-endif   
-   
+endif
+
 ! compute variance for each task
-var = var / (npts - 1.)   
+var = var / (npts - 1.)
 
 ! allocate stat arrays
 allocate(varar(ntasks),muar(ntasks),nar(ntasks))
@@ -940,13 +940,13 @@ var = varar(1); mu = muar(1); npts = nar(1)
 ! final statistics
 do i = 2,ntasks
    call parallel_variance(varar(i), muar(i), nar(i), var, mu, npts)
-enddo   
+enddo
 
 if (rank .eq. 0) then
    print*,'Average of random field: ',real(mu)
    print*,'Std. dev. of random field: ',real(sqrt(var))
    print*,''
-endif   
+endif
 
 ! deallocate stat arrays
 deallocate(varar, muar, nar)
@@ -954,13 +954,13 @@ deallocate(varar, muar, nar)
 tac = MPI_Wtime(); exec_time = tac - exec_time
 
 if (rank .eq. 0) print*,'Total elapsed time: ',real(exec_time),' sec'
-            
+
 if(rank .eq. 0) then
    print*,''
-   print*,'Progam completed'  
-endif   
- 
-call MPI_BARRIER(MCW,err)  
+   print*,'Progam completed'
+endif
+
+call MPI_BARRIER(MCW,err)
 
 call MPI_FINALIZE(err)
 
@@ -972,16 +972,16 @@ SUBROUTINE check_domain
 !
 ! Description:
 !
-!    This subroutine accomplish the following tasks: 
+!    This subroutine accomplish the following tasks:
 !
 !    1) It verifies that the background velocity model is larger(3D case) / deeper(1D case)
 !       than the desired output composite model
 !
 !    2) Load and broadcast velocity data (1D case)
 !
-!    The subroutine is not called if no background velocity model is specified (i.e. if  
+!    The subroutine is not called if no background velocity model is specified (i.e. if
 !    'backgr_mode' = 'n')
-!  
+!
 ! Author: W. Imperatori (walter.imperatori@sed.ethz.ch)
 !
 ! Version: Created on August 2011, v1.0
@@ -998,43 +998,43 @@ real(rsp)    :: xmax, ymax, zmax, x, y, z
 
 ! Check whether 1D deterministic velocity model is deep enough to encompass the output grid
 if (trim(backgr_mode) .eq. 't') then
-   
+
    ! only master task reads input file
    if(rank .eq. 0) then
       open(1,file=trim(backgr_Vs),status='old',form='formatted')
-      read(1,*) n_layers   
+      read(1,*) n_layers
    endif
-   
+
    ! broadcast info
-   call MPI_BCAST(n_layers,1,MPI_INTEGER,0,MCW,err)  
-        
+   call MPI_BCAST(n_layers,1,MPI_INTEGER,0,MCW,err)
+
    if (n_layers .lt. 2) then
       if (rank .eq. 0) then
          print*,'ERROR, at least two layers are required'
-         print*,'Number of layers ',n_layers  
+         print*,'Number of layers ',n_layers
       endif
       call MPI_BARRIER(MCW,err)
       call MPI_ABORT(MCW,errcode,err)
-   endif   
-   
+   endif
+
    ! allocate some arrays
    allocate(depth1D(n_layers),vs1D(n_layers),vp1D(n_layers))
-   
+
    if(rank .eq. 0) then
       do i = 1,n_layers
          read(1,*) depth1D(i),vp1D(i),vs1D(i)
       enddo
       close(1)
    endif
-     
-   ! broadcast medium parameters   
-   call MPI_BCAST(depth1D,n_layers,MPI_REAL,0,MCW,err)   
+
+   ! broadcast medium parameters
+   call MPI_BCAST(depth1D,n_layers,MPI_REAL,0,MCW,err)
    call MPI_BCAST(vp1D,n_layers,MPI_REAL,0,MCW,err)
-   call MPI_BCAST(vs1D,n_layers,MPI_REAL,0,MCW,err) 
-      
-   zmax = (output_N(3) - 1) * output_dx   
-      
-   ! check whether background model is deep enough   
+   call MPI_BCAST(vs1D,n_layers,MPI_REAL,0,MCW,err)
+
+   zmax = (output_N(3) - 1) * output_dx
+
+   ! check whether background model is deep enough
    if ( depth1D(n_layers) .lt. zmax ) then
       if (rank .eq. 0) then
          print*,'Maximum depth of input 1D model must be larger than ', zmax
@@ -1042,9 +1042,9 @@ if (trim(backgr_mode) .eq. 't') then
       endif
       call MPI_BARRIER(MCW,err)
       call MPI_ABORT(MCW,errcode,err)
-   endif   
+   endif
 
-endif    
+endif
 
 ! check whether background model encompasses output grid
 if (backgr_mode .eq. 'b') then
@@ -1052,21 +1052,21 @@ if (backgr_mode .eq. 'b') then
    xmax = (output_N(1) - 1) * output_dx
    ymax = (output_N(2) - 1) * output_dx
    zmax = (output_N(3) - 1) * output_dx
-   
+
    x = (backgr_N(1) - 1) * backgr_dx(1)
    y = (backgr_N(2) - 1) * backgr_dx(2)
    z = (backgr_N(3) - 1) * backgr_dx(3)
 
    if( (xmax .ge. x) .or. (ymax .ge. y) .or. (zmax .ge. z) ) then
-      if(rank .eq. 0) then 
+      if(rank .eq. 0) then
          print*,'3D deterministic velocity model must be encompass output grid'
          print*,'Execution aborted'
-      endif   
-      call MPI_BARRIER(MCW,err)   
+      endif
+      call MPI_BARRIER(MCW,err)
       call MPI_ABORT(MCW,errcode,err)
    endif
 
-endif       
+endif
 
 END SUBROUTINE check_domain
 
@@ -1077,7 +1077,7 @@ SUBROUTINE tapering
 ! Description:
 !
 !    This subroutine taper and mute the random field close to model sides, except at Z=0
-! 
+!
 ! Author: W. Imperatori (walter.imperatori@sed.ethz.ch)
 !
 ! Version: Created on August 2011, v1.0
@@ -1094,7 +1094,7 @@ real(rsp)    :: ratio, hanning
 
 mute = taper_side(2)
 
-! adjust input taper value 
+! adjust input taper value
 taper = taper_side(1) + 1
 
 ! mute in the X-direction, both sides
@@ -1108,19 +1108,19 @@ enddo
 
 ! taper in the X-direction, both sides
 do k = (mute + 1),(taper + mute)
-   ratio = real(k - mute) / real(taper)   
-   hanning = 1. - cos(0.5 * pi * ratio)  
+   ratio = real(k - mute) / real(taper)
+   hanning = 1. - cos(0.5 * pi * ratio)
    SPEC_Z(:,k) = real(SPEC_Z(:,k)) * hanning
-enddo 
+enddo
 l = output_N(1) - mute
 do k = (l - taper + 1),l
    ratio = real(k - l) / real(taper)
    hanning = 1. - cos(0.5*pi*ratio)
    SPEC_Z(:,k) = real(SPEC_Z(:,k)) * hanning
-enddo 
- 
+enddo
+
 ! mute along the Y-direction, both sides. Muting occurs only if chunk is at either ends of
-! Y-axis 
+! Y-axis
 do i = y_level(rank,1),y_level(rank,2)
    if (i .le. mute) SPEC_Z(i - y_level(rank,1) + 1,:) = 0.
 enddo
@@ -1129,33 +1129,33 @@ do i = y_level(rank,1),y_level(rank,2)
    if(i .ge. l) SPEC_Z(i - y_level(rank,1) + 1,:) = 0.
 enddo
 
-! taper along the Y-direction, both sides. Tapering occurs only if chunk is at either ends 
-! of Y-axis 
+! taper along the Y-direction, both sides. Tapering occurs only if chunk is at either ends
+! of Y-axis
 do i = y_level(rank,1),y_level(rank,2)
-   if( (i .ge. (mute + 1)) .and. (i .le. (taper + mute)) ) then 
+   if( (i .ge. (mute + 1)) .and. (i .le. (taper + mute)) ) then
       ratio = real(i - mute) / real(taper)
       hanning = 1. - cos(0.5*pi*ratio)
       SPEC_Z(i - y_level(rank,1) + 1,:) = real(SPEC_Z(i - y_level(rank,1) + 1,:)) * hanning
    endif
-enddo  
-l = output_N(2) - mute 
+enddo
+l = output_N(2) - mute
 do i = y_level(rank,1),y_level(rank,2)
    if( (i .ge. (l - taper + 1)) .and. (i .le. l) ) then
       ratio = real(i - l) / real(taper)
       hanning = 1. - cos(0.5*pi*ratio)
       SPEC_Z(i - y_level(rank,1) + 1,:) = real(SPEC_Z(i - y_level(rank,1) + 1,:)) * hanning
    endif
-enddo  
+enddo
 
 ! mute and taper along Z-direction
 l = output_N(3) - mute
 if( (z_level(rank) .ge. (l - taper + 1)) .and. (z_level(rank) .le. l) ) then
    ratio = real(z_level(rank) - l) / real(taper)
    hanning = 1. - cos(0.5*pi*ratio)
-   SPEC_Z(:,:) = real(SPEC_Z(:,:)) * hanning    
+   SPEC_Z(:,:) = real(SPEC_Z(:,:)) * hanning
 elseif( (z_level(rank) .ge. (l + 1)) .and. (z_level(rank) .le. output_N(3)) ) then
    SPEC_Z(:,:) = 0.
-endif   
+endif
 
 END SUBROUTINE tapering
 
@@ -1166,8 +1166,8 @@ SUBROUTINE taper_region
 ! Description:
 !
 !    This subroutine taper and mute the random field around a specific point as indicated by
-!    ref_point_xyz, ref_point_taper, ref_point_mode.  
-! 
+!    ref_point_xyz, ref_point_taper, ref_point_mode.
+!
 ! Author: W. Imperatori (walter.imperatori@sed.ethz.ch)
 !
 ! Version: Created on August 2011, v1.0
@@ -1185,11 +1185,11 @@ real(rsp)                 :: ratio, hanning, dist, dist_bndr
 
 ! determine PoI position in grid-points
 point(1) = nint(ref_point_xyz(1) / output_dx) + 1
-point(2) = nint(ref_point_xyz(2) / output_dx) + 1 
+point(2) = nint(ref_point_xyz(2) / output_dx) + 1
 point(3) = nint(ref_point_xyz(3) / output_dx) + 1
 
 ! radius (in grid points) of the homogeneous/heterogeneous region around the PoI
-mute = ref_point_taper(2) 
+mute = ref_point_taper(2)
 
 ! size of taper around the PoI
 taper = ref_point_taper(1)
@@ -1204,7 +1204,7 @@ if (reverse .eq. 0) then
 
       do i = 1,output_N(1)
 
-         dist = sqrt( real ((i - point(1))**2 + (k - point(2))**2 + (z_level(rank)- point(3))**2) ) 
+         dist = sqrt( real ((i - point(1))**2 + (k - point(2))**2 + (z_level(rank)- point(3))**2) )
 
          if( (nint(dist) .gt. mute) .and. (nint(dist) .le. (mute + taper)) ) then
 
@@ -1214,21 +1214,21 @@ if (reverse .eq. 0) then
             SPEC_Z(k - y_level(rank,1) + 1,i) = real(SPEC_Z(k - y_level(rank,1) + 1,i)) * hanning
 
          elseif (nint(dist) .le. mute) then
-                  
+
             SPEC_Z(k - y_level(rank,1) + 1,i) = 0.
-                    
-         endif   
+
+         endif
 
       enddo
    enddo
-   
+
 elseif(reverse .eq. 1) then
 
    do k = y_level(rank,1),y_level(rank,2)
 
       do i = 1,output_N(1)
 
-         dist = sqrt( real ((i - point(1))**2 + (k - point(2))**2 + (z_level(rank)- point(3))**2) ) 
+         dist = sqrt( real ((i - point(1))**2 + (k - point(2))**2 + (z_level(rank)- point(3))**2) )
 
          if( (nint(dist) .gt. mute) .and. (nint(dist) .le. (mute + taper)) ) then
 
@@ -1238,16 +1238,16 @@ elseif(reverse .eq. 1) then
             SPEC_Z(k - y_level(rank,1) + 1,i) = real(SPEC_Z(k - y_level(rank,1) + 1,i)) * hanning
 
          elseif (nint(dist) .gt. (mute + taper)) then
-                  
+
             SPEC_Z(k - y_level(rank,1) + 1,i) = 0.
-                    
-         endif   
+
+         endif
 
       enddo
    enddo
 
 endif
-          
+
 END SUBROUTINE taper_region
 
 !=========================================================================================
@@ -1257,7 +1257,7 @@ SUBROUTINE resample_deterministic_model
 ! Description:
 !
 !    This subroutine resample the deterministic velocity model (either 1D or 3D) on the same
-!    grid of the random field. 
+!    grid of the random field.
 !    Resampling occurs also for Vp values (if provided via backgr_Vp)
 !
 ! Author: W. Imperatori (walter.imperatori@sed.ethz.ch)
@@ -1281,13 +1281,13 @@ integer(isp) :: i, j
 ! MPI stuff
 integer(isp)                  :: fileq, rl, filetype
 integer(kind=mpi_offset_kind) :: offset, disp
-integer(isp),dimension(3)     :: starts, subsizes 
+integer(isp),dimension(3)     :: starts, subsizes
 
 
 ! velocity model resampling stuff
 real(rsp)                              :: Vs, Vp, xo, yo, zo, vpi, vsi
 real(rsp),dimension(2)                 :: x, y, z, vsl, vpl
- 
+
 real(rsp),dimension(n_layers)          :: tmp
 real(rsp),allocatable,dimension(:,:,:) :: VsB, VpB
 real(rsp),pointer,dimension(:,:,:)     :: V
@@ -1304,24 +1304,24 @@ zo = (z_level(rank) - 1) * output_dx
 ! 3D deterministic velocity model provided as binary file
 if(backgr_mode .eq. 'b') then
 
-   ! find first/last index of the background Y-axis encompassing the current 
+   ! find first/last index of the background Y-axis encompassing the current
    ! Y-axis chunk
    j_min = floor( (y_level(rank,1)-1) * output_dx / backgr_dx(2) ) + 1
    j_max = ceiling( (y_level(rank,2)-1) * output_dx / backgr_dx(2) ) + 1
 
-   ! ...corresponding number of points 
-   j_npts = j_max - j_min + 1 
+   ! ...corresponding number of points
+   j_npts = j_max - j_min + 1
 
    ! find first/last index of the background Z-axis encompassing the current Z-level
    k_min = floor( zo / backgr_dx(3) ) + 1
    k_max = k_min + 1
 
    ! handle the case when we are at end of the grid (and both input and output grids have
-   ! identical step) 
+   ! identical step)
    if (k_max .gt. backgr_N(3)) then
       k_min = k_min - 1
       k_max = k_max - 1
-   endif    
+   endif
 
    ! ...corresponding vector
    z = (/ (k_min - 1) * backgr_dx(3), (k_max - 1) * backgr_dx(3) /)
@@ -1332,10 +1332,10 @@ if(backgr_mode .eq. 'b') then
 
    ! ...corresponding number of points
    i_npts = i_max - i_min + 1
-   
+
    ! number of points along XY
    ij_npts = i_npts * j_npts
-   
+
    ! total points
    ijk_npts = ij_npts * 2
 
@@ -1347,18 +1347,18 @@ if(backgr_mode .eq. 'b') then
 
    tic = MPI_Wtime()
 
-   ! now we open and read Vs values for the background velocity model. 
+   ! now we open and read Vs values for the background velocity model.
    call MPI_FILE_OPEN(WRT_COMM,trim(backgr_Vs),MPI_MODE_RDONLY,MPI_INFO_NULL,fileq,err)
 
    ! define dimension and starting points of subarray
    subsizes = (/i_npts,j_npts,2/); starts = (/i_min - 1,j_min - 1,k_min - 1/)
 
-   call MPI_TYPE_CREATE_SUBARRAY(3,backgr_N,subsizes,starts,MPI_ORDER_FORTRAN,MPI_REAL,filetype,err) 
-   call MPI_TYPE_COMMIT(filetype,err) 
+   call MPI_TYPE_CREATE_SUBARRAY(3,backgr_N,subsizes,starts,MPI_ORDER_FORTRAN,MPI_REAL,filetype,err)
+   call MPI_TYPE_COMMIT(filetype,err)
    disp = 0
    call MPI_FILE_SET_VIEW(fileq,disp,MPI_REAL,filetype,'native',MPI_INFO_NULL,err)
-    
-   call MPI_FILE_READ(fileq,VsB,ijk_npts,MPI_REAL,status,err) 
+
+   call MPI_FILE_READ(fileq,VsB,ijk_npts,MPI_REAL,status,err)
 
    call MPI_FILE_CLOSE(fileq,err)
 
@@ -1372,72 +1372,72 @@ if(backgr_mode .eq. 'b') then
 
    ! do the same for Vp
    if (trim(backgr_Vp) .ne. 'none') then
-      
+
       allocate(VpB(i_npts,j_npts,2))
 
       call MPI_FILE_OPEN(WRT_COMM,trim(backgr_Vp),MPI_MODE_RDONLY,MPI_INFO_NULL,fileq,err)
 
       call MPI_TYPE_CREATE_SUBARRAY(3,backgr_N,subsizes,starts,MPI_ORDER_FORTRAN,MPI_REAL,  &
-                                    filetype,err) 
+                                    filetype,err)
       call MPI_TYPE_COMMIT(filetype,err)
       disp = 0
       call MPI_FILE_SET_VIEW(fileq,disp,MPI_REAL,filetype,'native',MPI_INFO_NULL,err)
-    
-      call MPI_FILE_READ(fileq,VpB,ijk_npts,MPI_REAL,status,err) 
+
+      call MPI_FILE_READ(fileq,VpB,ijk_npts,MPI_REAL,status,err)
 
       call MPI_FILE_CLOSE(fileq,err)
-      
-   endif 
+
+   endif
 
    ! Now interpolate Vs/Vp values onto current grid
-   
+
    !$OMP PARALLEL DO DEFAULT(SHARED) PRIVATE(i,j,i_min,i_max,xo,x,j_min,j_max,yo,y,V,Vs,Vp) &
    !$OMP REDUCTION(MAX:compos_Vs_max,compos_Vp_max) REDUCTION(MIN:compos_Vs_min,compos_Vp_min)
    do i = 1,output_N(1)
-   
+
       ! position along X of current point
       xo = (i - 1) * output_dx
-   
+
       ! corresponding indexes of background velocity grid
-      i_min = floor( xo / backgr_dx(1) ) + 1 
-      
+      i_min = floor( xo / backgr_dx(1) ) + 1
+
       ! handle the case when we are at end of the grid (and both input and output grids
       ! have identical step)
-      if (i_min .eq. size(VsB,1)) i_min = i_min - 1 
-      
+      if (i_min .eq. size(VsB,1)) i_min = i_min - 1
+
       i_max = i_min + 1
-      
+
       x = (/(i_min - 1) * backgr_dx(1), (i_max - 1) * backgr_dx(1)/)
-   
+
       !do j = 1,npts_ychunk(c_block)
       do j = 1,mypoints
-        
+
          ! position along Y of current point
          yo = (j - 1) * output_dx
-      
+
          ! corresponding indexes of background velocity grid
          j_min = floor( yo / backgr_dx(2) ) + 1
-         
+
          ! handle the case when we are at end of the grid (and both input and output grids
          ! have identical step)
-         if (j_min .eq. size(VsB,2)) j_min = j_min - 1 
-         
+         if (j_min .eq. size(VsB,2)) j_min = j_min - 1
+
          j_max = j_min + 1
-      
-         y = (/(j_min - 1) * backgr_dx(2), (j_max - 1) * backgr_dx(2)/)        
-      
+
+         y = (/(j_min - 1) * backgr_dx(2), (j_max - 1) * backgr_dx(2)/)
+
          ! alias to part of background model
          V => VsB(i_min:i_max,j_min:j_max,:)
-      
+
          call poly_interp(x,y,z,V,xo,yo,zo,Vs)
-  
+
          if (backgr_Vp .ne. 'none') then
-           
+
             V => VpB(i_min:i_max,j_min:j_max,:)
-            
+
             call poly_interp(x,y,z,V,xo,yo,zo,Vp)
-            
-         endif   
+
+         endif
 
          ! Add random field to background velocity. The random field must be considered as
          ! perturbation in % (we express input sigma in %)
@@ -1452,22 +1452,22 @@ if(backgr_mode .eq. 'b') then
 
          ! store min/max values
          compos_Vs_min = min(compos_Vs_min,Vs)
-         compos_Vs_max = max(compos_Vs_max,Vs)         
- 
+         compos_Vs_max = max(compos_Vs_max,Vs)
+
          compos_Vp_min = min(compos_Vp_min,Vp)
-         compos_Vp_max = max(compos_Vp_max,Vp)  
-    
-         nullify(V)    
-                                       
+         compos_Vp_max = max(compos_Vp_max,Vp)
+
+         nullify(V)
+
       enddo
    enddo
-   !$OMP END PARALLEL DO  
-   
+   !$OMP END PARALLEL DO
+
    ! deallocate arrays
    deallocate(VsB)
    if (trim(backgr_Vp) .ne. 'none') deallocate(VpB)
- 
-endif         
+
+endif
 
 ! 1D deterministic velocity model provided as text file. In this case we assume the velocity
 ! model has been already loaded in memory
@@ -1475,7 +1475,7 @@ if(backgr_mode .eq. 't') then
 
    ! make a copy of 1D z-vector
    tmp = depth1D
-   
+
    ! find layers containing current point
    k_min = minloc(abs(depth1D - zo),dim = 1)
 
@@ -1490,7 +1490,7 @@ if(backgr_mode .eq. 't') then
       i = k_max
       k_max = k_min
       k_min = i
-   endif   
+   endif
 
    z = (/depth1D(k_min),depth1D(k_max)/)
 
@@ -1513,20 +1513,20 @@ if(backgr_mode .eq. 't') then
 
          ! store results into existing array 'SPEC_Z'
          SPEC_Z(j,i) = cmplx(Vs,Vp)
-         
+
          ! store min/max values
          compos_Vs_min = min(compos_Vs_min,Vs)
-         compos_Vs_max = max(compos_Vs_max,Vs)         
- 
+         compos_Vs_max = max(compos_Vs_max,Vs)
+
          !print*,compos_Vs_min,vsi,Vs,i,j,l,u
- 
+
          compos_Vp_min = min(compos_Vp_min,Vp)
-         compos_Vp_max = max(compos_Vp_max,Vp)           
+         compos_Vp_max = max(compos_Vp_max,Vp)
 
       enddo
-   enddo   
-   
-endif   
+   enddo
+
+endif
 
 END SUBROUTINE resample_deterministic_model
 
@@ -1560,7 +1560,7 @@ integer(isp)                  :: N
 !N = output_N(1) * npts_ychunk(c_block)
 N = output_N(1) * mypoints
 
-! first, write VP values to disk if available. In this case all tasks belonging to the 
+! first, write VP values to disk if available. In this case all tasks belonging to the
 ! communicator write synchronously to disk
 if ( (trim(backgr_Vp) .ne. 'none') .and. (backgr_mode .ne. 'n') ) then
 
@@ -1572,10 +1572,10 @@ if ( (trim(backgr_Vp) .ne. 'none') .and. (backgr_mode .ne. 'n') ) then
    call MPI_FILE_SEEK_SHARED(filep,offset,MPI_SEEK_END,err)
 
    ! copy values into output array
-   IOar = transpose(aimag(SPEC_Z(:,1:output_N(1)))) 
+   IOar = transpose(aimag(SPEC_Z(:,1:output_N(1))))
 
    call MPI_FILE_WRITE_ORDERED(filep,IOar,N,MPI_REAL,status,err)
-   
+
    call MPI_FILE_CLOSE(filep,err)
 
 endif
@@ -1589,7 +1589,7 @@ offset = 0
 call MPI_FILE_SEEK_SHARED(filep,offset,MPI_SEEK_END,err)
 
 ! copy values into output array
-IOar = transpose(real(SPEC_Z(:,1:output_N(1)))) 
+IOar = transpose(real(SPEC_Z(:,1:output_N(1))))
 
 call MPI_FILE_WRITE_ORDERED_BEGIN(filep,IOar,N,MPI_REAL,err)
 
@@ -1607,7 +1607,7 @@ END PROGRAM random_3d_RAM_MPI
 SUBROUTINE online_variance(val, var, mu, n)
 !
 ! Description:
-! 
+!
 !    Algorithm of Welford to compute online variance and average. Output var must be divided
 !    by n-1 to obtain variance
 !
@@ -1616,7 +1616,7 @@ SUBROUTINE online_variance(val, var, mu, n)
 ! Version: Created on August 2011, v1.0
 !          Modified on December 2017, v1.3 - Some variables were renamed to reflect changes
 !                                            in the main program. Switched to double precision
-!                                            to avoid inaccurate calculations 
+!                                            to avoid inaccurate calculations
 !
 
 use precisions
@@ -1625,8 +1625,8 @@ implicit none
 
 real(rsp),intent(in)    :: val
 real(rdp),intent(inout) :: mu, var, n
-  
-! local variables  
+
+! local variables
 real(rdp)    :: delta, delta2
 
 !-----------------------------------------------------------------------------------------
@@ -1657,7 +1657,7 @@ SUBROUTINE parallel_variance(var1,mu1,n1,var2,mu2,n2)
 ! Version: Created on August 2011, v1.0
 !          Modified on December 2017, v1.3 - Some variables were renamed to reflect changes
 !                                            in the main program. Switched to double precision
-!                                            to avoid inaccurate calculations 
+!                                            to avoid inaccurate calculations
 !
 
 use precisions
@@ -1665,21 +1665,21 @@ use precisions
 implicit none
 
 real(rdp),intent(in)    :: var1, mu1, n1
-real(rdp),intent(inout) :: var2, mu2, n2 
+real(rdp),intent(inout) :: var2, mu2, n2
 
 ! local variables
 real(rdp) :: m_1, m_2, M2, delta
 
 !-----------------------------------------------------------------------------------------
-        
+
 delta = mu2 - mu1
-   
+
 m_1 = var1 * (n1 - 1.)
-   
+
 m_2 = var2 * (n2 - 1.)
 
 M2 = m_1 + m_2 + delta**2 * n1 * n2 / (n1 + n2)
-   
+
 M2 = M2 / (n1 + n2 - 1.)
 
 ! assign output mean
@@ -1692,5 +1692,3 @@ var2 = M2
 n2 = n1 + n2
 
 END SUBROUTINE parallel_variance
-
-
