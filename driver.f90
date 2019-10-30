@@ -39,64 +39,65 @@ PROGRAM DRIVER
   CALL MPI_BARRIER(MCW, IERR)
 
 
-  NX = 64
-  NY = 10
-  NZ = 6
+  NX = 11
+  NY = 20
+  NZ = 5
+
+  CALL SCARF3D(MCW, NX, NY, NZ, 10)
 
   ! WE WORKING IN 3D
-  NDIMS = 3
+  ! NDIMS = 3
+  !
+  ! ! NUMBER OF BLOCKS ALONG EACH DIRECTION
+  ! DIMS  = [2, 1, 2]
+  !
+  ! ! ALLOW REORDERING
+  ! REORDER = .TRUE.
+  !
+  ! ! NO PERIODICITY
+  ! ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
+  !
+  ! ! CREATE TOPOLOGY
+  ! CALL MPI_CART_CREATE(MCW, NDIMS, DIMS, ISPERIODIC, REORDER, TOPOZ, IERR)
 
-  ! NUMBER OF BLOCKS ALONG EACH DIRECTION
-  DIMS  = [2, 1, 2]
-
-  ! ALLOW REORDERING
-  REORDER = .TRUE.
-
-  ! NO PERIODICITY
-  ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
-
-  ! CREATE TOPOLOGY
-  CALL MPI_CART_CREATE(MCW, NDIMS, DIMS, ISPERIODIC, REORDER, TOPOZ, IERR)
-
-
-  DO I = 0, NTASKS - 1
-
-    ! PRINT COORDINATES OF CALLING PROCESS
-    IF (RANK .EQ. I) THEN
-      CALL MPI_CART_GET(TOPOZ, NDIMS, DIMS, ISPERIODIC, COORDS, IERR)
-
-      PRINT*, 'PROC ', RANK, ': ', COORDS
-
-      CALL MPI_SPLIT_TASK(NX, DIMS(1), COORDS(1), I0, I1)
-      CALL MPI_SPLIT_TASK(NY, DIMS(2), COORDS(2), J0, J1)
-      CALL MPI_SPLIT_TASK(NZ, DIMS(3), COORDS(3), K0, K1)
-
-      PRINT*, 'INDICES: ', 'X= ', I0, I1, ' Y= ', J0, J1, ' Z= ', K0, K1
-
-      DIR   = 0
-      DISPL = 1
-
-      CALL MPI_CART_SHIFT(TOPOZ, DIR, DISPL, SRC, DEST, IERR)
-
-      PRINT*, 'X-DIR: ', 'LEFT= ', SRC, ' MID= ', RANK, ' RIGHT= ', DEST
-
-      DIR   = 1
-      DISPL = 1
-
-      CALL MPI_CART_SHIFT(TOPOZ, DIR, DISPL, SRC, DEST, IERR)
-
-      PRINT*, 'Y-DIR: ', 'LEFT= ', SRC, ' MID= ', RANK, ' RIGHT= ', DEST
-
-      DIR   = 2
-      DISPL = 1
-
-      CALL MPI_CART_SHIFT(TOPOZ, DIR, DISPL, SRC, DEST, IERR)
-
-      PRINT*, 'Z-DIR: ', 'LEFT= ', SRC, ' MID= ', RANK, ' RIGHT= ', DEST
-
-    ENDIF
-
-  ENDDO
+  ! DO I = 0, NTASKS - 1
+  !
+  !   ! PRINT COORDINATES OF CALLING PROCESS
+  !   IF (RANK .EQ. I) THEN
+  !     CALL MPI_CART_GET(TOPOZ, NDIMS, DIMS, ISPERIODIC, COORDS, IERR)
+  !
+  !     PRINT*, 'PROC ', RANK, ': ', COORDS
+  !
+  !     CALL MPI_SPLIT_TASK(NX, DIMS(1), COORDS(1), I0, I1)
+  !     CALL MPI_SPLIT_TASK(NY, DIMS(2), COORDS(2), J0, J1)
+  !     CALL MPI_SPLIT_TASK(NZ, DIMS(3), COORDS(3), K0, K1)
+  !
+  !     PRINT*, 'INDICES: ', 'X= ', I0, I1, ' Y= ', J0, J1, ' Z= ', K0, K1
+  !
+  !     DIR   = 0
+  !     DISPL = 1
+  !
+  !     CALL MPI_CART_SHIFT(TOPOZ, DIR, DISPL, SRC, DEST, IERR)
+  !
+  !     PRINT*, 'X-DIR: ', 'LEFT= ', SRC, ' MID= ', RANK, ' RIGHT= ', DEST
+  !
+  !     DIR   = 1
+  !     DISPL = 1
+  !
+  !     CALL MPI_CART_SHIFT(TOPOZ, DIR, DISPL, SRC, DEST, IERR)
+  !
+  !     PRINT*, 'Y-DIR: ', 'LEFT= ', SRC, ' MID= ', RANK, ' RIGHT= ', DEST
+  !
+  !     DIR   = 2
+  !     DISPL = 1
+  !
+  !     CALL MPI_CART_SHIFT(TOPOZ, DIR, DISPL, SRC, DEST, IERR)
+  !
+  !     PRINT*, 'Z-DIR: ', 'LEFT= ', SRC, ' MID= ', RANK, ' RIGHT= ', DEST
+  !
+  !   ENDIF
+  !
+  ! ENDDO
 
 
 
