@@ -39,11 +39,12 @@ PROGRAM DRIVER
   CALL MPI_BARRIER(MCW, IERR)
 
 
-  NX = 11
-  NY = 20
-  NZ = 5
+  NX = 300
+  NY = 250
+  NZ = 200
 
-  CALL SCARF3D(MCW, NX, NY, NZ, 10)
+  !CALL SCARF3D(MCW, NX, NY, NZ, 10)
+  CALL SCARF3D(MCW, [NX, NY, NZ], 20._rdp, 'GAUSS', [500._rdp, 500._rdp, 100._rdp], 5._rdp, 0.25_rdp, 1234)
 
   ! WE WORKING IN 3D
   ! NDIMS = 3
