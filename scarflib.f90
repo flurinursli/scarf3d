@@ -37,7 +37,7 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D(MCW, N, DH, ACF, CL, SIGMA, HURST, SEED)
+    SUBROUTINE SCARF3D(MCW, N, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
 
       USE DECOMP_2D
       USE DECOMP_2D_FFT
@@ -51,6 +51,9 @@ MODULE SCARFLIB
       REAL(RDP),                                      INTENT(IN) :: SIGMA
       REAL(RDP),                                      INTENT(IN) :: HURST
       INTEGER(ISP),                                   INTENT(IN) :: SEED
+      INTEGER(ISP),                  DIMENSION(:,:),  INTENT(IN) :: POI                                         !< LOCATION OF POINT(S)-OF-INTEREST
+      INTEGER(ISP),                                   INTENT(IN) :: MUTE                                        !< NUMBER OF POINTS WHERE MUTING IS APPLIED
+      INTEGER(ISP),                                   INTENT(IN) :: TAPER                                       !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
       COMPLEX(RDP),     ALLOCATABLE, DIMENSION(:,:,:)            :: SPEC
       INTEGER(ISP)                                               :: RANK, NTASKS, IERR
       INTEGER(ISP)                                               :: I, J, K
@@ -61,10 +64,11 @@ MODULE SCARFLIB
       REAL(RDP)                                                  :: KNYQ, KC, KR
       REAL(RDP)                                                  :: BUTTER, NUM, AMP
       REAL(RDP)                                                  :: SCALING, MU, VAR
+      REAL(RDP)                                                  :: TIC, TAC
       REAL(RDP),                     DIMENSION(3)                :: DK
       REAL(RDP),        ALLOCATABLE, DIMENSION(:)                :: KX, KY, KZ
       REAL(RDP),        ALLOCATABLE, DIMENSION(:)                :: AVERAGE, STD_DEV
-      REAL(RDP),        ALLOCATABLE, DIMENSION(:,:,:)            :: FIELD, R
+      REAL(RDP),        ALLOCATABLE, DIMENSION(:,:,:)            :: FIELD, R, XCORR
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -82,19 +86,21 @@ MODULE SCARFLIB
       P_ROW = 0 !1
       P_COL = 0  !3
 
+      TIC = MPI_WTIME()
+
       ! DECOMPOSE DOMAIN
       CALL DECOMP_2D_INIT(N(1), N(2), N(3), P_ROW, P_COL)
 
-      IF (RANK .EQ. 0) PRINT*, 'PENCILS ALONG Z-AXIS'
-
-      CALL MPI_BARRIER(MCW, IERR)
-
-      DO I = 0, NTASKS-1
-        IF (RANK .EQ. I)   &
-          PRINT*, 'RANK= ', RANK , '| X= ', ZSTART(1), ZEND(1), '| Y= ', ZSTART(2), ZEND(2), '| Z= ', ZSTART(3), ZEND(3)
-      ENDDO
-
-      CALL MPI_BARRIER(MCW, IERR)
+      ! IF (RANK .EQ. 0) PRINT*, 'PENCILS ALONG Z-AXIS'
+      !
+      ! CALL MPI_BARRIER(MCW, IERR)
+      !
+      ! DO I = 0, NTASKS-1
+      !   IF (RANK .EQ. I)   &
+      !     PRINT*, 'RANK= ', RANK , '| X= ', ZSTART(1), ZEND(1), '| Y= ', ZSTART(2), ZEND(2), '| Z= ', ZSTART(3), ZEND(3)
+      ! ENDDO
+      !
+      ! CALL MPI_BARRIER(MCW, IERR)
 
       ! INITIALISE FFT ENGINE
       CALL DECOMP_2D_FFT_INIT
@@ -104,22 +110,35 @@ MODULE SCARFLIB
 
       CALL MPI_BARRIER(MCW, IERR)
 
-      IF (RANK .EQ. 0) PRINT*, 'FFT PENCILS'
+      TAC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'INITIALISATION TIME: ', REAL(TAC - TIC, RSP)
 
 
-      DO I = 0, NTASKS-1
-        IF (RANK .EQ. I)   &
-    PRINT*, 'RANK= ', RANK, '| X= ', FFT_START(1), FFT_END(1), '| Y= ', FFT_START(2), FFT_END(2), '| Z= ', FFT_START(3), FFT_END(3)
-      ENDDO
+    !
+    !   IF (RANK .EQ. 0) PRINT*, 'FFT PENCILS'
+    !
+    !
+    !   DO I = 0, NTASKS-1
+    !     IF (RANK .EQ. I)   &
+    ! PRINT*, 'RANK= ', RANK, '| X= ', FFT_START(1), FFT_END(1), '| Y= ', FFT_START(2), FFT_END(2), '| Z= ', FFT_START(3), FFT_END(3)
+    !   ENDDO
+
+      TIC = MPI_WTIME()
+
+      ALLOCATE(R(FFT_START(1):FFT_END(1), FFT_START(2):FFT_END(2), FFT_START(3):FFT_END(3)))
+
+      ! GENERATE A SET OF RANDOM NUMBERS IN THE RANGE [0, 2*PI)
+      CALL RANDOM_SEQUENCE(SEED, FFT_START, FFT_END, N, R)
 
       CALL MPI_BARRIER(MCW, IERR)
 
+      TAC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'RANDOM SEQUENCE TIMING: ', REAL(TAC - TIC, RSP)
+
       ! ALLOCATE ARRAY FOR SPECTRUM (STENCILS ORIENTED ALONG Z-AXIS)
       ALLOCATE(SPEC(FFT_START(1):FFT_END(1), FFT_START(2):FFT_END(2), FFT_START(3):FFT_END(3)))
-
-
-
-IF (RANK .EQ. 0) PRINT*, 'WORKING ON SPECTRUM'
 
       ! RESOLUTION IN WAVENUMBER DOMAIN ALONG EACH DIRECTION
       DO I = 1, 3
@@ -152,25 +171,16 @@ IF (RANK .EQ. 0) PRINT*, 'WORKING ON SPECTRUM'
       ! SCALING PARAMETER
       SCALING = 1._RDP / SQRT(PRODUCT(N) * DH**3)
 
-IF (RANK .EQ. 0) PRINT*, 'GENERATING RANDOM SEQUENCE'
-
-      ALLOCATE(R(FFT_START(1):FFT_END(1), FFT_START(2):FFT_END(2), FFT_START(3):FFT_END(3)))
-
-      ! GENERATE A SET OF RANDOM NUMBERS IN THE RANGE [0, 2*PI)
-      CALL RANDOM_SEQUENCE(SEED, FFT_START, FFT_END, N, R)
-
-IF (RANK .EQ. 0) PRINT*, 'COMPUTING SPECTRUM'
-
       ! COMPUTE SPECTRUM
       DO K = FFT_START(3), FFT_END(3)
         DO J = FFT_START(2), FFT_END(2)
           DO I = FFT_START(1), FFT_END(1)
 
             ! RADIAL WAVENUMBER
-            KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
+            !KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
 
             ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
-            BUTTER = 1._RDP / (1._RDP + (KR / KC)**(2 * 4))
+            !BUTTER = 1._RDP / SQRT(1._RDP + (KR / KC)**(2 * 4))
 
             ! NOW "KR" IS THE PRODUCT "K * CL"
             KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2
@@ -179,7 +189,7 @@ IF (RANK .EQ. 0) PRINT*, 'COMPUTING SPECTRUM'
             AMP = SQRT(NUM / FUN(KR, HURST))
 
             ! APPLY FILTER
-            AMP = AMP * BUTTER
+            !AMP = AMP * BUTTER
 
             ! COMBINE AMPLITUDE AND RANDOM PHASE
             SPEC(I, J, K) = CMPLX(AMP * COS(R(I, J, K)), AMP * SIN(R(I, J, K)))
@@ -190,12 +200,18 @@ IF (RANK .EQ. 0) PRINT*, 'COMPUTING SPECTRUM'
 
       CALL MPI_BARRIER(MCW, IERR)
 
-IF (RANK .EQ. 0) PRINT*, 'ENFORCE SYMMETRY'
+      TIC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'SPECTRUM TIMING: ', REAL(TIC - TAC, RSP)
 
       ! ENFORCE SYMMETRY CONDITIONS AT Y-Z PLANES FOR "FFT_START(1)=1" AND "FFT_END(1)=NYQUIST(1)"
       CALL ENFORCE_SYMMETRY(MCW, FFT_START, FFT_END, NYQUIST, SPEC)
 
-IF (RANK .EQ. 0) PRINT*, 'IFFT'
+      CALL MPI_BARRIER(MCW, IERR)
+
+      TAC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'SYMMETRY TIMING: ', REAL(TAC - TIC, RSP)
 
       ! ALLOCATE OUTPUT ARRAY (STENCILS ORIENTED ALONG X-AXIS)
       ALLOCATE(FIELD(XSTART(1):XEND(1), XSTART(2):XEND(2), XSTART(3):XEND(3)))
@@ -203,7 +219,13 @@ IF (RANK .EQ. 0) PRINT*, 'IFFT'
       ! ONCE SPECTRUM IS READY, CALL COMPLEX TO REAL TRANSFORM
       CALL DECOMP_2D_FFT_3D(SPEC, FIELD)
 
-IF (RANK .EQ. 0) PRINT*, 'SCALING'
+      CALL MPI_BARRIER(MCW, IERR)
+
+      TIC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'IFFT TIMING: ', REAL(TIC - TAC, RSP)
+
+      CALL DECOMP_2D_FFT_FINALIZE
 
       ! APPLY SCALING FACTOR
       DO K = XSTART(3), XEND(3)
@@ -213,8 +235,6 @@ IF (RANK .EQ. 0) PRINT*, 'SCALING'
           ENDDO
         ENDDO
       ENDDO
-
-IF (RANK .EQ. 0) PRINT*, 'STATISTICS'
 
       ALLOCATE(AVERAGE(NTASKS), STD_DEV(NTASKS), NPTS(NTASKS))
 
@@ -231,19 +251,50 @@ IF (RANK .EQ. 0) PRINT*, 'STATISTICS'
 
       IF (RANK .EQ. 0) PRINT*, 'MEAN, STD.DEV: ', AVERAGE(NTASKS), SQRT(STD_DEV(NTASKS))
 
-IF (RANK .EQ. 0) PRINT*, 'IO'
+
+      CALL MPI_BARRIER(MCW, IERR)
+
+      TIC = MPI_WTIME()
+
+      ! TAPER / MUTE AROUND POINT-OF-INTEREST
+      DO I = 1, SIZE(POI, 2)
+        CALL TAPERING(XSTART, XEND, FIELD, POI(:, I), MUTE, TAPER)
+      ENDDO
+
+      CALL MPI_BARRIER(MCW, IERR)
+
+      TAC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'TAPERING TIMING: ', REAL(TAC - TIC, RSP)
+
+
+! IF (RANK .EQ. 0) PRINT*, 'AUTOCORRELATION'
+!
+!       ALLOCATE(XCORR(XSTART(1):XEND(1), XSTART(2):XEND(2), XSTART(3):XEND(3)))
+!
+!       ! AUTOCORRELATION ALONG X-AXIS
+!       CALL AUTOCORRELATION(1, FIELD, XCORR)
+!
+!       CALL DECOMP_2D_WRITE_ONE(1, XCORR, 'xcorr.bin')
+
+
+      CALL MPI_BARRIER(MCW, IERR)
+
+      TIC = MPI_WTIME()
 
       ! WRITE TO DISK
       CALL DECOMP_2D_WRITE_ONE(1, FIELD, 'random.bin')
 
       CALL DECOMP_2D_WRITE_PLANE(1, FIELD, 1, N(1)/2, 'slice.bin')
 
-IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
+      CALL MPI_BARRIER(MCW, IERR)
+
+      TAC = MPI_WTIME()
+
+      IF (RANK .EQ. 0) PRINT*, 'SPECTRUM TIMING: ', REAL(TAC - TIC, RSP)
 
       ! CLEAN UP MEMORY
       DEALLOCATE(SPEC, FIELD)
-
-      CALL DECOMP_2D_FFT_FINALIZE
 
       CALL DECOMP_2D_FINALIZE
 
@@ -266,6 +317,8 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
       INTEGER(ISP),              DIMENSION(3)                                                  :: N                                 !< POINTS ALONG EACH DIMENSION
       INTEGER(ISP), ALLOCATABLE, DIMENSION(:)                                                  :: LIST
       INTEGER(ISP), ALLOCATABLE, DIMENSION(:,:)                                                :: LBOUND, UBOUND
+
+integer(isp) :: j0, j1, step
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -304,8 +357,19 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
 
           ! PRINT*, RANK, '-- ', LIST
 
+          j0 = fs(2)
+          j1 = fe(2)
+          step = 1
+
+          if (fs(2) .ge. nyquist(2)) then
+            j0 = fe(2)
+            j1 = fs(2)
+            step = -1
+          endif
+
           ! "J" IS VERTICAL AXIS IN FIGURE 4
-          DO J = FS(2), FE(2)
+          !DO J = FS(2), FE(2)
+          do j = j0, j1, step
 
             IF ( (J .EQ. 1) .OR. (J .EQ. NYQUIST(2)) ) THEN
 
@@ -338,6 +402,8 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
                 ! TAKE WHOLE STRIPE ALONG "K"-AXIS
                 STRIPE = SPEC(I, J, :)
                 !STRIPE = [CMPLX(J, 1), CMPLX(J, 2), CMPLX(J, 3), CMPLX(J, 4), CMPLX(J, 5), CMPLX(J, 6)]
+
+!print*, rank, '--', sender, receiver, '--', i, '++', j, jstar
 
                 IF (SENDER .EQ. RANK)   CALL MPI_SEND(STRIPE, N(3), MPI_DOUBLE_COMPLEX, RECEIVER, JSTAR, COMM, IERR)
                 IF (RECEIVER .EQ. RANK) CALL MPI_RECV(STRIPE, N(3), MPI_DOUBLE_COMPLEX, SENDER, J, COMM, MPI_STATUS_IGNORE, IERR)
@@ -472,6 +538,45 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    FUNCTION COMPENSATED_SUM(R) RESULT(V)
+
+      ! SUM ELEMENTS OF ARRAY BASED ON KAHAN-BABUSKA ALGORITHM
+
+      REAL(RDP),   DIMENSION(:,:,:), INTENT(IN) :: R
+      INTEGER(ISP)                              :: I, J, K
+      REAL(RDP)                                 :: V, C, T
+
+      !-------------------------------------------------------------------------------------------------------------------------------
+
+      V = 0._RDP
+      C = 0._RDP
+
+      DO K = 1, SIZE(R, 3)
+        DO J = 1, SIZE(R, 2)
+          DO I = 1, SIZE(R, 1)
+
+            T = V + R(I, J, K)
+
+            IF (ABS(V) .GE. ABS(R(I, J, K))) THEN
+              C = C + (V - T) + R(I, J, K)
+            ELSE
+              C = C + (R(I, J, K) - T) + V
+            ENDIF
+
+            V = T
+
+          ENDDO
+        ENDDO
+      ENDDO
+
+      V = V + C
+
+    END FUNCTION COMPENSATED_SUM
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
     FUNCTION MEAN(R) RESULT(V)
 
       REAL(RDP),   DIMENSION(:,:,:), INTENT(IN) :: R
@@ -479,6 +584,8 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
       REAL(RDP)                                 :: V, C
 
       !-------------------------------------------------------------------------------------------------------------------------------
+
+      !V = COMPENSATED_SUM(R) / REAL(SIZE(R), RDP)
 
       V = 0._RDP
       C = 1._RDP
@@ -500,10 +607,11 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
 
     FUNCTION VARIANCE(R) RESULT(V)
 
+      ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM
+
       REAL(RDP),   DIMENSION(:,:,:), INTENT(IN) :: R
       INTEGER(ISP)                              :: I, J, K
-      REAL(RDP)                                 :: V
-      REAL(RDP)                                 :: MU, S1, S2, X
+      REAL(RDP)                                 :: MU, S1, S2, X, V
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -553,7 +661,7 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
 
       ! OUTPUT MEAN
       !MU(2) = MU(1) + DELTA * REAL(N(2), RDP) / REAL(SUM(N), RDP)
-      MU(2) = (N(1) * MU(1) + N(2) * MU(2)) / REAL(SUM(N), RDP)          !< THIS SHOULD BE MORE STABLE
+      MU(2) = (N(1) * MU(1) + N(2) * MU(2)) / REAL(SUM(N), RDP)          !< THIS SHOULD BE MORE STABLE WHEN N(1)~N(2)
 
       ! OUTPUT VARIANCE
       VAR(2) = M2
@@ -580,9 +688,216 @@ IF (RANK .EQ. 0) PRINT*, 'CLEANUP'
 
     END SUBROUTINE MPI_SPLIT_TASK
 
-! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-!===============================================================================================================================
-! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE AUTOCORRELATION(AXIS, FIELD, CORR)
+
+      USE, INTRINSIC                                                   :: ISO_C_BINDING
+
+      INCLUDE 'fftw3.f03'
+
+      INTEGER(ISP),                                        INTENT(IN)  :: AXIS
+      REAL(RDP),                 DIMENSION(:,:,:),         INTENT(IN)  :: FIELD
+      REAL(RDP),                 DIMENSION(:,:,:),         INTENT(OUT) :: CORR
+      INTEGER(ISP)                                                     :: I, J, K, M
+      INTEGER(ISP)                                                     :: NX, NY, NZ, NPTS
+      COMPLEX(C_DOUBLE_COMPLEX), DIMENSION(:),     POINTER             :: TU => NULL()
+      REAL(C_DOUBLE),            DIMENSION(:),     POINTER             :: U => NULL()
+      TYPE(C_PTR)                                                      :: P1, P2, P
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      NX = SIZE(FIELD, 1)
+      NY = SIZE(FIELD, 2)
+      NZ = SIZE(FIELD, 3)
+
+      IF (AXIS .EQ. 1) NPTS = NX                                      !< AUTOCORRELATION ALONG X-DIRECTION
+      IF (AXIS .EQ. 2) NPTS = NY                                      !< AUTOCORRELATION ALONG Y-DIRECTION
+      IF (AXIS .EQ. 3) NPTS = NZ                                      !< AUTOCORRELATION ALONG Z-DIRECTION
+
+      ! NUMBER OF POINTS IN CORRELATION (INCL. NEGATIVE AND POSITIVE LAGS)
+      NPTS = 2 * NPTS - 1
+
+      M = NPTS / 2 + 1
+
+      ! ALLOCATE CONTIGUOUS MEMORY
+      P = FFTW_ALLOC_COMPLEX(INT(M, C_SIZE_T))
+
+      CALL C_F_POINTER(P, U, [2*M])
+      CALL C_F_POINTER(P, TU, [M])
+
+      P1 = FFTW_PLAN_DFT_R2C_1D(NPTS, U, TU, FFTW_MEASURE)
+      P2 = FFTW_PLAN_DFT_C2R_1D(NPTS, TU, U, FFTW_MEASURE)
+
+      IF (AXIS .EQ. 1) THEN
+
+        DO K = 1, NZ
+          DO J = 1, NY
+
+            U(:) = 0._RDP
+
+            ! COPY INPUT VALUES INTO CONTIGUOUS MEMORY
+            DO I = 1, NX
+              U(I) = FIELD(I, J, K)
+            ENDDO
+
+            CALL FFTW_EXECUTE_DFT_R2C(P1, U, TU)
+
+            DO I = 1, M
+              TU(I) = TU(I) * CONJG(TU(I))
+            ENDDO
+
+            CALL FFTW_EXECUTE_DFT_C2R(P2, TU, U)
+
+            ! SCALING IFFT
+            DO I = 1, NPTS
+              U(I) = U(I) / REAL(NPTS, RDP)
+            ENDDO
+
+            ! COMPUTE BIASED AUTOCORRELATION, RETURN ONLY ZERO AND POSITIVE LAGS
+            DO I = 1, M
+              CORR(I, J, K) = U(I) / REAL(M, RDP)
+            ENDDO
+
+          ENDDO
+        ENDDO
+
+      ELSEIF (AXIS .EQ. 2) THEN
+
+        DO K = 1, NZ
+          DO I = 1, NX
+
+            U(:) = 0._RDP
+
+            ! COPY INPUT VALUES INTO CONTIGUOUS MEMORY
+            DO J = 1, NY
+              U(J) = FIELD(I, J, K)
+            ENDDO
+
+            CALL FFTW_EXECUTE_DFT_R2C(P1, U, TU)
+
+            DO J = 1, M
+              TU(J) = TU(J) * CONJG(TU(J))
+            ENDDO
+
+            CALL FFTW_EXECUTE_DFT_C2R(P2, TU, U)
+
+            ! SCALING IFFT
+            DO J = 1, NPTS
+              U(J) = U(J) / REAL(NPTS, RDP)
+            ENDDO
+
+            ! COMPUTE BIASED AUTOCORRELATION, RETURN ONLY ZERO AND POSITIVE LAGS
+            DO J = 1, M
+              CORR(I, J, K) = U(J) / REAL(M, RDP)
+            ENDDO
+
+          ENDDO
+        ENDDO
+
+      ELSEIF (AXIS .EQ. 3) THEN
+
+        DO J = 1, NY
+          DO I = 1, NX
+
+            U(:) = 0._RDP
+
+            ! COPY INPUT VALUES INTO CONTIGUOUS MEMORY
+            DO K = 1, NZ
+              U(K) = FIELD(I, J, K)
+            ENDDO
+
+            CALL FFTW_EXECUTE_DFT_R2C(P1, U, TU)
+
+            DO K = 1, M
+              TU(K) = TU(K) * CONJG(TU(K))
+            ENDDO
+
+            CALL FFTW_EXECUTE_DFT_C2R(P2, TU, U)
+
+            ! SCALING IFFT
+            DO K = 1, NPTS
+              U(K) = U(K) / REAL(NPTS, RDP)
+            ENDDO
+
+            ! COMPUTE BIASED AUTOCORRELATION, RETURN ONLY ZERO AND POSITIVE LAGS
+            DO K = 1, M
+              CORR(I, J, K) = U(K) / REAL(M, RDP)
+            ENDDO
+
+          ENDDO
+        ENDDO
+
+      ENDIF
+
+      ! REALEASE MEMORY
+      CALL FFTW_DESTROY_PLAN(P1)
+      CALL FFTW_DESTROY_PLAN(P2)
+
+      NULLIFY(U, TU)
+
+      CALL FFTW_FREE(P)
+
+    END SUBROUTINE AUTOCORRELATION
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE TAPERING (FS, FE, X, POI, MUTE, TAPER)
+
+      INTEGER(ISP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE
+      REAL(RDP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: X
+      INTEGER(ISP), DIMENSION(3),                                     INTENT(IN)    :: POI
+      INTEGER(ISP),                                                   INTENT(IN)    :: MUTE, TAPER
+      INTEGER(ISP)                                                                  :: I, J, K
+      INTEGER(ISP)                                                                  :: D, DS, DM, DT, DX, DY, DZ
+      REAL(RDP)                                                                     :: T
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      DS = (MUTE + TAPER)**2
+      DM = MUTE**2
+      DT = TAPER**2
+
+      DO K = FS(3), FE(3)
+
+        DZ = (K - POI(3))**2
+
+        DO J = FS(2), FE(2)
+
+          DY = (J - POI(2))**2
+
+          DO I = FS(1), FE(1)
+
+            DX = (I - POI(1))**2
+
+            D = DX + DY + DZ
+
+            IF (D .LE. DM) THEN
+
+              X(I, J, K) = 0._RDP
+
+            ELSEIF ( (D .GT. DM) .AND. (D .LE. DS) ) THEN
+
+              T = REAL(D - DM, RDP) / REAL(DT, RDP)
+
+              X(I, J, K) = X(I, J, K) * (1._RDP - COS(T * PI / 2._RDP))
+
+            ENDIF
+
+          ENDDO
+        ENDDO
+      ENDDO
+
+
+    END SUBROUTINE TAPERING
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
 
 

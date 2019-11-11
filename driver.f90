@@ -12,10 +12,11 @@ PROGRAM DRIVER
   INTEGER(ISP)               :: NX, NY, NZ
 
   ! MPI STUFF
-  INTEGER(ISP)               :: MCW, IERR, NTASKS, RANK, TOPOZ, NDIMS
-  INTEGER(ISP)               :: DIR, DISPL, SRC, DEST
-  INTEGER(ISP)               :: NONEIGHBOR
-  INTEGER(ISP), DIMENSION(3) :: DIMS, COORDS
+  INTEGER(ISP)                 :: MCW, IERR, NTASKS, RANK, TOPOZ, NDIMS
+  INTEGER(ISP)                 :: DIR, DISPL, SRC, DEST
+  INTEGER(ISP)                 :: NONEIGHBOR
+  INTEGER(ISP), DIMENSION(3)   :: DIMS, COORDS
+  INTEGER(ISP), DIMENSION(3,2) :: POI
 
   LOGICAL                    :: REORDER
   LOGICAL, DIMENSION(3)      :: ISPERIODIC
@@ -39,12 +40,14 @@ PROGRAM DRIVER
   CALL MPI_BARRIER(MCW, IERR)
 
 
-  NX = 300
-  NY = 250
-  NZ = 200
+  NX = 600    !300
+  NY = 500
+  NZ = 300
 
-  !CALL SCARF3D(MCW, NX, NY, NZ, 10)
-  CALL SCARF3D(MCW, [NX, NY, NZ], 20._rdp, 'GAUSS', [500._rdp, 500._rdp, 100._rdp], 5._rdp, 0.25_rdp, 1234)
+  POI(:, 1) = [300, 250, 150]
+  POI(:, 2) = [400, 250, 150]
+
+  CALL SCARF3D(MCW, [NX, NY, NZ], 100._rdp, 'VK', [5000._rdp, 5000._rdp, 5000._rdp], 0.05_rdp, 0.1_rdp, 1235, POI, 4, 26)
 
   ! WE WORKING IN 3D
   ! NDIMS = 3
