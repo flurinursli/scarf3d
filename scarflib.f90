@@ -28,7 +28,6 @@ MODULE SCARFLIB
   ! VARIABLES
   REAL(RDP), PARAMETER :: PI = 3.141592653589793_RDP
 
-
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
   CONTAINS
@@ -268,7 +267,7 @@ MODULE SCARFLIB
       IF (RANK .EQ. 0) PRINT*, 'TAPERING TIMING: ', REAL(TAC - TIC, RSP)
 
 
-! IF (RANK .EQ. 0) PRINT*, 'AUTOCORRELATION'
+!       IF (RANK .EQ. 0) PRINT*, 'AUTOCORRELATION'
 !
 !       ALLOCATE(XCORR(XSTART(1):XEND(1), XSTART(2):XEND(2), XSTART(3):XEND(3)))
 !
@@ -291,7 +290,7 @@ MODULE SCARFLIB
 
       TAC = MPI_WTIME()
 
-      IF (RANK .EQ. 0) PRINT*, 'SPECTRUM TIMING: ', REAL(TAC - TIC, RSP)
+      IF (RANK .EQ. 0) PRINT*, 'IO TIMING: ', REAL(TAC - TIC, RSP)
 
       ! CLEAN UP MEMORY
       DEALLOCATE(SPEC, FIELD)
@@ -311,14 +310,13 @@ MODULE SCARFLIB
       INTEGER(ISP),              DIMENSION(3),                                   INTENT(IN)    :: NYQUIST
       COMPLEX(RDP),              DIMENSION(FS(1):FE(1),FS(2):FE(2),FS(3):FE(3)), INTENT(INOUT) :: SPEC
       COMPLEX(RDP), ALLOCATABLE, DIMENSION(:)                                                  :: STRIPE
-      INTEGER(ISP)                                                                             :: I, J, JSTAR, K
+      INTEGER(ISP)                                                                             :: I, J, JSTAR, K                    !< COUNTERS
+      INTEGER(ISP)                                                                             :: J0, J1, STEP                      !< COUNTERS
       INTEGER(ISP)                                                                             :: RANK, SENDER, RECEIVER, NTASKS    !< MPI STUFF
       INTEGER(ISP)                                                                             :: IERR
       INTEGER(ISP),              DIMENSION(3)                                                  :: N                                 !< POINTS ALONG EACH DIMENSION
       INTEGER(ISP), ALLOCATABLE, DIMENSION(:)                                                  :: LIST
       INTEGER(ISP), ALLOCATABLE, DIMENSION(:,:)                                                :: LBOUND, UBOUND
-
-integer(isp) :: j0, j1, step
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -357,19 +355,20 @@ integer(isp) :: j0, j1, step
 
           ! PRINT*, RANK, '-- ', LIST
 
-          j0 = fs(2)
-          j1 = fe(2)
-          step = 1
+          ! ASSIGN LOOP INDICES FOR SENDING MPI TASKS
+          J0   = FS(2)
+          J1   = FE(2)
+          STEP = 1
 
-          if (fs(2) .ge. nyquist(2)) then
-            j0 = fe(2)
-            j1 = fs(2)
-            step = -1
-          endif
+          ! SWAP INDICES TO CREATE RECEIVING MPI TASKS MATCHING THE SENDING ONES
+          IF (FS(2) .GE. NYQUIST(2)) THEN
+            J0   = FE(2)
+            J1   = FS(2)
+            STEP = -1
+          ENDIF
 
           ! "J" IS VERTICAL AXIS IN FIGURE 4
-          !DO J = FS(2), FE(2)
-          do j = j0, j1, step
+          DO J = J0, J1, STEP
 
             IF ( (J .EQ. 1) .OR. (J .EQ. NYQUIST(2)) ) THEN
 
@@ -403,7 +402,7 @@ integer(isp) :: j0, j1, step
                 STRIPE = SPEC(I, J, :)
                 !STRIPE = [CMPLX(J, 1), CMPLX(J, 2), CMPLX(J, 3), CMPLX(J, 4), CMPLX(J, 5), CMPLX(J, 6)]
 
-!print*, rank, '--', sender, receiver, '--', i, '++', j, jstar
+                !print*, rank, '--', sender, receiver, '--', i, '++', j, jstar
 
                 IF (SENDER .EQ. RANK)   CALL MPI_SEND(STRIPE, N(3), MPI_DOUBLE_COMPLEX, RECEIVER, JSTAR, COMM, IERR)
                 IF (RECEIVER .EQ. RANK) CALL MPI_RECV(STRIPE, N(3), MPI_DOUBLE_COMPLEX, SENDER, J, COMM, MPI_STATUS_IGNORE, IERR)
@@ -457,12 +456,14 @@ integer(isp) :: j0, j1, step
 
     SUBROUTINE RANDOM_SEQUENCE(SEED, FS, FE, N, R)
 
-      INTEGER(ISP),                                                              INTENT(IN)  :: SEED                    !< INITIAL SEED
-      INTEGER(ISP),              DIMENSION(3),                                   INTENT(IN)  :: FS, FE
-      INTEGER(ISP),              DIMENSION(3),                                   INTENT(IN)  :: N
-      REAL(RDP),                 DIMENSION(FS(1):FE(1),FS(2):FE(2),FS(3):FE(3)), INTENT(OUT) :: R
+      ! GENERATE A SEQUENCE OF RANDOM NUMBERS IN THE RANGE [0 2*PI)
+
+      INTEGER(ISP),                                                              INTENT(IN)  :: SEED                 !< INITIAL SEED
+      INTEGER(ISP),              DIMENSION(3),                                   INTENT(IN)  :: FS, FE               !< START/END INDICES ALONG EACH DIRECTION
+      INTEGER(ISP),              DIMENSION(3),                                   INTENT(IN)  :: N                    !< SIZE OF WHOLE RANDOM FIELD (POINTS)
+      REAL(RDP),                 DIMENSION(FS(1):FE(1),FS(2):FE(2),FS(3):FE(3)), INTENT(OUT) :: R                    !< RANDOM SEQUENCE
       INTEGER(ISP)                                                                           :: SEED_SIZE
-      INTEGER(ISP)                                                                           :: I, J
+      INTEGER(ISP)                                                                           :: I, J                 !< COUNTERS
       INTEGER(ISP), ALLOCATABLE, DIMENSION(:)                                                :: TMP_SEED
       REAL(RDP),                 DIMENSION(FS(3):FE(3))                                      :: HARVEST
 
@@ -483,22 +484,10 @@ integer(isp) :: j0, j1, step
 
           CALL RANDOM_NUMBER(HARVEST)
 
-          R(I, J, :) = HARVEST * 2._RDP * PI
+          R(I, J, :) = HARVEST * 2._RDP * PI                               !< SEQUENCE IN THE RANGE [0, 2*PI)
 
         ENDDO
       ENDDO
-
-      ! DO I = FS(1), FE(1)
-      !
-      !     TMP_SEED = SEED + I
-      !
-      !     CALL RANDOM_SEED(PUT = TMP_SEED)
-      !
-      !     CALL RANDOM_NUMBER(R(I, :, :))
-      !
-      !     R(I, :, :) = R(I, :, :) * 2._RDP * PI
-      !
-      ! ENDDO
 
       DEALLOCATE(TMP_SEED)
 
@@ -848,13 +837,17 @@ integer(isp) :: j0, j1, step
 
     SUBROUTINE TAPERING (FS, FE, X, POI, MUTE, TAPER)
 
-      INTEGER(ISP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE
-      REAL(RDP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: X
-      INTEGER(ISP), DIMENSION(3),                                     INTENT(IN)    :: POI
-      INTEGER(ISP),                                                   INTENT(IN)    :: MUTE, TAPER
-      INTEGER(ISP)                                                                  :: I, J, K
-      INTEGER(ISP)                                                                  :: D, DS, DM, DT, DX, DY, DZ
-      REAL(RDP)                                                                     :: T
+      ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
+      ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
+
+      INTEGER(ISP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE                !< START/END INDICES ALONG EACH DIRECTION
+      REAL(RDP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: X                     !< RANDOM FIELD
+      INTEGER(ISP), DIMENSION(3),                                     INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (NODES)
+      INTEGER(ISP),                                                   INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
+      INTEGER(ISP)                                                                  :: I, J, K               !< COUNTERS
+      INTEGER(ISP)                                                                  :: D, DS, DM, DT         !< VARIOUS DISTANCES
+      INTEGER(ISP)                                                                  :: DX, DY, DZ            !< NODE-POI DISTANCE
+      REAL(RDP)                                                                     :: T                     !< TAPER ARGUMENT
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -864,27 +857,27 @@ integer(isp) :: j0, j1, step
 
       DO K = FS(3), FE(3)
 
-        DZ = (K - POI(3))**2
+        DZ = (K - POI(3))**2                                                    !< DISTANCE ALONG Z
 
         DO J = FS(2), FE(2)
 
-          DY = (J - POI(2))**2
+          DY = (J - POI(2))**2                                                  !< DISTANCE ALONG Y
 
           DO I = FS(1), FE(1)
 
-            DX = (I - POI(1))**2
+            DX = (I - POI(1))**2                                                !< DISTANCE ALONG X
 
-            D = DX + DY + DZ
+            D = DX + DY + DZ                                                    !< TOTAL DISTANCE
 
             IF (D .LE. DM) THEN
 
-              X(I, J, K) = 0._RDP
+              X(I, J, K) = 0._RDP                                               !< MUTING
 
             ELSEIF ( (D .GT. DM) .AND. (D .LE. DS) ) THEN
 
               T = REAL(D - DM, RDP) / REAL(DT, RDP)
 
-              X(I, J, K) = X(I, J, K) * (1._RDP - COS(T * PI / 2._RDP))
+              X(I, J, K) = X(I, J, K) * (1._RDP - COS(T * PI / 2._RDP))         !< TAPERING
 
             ENDIF
 
