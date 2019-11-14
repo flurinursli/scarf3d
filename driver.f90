@@ -1,22 +1,20 @@
 PROGRAM DRIVER
 
   USE :: MPI
-  USE :: OMP_LIB
 
-  USE, NON_INTRINSIC :: PRECISIONS
   USE, NON_INTRINSIC :: SCARFLIB
 
   IMPLICIT NONE
 
-  INTEGER(ISP)               :: I, I0, I1, J0, J1, K0, K1
-  INTEGER(ISP)               :: NX, NY, NZ
+  INTEGER               :: I, I0, I1, J0, J1, K0, K1
+  INTEGER               :: NX, NY, NZ
 
   ! MPI STUFF
-  INTEGER(ISP)                 :: MCW, IERR, NTASKS, RANK, TOPOZ, NDIMS
-  INTEGER(ISP)                 :: DIR, DISPL, SRC, DEST
-  INTEGER(ISP)                 :: NONEIGHBOR
-  INTEGER(ISP), DIMENSION(3)   :: DIMS, COORDS
-  INTEGER(ISP), DIMENSION(3,2) :: POI
+  INTEGER                 :: MCW, IERR, NTASKS, RANK, TOPOZ, NDIMS
+  INTEGER                 :: DIR, DISPL, SRC, DEST
+  INTEGER                 :: NONEIGHBOR
+  INTEGER, DIMENSION(3)   :: DIMS, COORDS
+  INTEGER, DIMENSION(3,2) :: POI
 
   LOGICAL                    :: REORDER
   LOGICAL, DIMENSION(3)      :: ISPERIODIC
@@ -41,13 +39,14 @@ PROGRAM DRIVER
 
 
   NX = 600    !300
-  NY = 500
-  NZ = 300
+  NY = 600
+  NZ = 600
 
   POI(:, 1) = [300, 250, 150]
   POI(:, 2) = [400, 250, 150]
 
-  CALL SCARF3D(MCW, [NX, NY, NZ], 100._rdp, 'VK', [5000._rdp, 5000._rdp, 5000._rdp], 0.05_rdp, 0.1_rdp, 1235, POI, 4, 26)
+  !CALL SCARF3D_FFT(MCW, [NX, NY, NZ], 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.1_fpp, 1235, POI, 4, 26)
+  CALL SCARF3D_FFT(MCW, [NX, NY, NZ], 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.1_fpp, 1235, POI, 0, 0)
 
   ! WE WORKING IN 3D
   ! NDIMS = 3
