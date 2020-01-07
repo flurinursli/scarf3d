@@ -1,10 +1,13 @@
-MODULE SCARFLIB_FFT2
+MODULE SCARFLIB_FFT3
 
   ! ALL VARIABLES AND SUBMODULE PROCEDURES ARE GLOBAL WITHIN THE SUBMODULE, BUT LIMITED TO IT.
 
-!    USE, INTRINSIC     :: OMP_LIB
+  ! mpif90 -O3 scarflib_fft2.f90 scarflib_spec.f90 scarflib.f90 driver.f90 *.f -I/home/walter/Backedup/Software/fftw-3.3.8/include
+  ! -L/home/walter/Backedup/Software/fftw-3.3.8/lib -lfftw3 -fcheck=all -fbacktrace -fopenacc
 
-  USE, NON_INTRINSIC :: SCARFLIB
+  USE, INTRINSIC     :: ISO_FORTRAN_ENV
+  USE, INTRINSIC     :: ISO_C_BINDING
+  USE, NON_INTRINSIC :: MPI
 
   IMPLICIT NONE
 
@@ -12,14 +15,50 @@ MODULE SCARFLIB_FFT2
 
   PRIVATE
 
-  PUBLIC :: SCARF3D_STRUCTURED
+  PUBLIC :: SCARF3D_FFT
 
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  ! SET PRECISION
+
+  !#ifdef DOUBLE_PREC
+   INTEGER, PARAMETER :: FPP          = REAL64
+   INTEGER, PARAMETER :: C_FPP        = C_DOUBLE
+   INTEGER, PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
+   INTEGER, PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
+   INTEGER, PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
+  !#else
+    ! INTEGER, PARAMETER :: FPP          = REAL32
+    ! INTEGER, PARAMETER :: C_FPP        = C_FLOAT
+    ! INTEGER, PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
+    ! INTEGER, PARAMETER :: REAL_TYPE    = MPI_REAL
+    ! INTEGER, PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
+  !#endif
+
+    ! INTEGERS HAVE ALWAYS SAME "PRECISION"
+    INTEGER, PARAMETER :: IPP = INT32
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! PROCEDURE POINTERS
   PROCEDURE(VK_PSDF), POINTER :: FUN
 
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  ! TOTAL NUMBER OF POINTS ALONG EACH AXIS (WHOLE MODEL)
+  INTEGER(IPP),                DIMENSION(3)                     :: NPTS
+
+  ! MPI STUFF
+  INTEGER(IPP)                                                  :: WORLD_RANK, WORLD_SIZE
+
+  ! GLOBAL MODEL INDICES FOR ALL MPI PROCESSES
+  INTEGER(IPP),   ALLOCATABLE, DIMENSION(:,:)                   :: GS, GE
+
+  ! PI
+  REAL(FPP),                                  PARAMETER         :: PI = 3.141592653589793_FPP
+
+  ! ABSOLUTE POSITION OF MODEL'S FIRST POINT
+  REAL(FPP),                   DIMENSION(3)                     :: OFF_AXIS
 
   ! POINTER FOR FOURIER TRANSFORM
   COMPLEX(C_CPP),              DIMENSION(:),            POINTER :: CDUM => NULL()
@@ -38,12 +77,12 @@ MODULE SCARFLIB_FFT2
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_FFT(X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, TIME)
+    SUBROUTINE SCARF3D_FFT(X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, INFO)
 
       ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
       ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
-      REAL(FPP),                     DIMENSION(3),     INTENT(IN)    :: X, Y, Z        !< POSITION OF POINTS ALONG X, Y, Z
+      REAL(FPP),                     DIMENSION(:),     INTENT(IN)    :: X, Y, Z        !< POSITION OF POINTS ALONG X, Y, Z
       REAL(FPP),                                       INTENT(IN)    :: DH             !< GRID-STEP
       CHARACTER(LEN=*),                                INTENT(IN)    :: ACF            !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
       REAL(FPP),                     DIMENSION(3),     INTENT(IN)    :: CL             !< CORRELATION LENGTH
@@ -54,17 +93,21 @@ MODULE SCARFLIB_FFT2
       INTEGER(IPP),                                    INTENT(IN)    :: MUTE           !< NUMBER OF POINTS WHERE MUTING IS APPLIED
       INTEGER(IPP),                                    INTENT(IN)    :: TAPER          !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
       REAL(FPP),                     DIMENSION(:,:,:), INTENT(INOUT) :: FIELD          !< VELOCITY FIELD TO BE PERTURBED
-      REAL(FPP),                     DIMENSION(3),     INTENT(OUT)   :: TIME           !< TIMING FOR PERFORMANCE ANALYSIS
+      REAL(FPP),                     DIMENSION(3),     INTENT(OUT)   :: INFO           !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
       COMPLEX(FPP),     ALLOCATABLE, DIMENSION(:,:,:)                :: SPEC           !< SPECTRUM/RANDOM FIELD
       INTEGER(IPP)                                                   :: IERR, TOPO     !< MPI STUFF
       INTEGER(IPP)                                                   :: I, J, K        !< COUNTERS
+      INTEGER(IPP)                                                   :: OFFSET         !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
       INTEGER(IPP),                  DIMENSION(2)                    :: REQUEST
       INTEGER(IPP),                  DIMENSION(3)                    :: M              !< POINTS FOR CALLING PROCESS
+      INTEGER(IPP),                  DIMENSION(3)                    :: COORDS         !< PROCESS COORDINATES
       INTEGER(IPP),                  DIMENSION(3)                    :: LS, LE         !< FIRST/LAST INDEX ALONG X, Y, Z
       INTEGER(IPP),                  DIMENSION(MPI_STATUS_SIZE)      :: STATUS
       REAL(FPP)                                                      :: SCALING        !< SCALING FACTOR
       REAL(FPP)                                                      :: TICTOC
       REAL(FPP),                     DIMENSION(2)                    :: ET             !< DUMMY FOR ELAPSED TIME
+      REAL(FPP),                     DIMENSION(3)                    :: MIN_EXTENT     !< LOWER MODEL LIMITS (GLOBAL)
+      REAL(FPP),                     DIMENSION(3)                    :: MAX_EXTENT     !< UPPER MODEL LIMITS (GLOBAL)
       REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)                :: DUM1, DUM2     !< DUMMY ARRAYS FOR INTERPOLATION
 
       !-----------------------------------------------------------------------------------------------------------------------------
@@ -75,13 +118,54 @@ MODULE SCARFLIB_FFT2
       ! GET AVAILABLE MPI PROCESSES
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
 
-      ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH AND THEN INTERPOLATED
-      ! AT POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE MPI PROCESS
+      ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
+      MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
+      MAX_EXTENT = [MAXVAL(X, DIM = 1); MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
+
+      ! (GLOBAL) MODEL LIMITS
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+      ! CYCLE OVER THE THREE MAIN DIRECTIONS
+      DO I = 1, 3
+
+        ! SET NUMBER OF POINTS SUCH THAT RANDOM FIELD COVERS WHOLE DOMAIN
+        NPTS(I) = NINT( (MAX_EXTENT(I) - MIN_EXTENT(I)) / DH) + 1
+
+        ! POINTS FOR ONE CORRELATION LENGTH
+        OFFSET = NINT(CL(I) / DH) + 1
+
+        ! WE MUST EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
+        NPTS(I) = NPTS(I) + 2 * OFFSET
+
+        ! MAKE SURE WE HAVE EVEN NUMBER OF POINTS
+        IF (MOD(NPTS(I), 2) .NE. 0) NPTS(I) = NPTS(I) + 1
+
+        ! ABSOLUTE POSITION OF FIRST POINT (IT COULD BE NEGATIVE)
+        OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET - 1) * DH
+
+      ENDDO
+
+      INFO(:) = 0._FPP
+
+      ! HERE WE CHECK IF THE MODEL IS LARGE ENOUGH TO CATCH THE LOWER PART OF THE SPECTRUM (LOW WAVENUMBERS)...
+      IF (ANY(NPTS .LE. NINT(2._FPP * PI * CL / DH))) INFO(1) = 1._FPP
+
+      ! ...AND HERE IF THE GRID-STEP IS SMALL ENOUGH TO CATCH THE UPPER PART OF THE SPECTRUM (HIGH WAVENUMBERS)
+      IF (ANY(DH .GT. CL / 2._FPP)) INFO(2) = 1._FPP
+
+      ! ANOTHER WAY TO CHECK HOW CLOSE THE DISCRETE AND CONTINUOUS SPECTRA ARE, IS TO COMPARE THE RESPECTIVE STANDARD DEVIATIONS
+
+
+
+      ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
+      ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE MPI PROCESS
 
       ! WE WORK IN 3D
       NDIMS = 3
 
       ! NUMBER OF PROCESSES ALONG EACH DIRECTION
+      ! THIS SHOULD BE REPLACED BY A BEST-EXEC SOLUTION AS IN "2DFFTDECOMP"
       DIMS  = [2, 1, 2]
 
       ! ALLOW REORDERING
@@ -93,12 +177,13 @@ MODULE SCARFLIB_FFT2
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, TOPO, IERR)
 
+      ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
       CALL MPI_CART_COORDS(TOPO, WORLD_RANK, NDIMS, COORDS, IERR)
 
-      ! RETURN FIRST/LAST-INDEX ALONG EACH DIRECTION FOR CALLING RANK
-      CALL MPI_RANK2INDEX(NPTS, DIMS, COORDS, LS, LE)
+      ! RETURN FIRST/LAST-INDEX ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
+      CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
 
-      ! "GS"/"GE" STORE FIRST/LAST INDICES ALONG EACH DIRECTION FOR EACH PROCESS
+      ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
       ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
 
       GS(:, WORLD_RANK) = LS
@@ -107,9 +192,6 @@ MODULE SCARFLIB_FFT2
       ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      ! FIND TOTAL NUMBER OF POINTS (WHOLE DOMAIN) ALONG EACH AXIS
-      N = MAXVAL(GE, DIM = 2)
 
       ! NUMBER OF POINTS FOR CALLING PROCESS
       DO I = 1, 3
@@ -138,7 +220,7 @@ MODULE SCARFLIB_FFT2
       TIME(3) = TICTOC
 
       ! SCALING PARAMETER
-      SCALING = 1._FPP / SQRT(REAL(N(1), FPP) * REAL(N(2), FPP) * REAL(N(3), FPP) * DH**3)
+      SCALING = 1._FPP / SQRT(REAL(NPTS(1), FPP) * REAL(NPTS(2), FPP) * REAL(NPTS(3), FPP) * DH**3)
 
       ALLOCATE(DELTA(0:M(1)+1, 0:M(2)+1, 0:M(3)+1))
 
@@ -575,7 +657,7 @@ MODULE SCARFLIB_FFT2
       !-------------------------------------------------------------------------------------------------------------------------------
 
       ! INDEX OF NYQUIST FREQUENCY ALONG X-AXIS
-      NYQUIST = N(1) / 2 + 1
+      NYQUIST = NPTS(1) / 2 + 1
 
       ! PARAMETER USED TO DETERMINE ELEMENTS TO BE SENT/RECEIVED
       !OFFSET = GS(1, WORLD_RANK) - 1
@@ -695,8 +777,8 @@ MODULE SCARFLIB_FFT2
       CALL C_F_POINTER(PC, CDUM, [LY(RANK) * NYQUIST])
       CALL C_F_POINTER(PC, RDUM, [LY(RANK) * NYQUIST * 2])
 
-      ! PREPARE FFTW PLAN ALONG X-AXIS ("LY(RANK)" TRANSFORMS, EACH HAVING "N(1)" NUMBER OF POINTS)
-      P1 = FFTW_PLAN_MANY_DFT_C2R(1, [N(1)], LY(RANK), CDUM, [N(1)], LY(RANK), 1, RDUM, [N(1)], LY(RANK), 1, FFTW_ESTIMATE)
+      ! PREPARE FFTW PLAN ALONG X-AXIS ("LY(RANK)" TRANSFORMS, EACH HAVING "NPTS(1)" NUMBER OF POINTS)
+      P1 = FFTW_PLAN_MANY_DFT_C2R(1, [NPTS(1)], LY(RANK), CDUM, [NPTS(1)], LY(RANK), 1, RDUM, [NPTS(1)], LY(RANK), 1, FFTW_ESTIMATE)
 
       ! WORK Z-SLICES ONE BY ONE
       DO K = 1, NZ
@@ -783,16 +865,16 @@ MODULE SCARFLIB_FFT2
       REAL(FPP)                                                                     :: KNYQ, KC, KR          !< USED TO COMPUTE SPECTRUM
       REAL(FPP)                                                                     :: TICTOC                !< USED FOR TIMING
       REAL(FPP),        DIMENSION(3)                                                :: DK                    !< RESOLUTION IN WAVENUMBER DOMAIN
-      REAL(FPP),        DIMENSION(N(1))                                             :: HARVEST               !< RANDOM VALUES
-      REAL(FPP),        DIMENSION(N(1))                                             :: KX                    !< WAVENUMBER VECTOR (X)
-      REAL(FPP),        DIMENSION(N(2))                                             :: KY                    !< WAVENUMBER VECTOR (Y)
-      REAL(FPP),        DIMENSION(N(3))                                             :: KZ                    !< WAVENUMBER VECTOR (Z)
+      REAL(FPP),        DIMENSION(NPTS(1))                                             :: HARVEST               !< RANDOM VALUES
+      REAL(FPP),        DIMENSION(NPTS(1))                                             :: KX                    !< WAVENUMBER VECTOR (X)
+      REAL(FPP),        DIMENSION(NPTS(2))                                             :: KY                    !< WAVENUMBER VECTOR (Y)
+      REAL(FPP),        DIMENSION(NPTS(3))                                             :: KZ                    !< WAVENUMBER VECTOR (Z)
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! RESOLUTION IN WAVENUMBER DOMAIN ALONG EACH DIRECTION
       DO I = 1, 3
-        DK(I) = 2._FPP * PI / (REAL(N(I), FPP) * DH)
+        DK(I) = 2._FPP * PI / (REAL(NPTS(I), FPP) * DH)
       ENDDO
 
       ! NYQUIST WAVENUMBER
@@ -802,9 +884,9 @@ MODULE SCARFLIB_FFT2
       KC = KNYQ / 2._FPP
 
       ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
-      KX = [[(I * DK(1), I = 0, N(1)/2)], [(I * DK(1), I = N(1)/2-1, 1, -1)]]
-      KY = [[(J * DK(2), J = 0, N(2)/2)], [(J * DK(2), J = N(2)/2-1, 1, -1)]]
-      KZ = [[(K * DK(3), K = 0, N(3)/2)], [(K * DK(3), K = N(3)/2-1, 1, -1)]]
+      KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]
+      KY = [[(J * DK(2), J = 0, NPTS(2)/2)], [(J * DK(2), J = NPTS(2)/2-1, 1, -1)]]
+      KZ = [[(K * DK(3), K = 0, NPTS(3)/2)], [(K * DK(3), K = NPTS(3)/2-1, 1, -1)]]
 
       ! COMPUTE PART OF POWER SPECTRAL DENSITY OUTSIDE LOOP
       IF (ACF .EQ. 'VK') THEN
@@ -822,17 +904,17 @@ MODULE SCARFLIB_FFT2
       CALL WATCH_START(TICTOC)
 
       ! COMPUTE SPECTRUM
-      DO K = 1, N(3)
+      DO K = 1, NPTS(3)
 
         BOOL(3) = (K .GE. LS(3)) .AND. (K .LE. LE(3))
 
-        DO J = 1, N(2)
+        DO J = 1, NPTS(2)
 
           BOOL(2) = (J .GE. LS(2)) .AND. (J .LE. LE(2))
 
           CALL RANDOM_NUMBER(HARVEST)
 
-          DO I = 1, N(1)
+          DO I = 1, NPTS(1)
 
             BOOL(1) = (I .GE. LS(1)) .AND. (I .LE. LE(1))
 
@@ -882,11 +964,11 @@ MODULE SCARFLIB_FFT2
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE MPI_SPLIT_TASK(N, NTASKS, I0, I1)
+    SUBROUTINE MPI_SPLIT_TASK(NPTS, NTASKS, I0, I1)
 
-      ! DISTRIBUTE "N" POINTS AMONGST "NTASKS" PROCESSES AND, FOR EACH PROCESS, RETURN THE LOWEST AND HIGHEST INDEX.
+      ! DISTRIBUTE "NPTS" POINTS AMONGST "NTASKS" PROCESSES AND, FOR EACH PROCESS, RETURN THE LOWEST AND HIGHEST INDEX.
 
-      INTEGER(IPP),                        INTENT(IN)  :: N                          !< NUMBER OF POINTS TO BE SPLIT
+      INTEGER(IPP),                        INTENT(IN)  :: NPTS                          !< NUMBER OF POINTS TO BE SPLIT
       INTEGER(IPP),                        INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
       INTEGER(IPP), DIMENSION(0:NTASKS-1), INTENT(OUT) :: I0, I1                     !< 1ST/LAST INDEX
       INTEGER(IPP)                                     :: P                          !< COUNTER
@@ -894,8 +976,8 @@ MODULE SCARFLIB_FFT2
       !------------------------------------------------------------------------------------------------------------------------------
 
       DO P = 0, NTASKS - 1
-        I0(P) = 1 + INT( REAL(N, FPP) / REAL(NTASKS, FPP) * REAL(P, FPP) )
-        I1(P) = INT( REAL(N, FPP) / REAL(NTASKS, FPP) * REAL(P + 1, FPP) )
+        I0(P) = 1 + INT( REAL(NPTS, FPP) / REAL(NTASKS, FPP) * REAL(P, FPP) )
+        I1(P) = INT( REAL(NPTS, FPP) / REAL(NTASKS, FPP) * REAL(P + 1, FPP) )
       ENDDO
 
     END SUBROUTINE MPI_SPLIT_TASK
@@ -961,7 +1043,7 @@ MODULE SCARFLIB_FFT2
 
       ! INDEX OF NYQUIST WAVENUMBER
       DO I = 1, 3
-        NYQUIST(I) = N(I) / 2 + 1
+        NYQUIST(I) = NPTS(I) / 2 + 1
       ENDDO
 
       ! CONSIDER ONLY I-INDEX = 1 AND I-INDEX = NYQUIST(1)
@@ -1030,11 +1112,11 @@ MODULE SCARFLIB_FFT2
             IF ( (GE(2, SLICE2GLOBAL(P)) .GE. NYQUIST(2)) .AND. (GE(3, SLICE2GLOBAL(P)) .GE. NYQUIST(3)) ) THEN
 
               ! CORRESPONDING MIN/MAX INDICES IN THE EPSILON/THETA/PHI REGION
-              J0 = N(2) - GE(2, SLICE2GLOBAL(P)) + 2
-              J1 = N(2) - MAX(GS(2, SLICE2GLOBAL(P)), NYQUIST(2)) + 2
+              J0 = NPTS(2) - GE(2, SLICE2GLOBAL(P)) + 2
+              J1 = NPTS(2) - MAX(GS(2, SLICE2GLOBAL(P)), NYQUIST(2)) + 2
 
-              K0 = N(3) - GE(3, SLICE2GLOBAL(P)) + 2
-              K1 = N(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3)) + 2
+              K0 = NPTS(3) - GE(3, SLICE2GLOBAL(P)) + 2
+              K1 = NPTS(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3)) + 2
 
               ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
               BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
@@ -1071,8 +1153,8 @@ MODULE SCARFLIB_FFT2
                   BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
 
                   ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-                  J = N(2) - JMAP(C) + 2
-                  K = N(3) - KMAP(C) + 2
+                  J = NPTS(2) - JMAP(C) + 2
+                  K = NPTS(3) - KMAP(C) + 2
 
                   ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
                   IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
@@ -1090,11 +1172,11 @@ MODULE SCARFLIB_FFT2
             IF ( (GS(2, SLICE2GLOBAL(P)) .LT. NYQUIST(2)) .AND. (GE(3, SLICE2GLOBAL(P)) .GT. NYQUIST(3)) ) THEN
 
               ! CORRESPONDING MIN/MAX INDICES IN THE GAMMA REGION
-              J0 = N(2) - MIN(GE(2, SLICE2GLOBAL(P)), NYQUIST(2) - 1) + 2
-              J1 = N(2) - GS(2, SLICE2GLOBAL(P)) + 2
+              J0 = NPTS(2) - MIN(GE(2, SLICE2GLOBAL(P)), NYQUIST(2) - 1) + 2
+              J1 = NPTS(2) - GS(2, SLICE2GLOBAL(P)) + 2
 
-              K0 = N(3) - GE(3, SLICE2GLOBAL(P)) + 2
-              K1 = N(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3) + 1) + 2
+              K0 = NPTS(3) - GE(3, SLICE2GLOBAL(P)) + 2
+              K1 = NPTS(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3) + 1) + 2
 
               ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
               BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
@@ -1131,8 +1213,8 @@ MODULE SCARFLIB_FFT2
                   BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
 
                   ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-                  J = N(2) - JMAP(C) + 2
-                  K = N(3) - KMAP(C) + 2
+                  J = NPTS(2) - JMAP(C) + 2
+                  K = NPTS(3) - KMAP(C) + 2
 
                   ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
                   IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
@@ -1150,8 +1232,8 @@ MODULE SCARFLIB_FFT2
             IF ( (GE(2, SLICE2GLOBAL(P)) .GT. NYQUIST(2)) .AND. (GS(3, SLICE2GLOBAL(P)) .EQ. 1) ) THEN
 
               ! CORRESPONDING MIN/MAX INDICES IN THE BETA REGION
-              J0 = N(2) - GE(2, SLICE2GLOBAL(P)) + 2
-              J1 = N(2) - MAX(GS(2, SLICE2GLOBAL(P)), NYQUIST(2) + 1) + 2
+              J0 = NPTS(2) - GE(2, SLICE2GLOBAL(P)) + 2
+              J1 = NPTS(2) - MAX(GS(2, SLICE2GLOBAL(P)), NYQUIST(2) + 1) + 2
 
               K0 = 1
               K1 = 1
@@ -1191,7 +1273,7 @@ MODULE SCARFLIB_FFT2
                   BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
 
                   ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-                  J = N(2) - JMAP(C) + 2
+                  J = NPTS(2) - JMAP(C) + 2
                   K = 1
 
                   ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
@@ -1213,8 +1295,8 @@ MODULE SCARFLIB_FFT2
               J0 = 1
               J1 = 1
 
-              K0 = N(3) - GE(3, SLICE2GLOBAL(P)) + 2
-              K1 = N(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3) + 1) + 2
+              K0 = NPTS(3) - GE(3, SLICE2GLOBAL(P)) + 2
+              K1 = NPTS(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3) + 1) + 2
 
               ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
               BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
@@ -1252,7 +1334,7 @@ MODULE SCARFLIB_FFT2
 
                   ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
                   J = 1
-                  K = N(3) - KMAP(C) + 2
+                  K = NPTS(3) - KMAP(C) + 2
 
                   ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
                   IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
@@ -1507,10 +1589,10 @@ MODULE SCARFLIB_FFT2
 
     SUBROUTINE INTERPOLATE(X, Y, Z, V, XO, YO, ZO, FIELD)
 
-      REAL(FPP),    DIMENSION(:),     INTENT(IN)    :: X, Y, Z
-      REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)    :: V
-      REAL(FPP),    DIMENSION(:),     INTENT(IN)    :: XO, YO, ZO
-      REAL(FPP),    DIMENSION(:),     INTENT(INOUT) :: FIELD
+      REAL(FPP),    DIMENSION(:),     INTENT(IN)    :: X, Y, Z                              !< COORDINATES INPUT POINTS
+      REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)    :: V                                    !< INPUT FIELD
+      REAL(FPP),    DIMENSION(:),     INTENT(IN)    :: XO, YO, ZO                           !< POINTS WHERE INPUT FIELD IS INTERPOLATED
+      REAL(FPP),    DIMENSION(:),     INTENT(INOUT) :: FIELD                                !< INTERPOLATED FIELD
       INTEGER(IPP)                                  :: I, J, K, L
       INTEGER(IPP)                                  :: NPTS
       REAL(FPP)                                     :: PX, PY, PZ, IPX, IPY
@@ -1605,8 +1687,8 @@ MODULE SCARFLIB_FFT2
     FUNCTION HUNT(XX, X, HINT) RESULT(JLO)
       !
       ! DESCRIPTION:
-      !   GIVEN VECTOR XX(1:N) AND SCALAR X, RETURNS INDEX JLO SUCH THAT X IS BETWEEN X(JLO) AND
-      !   X(JLO + 1). INPUT XX MUST BE MONOTONIC (DECREASING OR INCREASING). JLO=0 OR JLO=N INDI-
+      !   GIVEN VECTOR XX(1:NPTS) AND SCALAR X, RETURNS INDEX JLO SUCH THAT X IS BETWEEN X(JLO) AND
+      !   X(JLO + 1). INPUT XX MUST BE MONOTONIC (DECREASING OR INCREASING). JLO=0 OR JLO=NPTS INDI-
       !   CATES THAT X IS OUT OF RANGE. IF HINT IS PRESENT, IT IS USED AS INITIAL GUESS FOR JLO
       !
       ! AUTHOR:
@@ -1619,14 +1701,14 @@ MODULE SCARFLIB_FFT2
       REAL(FPP),                            INTENT(IN) :: X
       REAL(FPP),    DIMENSION(:),           INTENT(IN) :: XX
       INTEGER(ISP),               OPTIONAL, INTENT(IN) :: HINT
-      INTEGER(ISP)                                     :: N, INC, JHI, JM, JLO
+      INTEGER(ISP)                                     :: NPTS, INC, JHI, JM, JLO
       LOGICAL                                          :: ASCND
 
       !----------------------------------------------------------------------------------------------------------------------------
 
-      N = SIZE(XX)
+      NPTS = SIZE(XX)
 
-      ASCND = (XX(N) .GE. XX(1))
+      ASCND = (XX(NPTS) .GE. XX(1))
 
       IF (.NOT.PRESENT(HINT)) THEN
         JLO = 0
@@ -1634,10 +1716,10 @@ MODULE SCARFLIB_FFT2
         JLO = HINT
       ENDIF
 
-      IF (JLO .LE. 0 .OR. JLO .GT. N) THEN
+      IF (JLO .LE. 0 .OR. JLO .GT. NPTS) THEN
 
         JLO = 0
-        JHI = N + 1
+        JHI = NPTS + 1
 
       ELSE
 
@@ -1649,8 +1731,8 @@ MODULE SCARFLIB_FFT2
           DO
             JHI = JLO + INC
 
-            IF (JHI .GT. N) THEN
-              JHI = N + 1
+            IF (JHI .GT. NPTS) THEN
+              JHI = NPTS + 1
               EXIT
             ELSE
               IF (X .LT. XX(JHI) .EQV. ASCND) EXIT
@@ -1687,7 +1769,7 @@ MODULE SCARFLIB_FFT2
       DO
 
         IF (JHI - JLO .LE. 1) THEN
-          IF (X .EQ. XX(N)) JLO = N - 1
+          IF (X .EQ. XX(NPTS)) JLO = NPTS - 1
           IF (X .EQ. XX(1)) JLO = 1
           EXIT
         ELSE
@@ -1708,4 +1790,27 @@ MODULE SCARFLIB_FFT2
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-END MODULE SCARFLIB_FFT2
+    SUBROUTINE COORDS2INDEX(NPTS, DIMS, COORDS, FS, FE)
+
+      ! MAP PROCESS COORDINATES INTO FIRST/LAST INDICES
+
+      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: NPTS                        !< POINTS ALONG EACH AXIS
+      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: DIMS                        !< NUMBER OF PROCESSES ALONG EACH AXIS
+      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: COORDS                      !< CALLING PROCESS COORDINATES
+      INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: FS, FE                      !< RESULTING FIRST/LAST INDICES
+      INTEGER(IPP)                            :: I                           !< COUNTER
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      DO I = 1, 3
+        FS(I) = 1 + INT( REAL(NPTS(I)) / REAL(DIMS(I)) * REAL(COORDS(I)) )
+        FE(I) = INT( REAL(NPTS(I)) / REAL(DIMS(I)) * REAL(COORDS(I) + 1) )
+      ENDDO
+
+    END SUBROUTINE COORDS2INDEX
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+END MODULE SCARFLIB_FFT3
