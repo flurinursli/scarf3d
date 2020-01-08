@@ -126,7 +126,8 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
 
-      ! CYCLE OVER THE THREE MAIN DIRECTIONS
+      ! CYCLE OVER THE THREE MAIN DIRECTIONS TO DETERMINE THE NECESSARY MODEL SIZE (IN NUMBER OF POINTS) AND THE ABSOLUTE POSITION OF
+      ! OF THE FIRST POINT TO COUNTERACT FFT PERIODICITY
       DO I = 1, 3
 
         ! SET NUMBER OF POINTS SUCH THAT RANDOM FIELD COVERS WHOLE DOMAIN
@@ -154,12 +155,10 @@ MODULE SCARFLIB_FFT3
       ! ...AND HERE IF THE GRID-STEP IS SMALL ENOUGH TO CATCH THE UPPER PART OF THE SPECTRUM (HIGH WAVENUMBERS)
       IF (ANY(DH .GT. CL / 2._FPP)) INFO(2) = 1._FPP
 
-      ! ANOTHER WAY TO CHECK HOW CLOSE THE DISCRETE AND CONTINUOUS SPECTRA ARE, IS TO COMPARE THE RESPECTIVE STANDARD DEVIATIONS
-
-
+      ! [ANOTHER WAY TO CHECK HOW CLOSE THE DISCRETE AND CONTINUOUS SPECTRA ARE, IS TO COMPARE THE RESPECTIVE STANDARD DEVIATIONS]
 
       ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
-      ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE MPI PROCESS
+      ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE PROCESS
 
       ! WE WORK IN 3D
       NDIMS = 3
@@ -180,7 +179,7 @@ MODULE SCARFLIB_FFT3
       ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
       CALL MPI_CART_COORDS(TOPO, WORLD_RANK, NDIMS, COORDS, IERR)
 
-      ! RETURN FIRST/LAST-INDEX ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
+      ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
       CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
 
       ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
@@ -199,13 +198,12 @@ MODULE SCARFLIB_FFT3
       ENDDO
 
       ! ALLOCATE MEMORY FOR SPECTRUM
-      !ALLOCATE(SPEC(LS(1):LE(1), LS(2):LE(2), LS(3):LE(3)))
       ALLOCATE(SPEC(M(1), M(2), M(3)))
 
       ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
       CALL COMPUTE_SPECTRUM(LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
 
-      TIME(1:2) = ET
+      INFO(3:4) = ET
 
       ! START TIMER
       CALL WATCH_START(TICTOC)
@@ -217,51 +215,47 @@ MODULE SCARFLIB_FFT3
 
       CALL WATCH_STOP(TICTOC)
 
-      TIME(3) = TICTOC
+      INFO(5) = TICTOC
 
       ! SCALING PARAMETER
       SCALING = 1._FPP / SQRT(REAL(NPTS(1), FPP) * REAL(NPTS(2), FPP) * REAL(NPTS(3), FPP) * DH**3)
 
-      ALLOCATE(DELTA(0:M(1)+1, 0:M(2)+1, 0:M(3)+1))
+      ALLOCATE(DELTA(M(1) + 1, M(2) + 1, M(3) + 1))
 
-      DO K = 1, SIZE(SPEC, 3)
-        DO J = 1, SIZE(SPEC, 2)
-          DO I = 1, SIZE(SPEC, 1)
-            !SPEC(I, J, K) = SPEC(I, J, K) * SCALING
-            DELTA(I, J, K) = REAL(SPEC(I, J, K)) * SCALING
+      DELTA(:,:,:) = 0._FPP
+
+      ! SCALE IFFT
+      DO K = 1, M(3)
+        DO J = 1, M(2)
+          DO I = 1, M(1)
+            DELTA(I + 1, J + 1, K + 1) = REAL(SPEC(I, J, K), FPP) * SCALING
           ENDDO
         ENDDO
       ENDDO
 
       DEALLOCATE(SPEC)
 
-      DO I = 1, 3
-        M(I) = GE(I, WORLD_RANK) - GS(I, WORLD_RANK) + 1
-      ENDDO
+      CALL WATCH_START(TICTOC)
 
-      ! HALO EXCHANGE
-      CALL EXCHANGE_HALO(M, DELTA)
+      CALL EXCHANGE_HALO(TOPO, DELTA)
+
+      CALL WATCH_STOP(TICTOC)
+
+      INFO(6) = TICTOC
 
 
       CALL WATCH_START(TICTOC)
 
-      ! BROADCAST EACH SINGLE RANDOM FIELD BLOCK TO ALL PROCESSES IN ORDER TO INTERPOLATE THE PERTURBATION VALUE AT EACH INPUT POINT
-      DO P = 0, WORLD_SIZE - 1
-
-        ! POINTS IN P-TH BLOCK
-        M(1) = GE(1, P) - GS(1, P) + 1
-        M(2) = GE(2, P) - GS(2, P) + 1
-        M(3) = GE(3, P) - GS(3, P) + 1
-
-        !CALL ASYNC_INTERP(P, M, SPEC, X, Y, Z, FIELD)
-
-        CALL SYNC_INTERP(P, M, DELTA, X, Y, Z, FIELD)
-
-      ENDDO
+      CALL INTERPOLATE(DH, DELTA, X, Y, Z, FIELD)
 
       CALL WATCH_STOP(TICTOC)
 
-      TIME(4) = TICTOC
+      INFO(7) = TICTOC
+
+
+
+
+
 
       !CALL IO_WRITE_ONE(REAL(SPEC, FPP), 'random_struct.bin')
       !CALL IO_WRITE_SLICE(1, 50, REAL(SPEC, FPP), 'random_struct_slice.bin')
@@ -1453,46 +1447,138 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXCHANGE_HALO(M, DELTA)
+    SUBROUTINE EXCHANGE_HALO(TOPO, DELTA)
 
-      INTEGER(IPP),                   DIMENSION(3),                          INTENT(IN)    :: M
-      REAL(FPP),                      DIMENSION(0:M(1)+1,0:M(2)+1,0:M(3)+1), INTENT(INOUT) :: DELTA
-      INTEGER(IPP)                                                                         :: IERR, EW, NS, UD, SRC, DEST
-      INTEGER(IPP),                   DIMENSION(3)                                         :: SIZES, SUBSIZES, STARTS
-      INTEGER(IPP),                   DIMENSION(6)                                         :: SENDCOUNTS, RECVCOUNTS
-      INTEGER(IPP),                   DIMENSION(6)                                         :: SENDTYPES, RECVTYPES
-      INTEGER(KIND=MPI_ADDRESS_KIND), DIMENSION(6)                                         :: SDISPLS, RDISPLS
+      INTEGER(IPP),                             INTENT(IN)    :: TOPO                            !< COMMUNICATOR WITH CARTESIAN TOPOLOGY
+      REAL(FPP),    DIMENSION(:,:,:),           INTENT(INOUT) :: DELTA                           !< RANDOM FIELD
+      INTEGER(IPP)                                            :: I
+      INTEGER(IPP)                                            :: IERR, NEG, POS
+      INTEGER(IPP)                                            :: FROM_NEG, TO_POS
+      INTEGER(IPP), DIMENSION(3)                              :: SIZES, SUBSIZES, STARTS
+      INTEGER(IPP), DIMENSION(3,0:WORLD_SIZE-1)               :: N
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! LOOP OVER THREE DIRECTIONS
-      DO J = 1, 3
+      ! NUMBER OF POINTS FOR EACH PROCESS
+      DO I = 0, WORLD_SIZE - 1
+        N(1, I) = GE(1, I) - GS(1, I) + 1
+        N(2, I) = GE(2, I) - GS(2, I) + 1
+        N(3, I) = GE(3, I) - GS(3, I) + 1
+      ENDDO
 
-        ! DETERMINE NEIGHBORS IN THE NORTH-SOUTH DIRECTION (I.E. X-AXIS)
-        CALL MPI_CART_SHIFT(MPI_COMM_WORLD, J, 1, SRC, DEST, IERR)
+      ! LOOP OVER DIRECTIONS
+      DO I = 0, 2
 
-        SIZES    = [M(1), M(2), M(3)] + 2
-        SUBSIZES = [1, M(2), M(3)]
+        ! DETERMINE NEIGHBOURS IN CURRENT DIRECTION
+        CALL MPI_CART_SHIFT(TOPO, I, 1, NEG, POS, IERR)
 
-        CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, [1, 1, 1], MPI_ORDER_FORTRAN, REAL_TYPE, EW, IERR)
+        SIZES = N(:, WORLD_RANK) + 1
 
+        ! EXCHANGE ALONG X
+        IF (I .EQ. 0) THEN
 
-      CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, EW, IERR)
-      CALL MPI_TYPE_COMMIT(EW, IERR)
+          SUBSIZES = [1, N(2, WORLD_RANK), N(3, WORLD_RANK)]
 
-      CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NS, IERR)
-      CALL MPI_TYPE_COMMIT(EW, IERR)
+          !STARTS = [1, 1, 1]
+          !CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_NEG, IERR)
+          !CALL MPI_TYPE_COMMIT(TO_NEG)
 
-      CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, UD, IERR)
-      CALL MPI_TYPE_COMMIT(EW, IERR)
+          STARTS = [0, 1, 1]
+          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
+          CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
 
-      CALL MPI_NEIGHBOR_ALLTOALLW(DELTA, SENDCOUNTS, SDISPLS, SENDTYPES, DELTA, RECVCOUNTS, RDISPLS, RECVTYPES, MPI_COMM_WORLD,  &
-                                  IERR)
+          STARTS = [N(1, WORLD_RANK), 1, 1]
+          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
+          CALL MPI_TYPE_COMMIT(TO_POS, IERR)
 
+          !STARTS = [N(1, WORLD_RANK) + 1, 1, 1]
+          !CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_POS, IERR)
+          !CALL MPI_TYPE_COMMIT(FROM_POS)
+
+        ! EXCHANGE ALONG Y
+        ELSEIF (I .EQ. 1) THEN
+
+          SUBSIZES = [N(1, WORLD_RANK) + 1, 1, N(3, WORLD_RANK)]
+
+          STARTS = [0, 0, 1]
+          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
+          CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
+
+          STARTS = [0, N(2, WORLD_RANK), 1]
+          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
+          CALL MPI_TYPE_COMMIT(TO_POS, IERR)
+
+        ! EXCHANGE ALONG Z
+        ELSEIF (I .EQ. 2) THEN
+
+          SUBSIZES = [N(1, WORLD_RANK) + 1, N(2, WORLD_RANK) + 1, 1]
+
+          STARTS = [0, 0, 0]
+          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
+          CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
+
+          STARTS = [0, 0, N(3, WORLD_RANK)]
+          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
+          CALL MPI_TYPE_COMMIT(TO_POS, IERR)
+
+        ENDIF
+
+        ! EXCHANGE WITH PROCESS IN THE NEGATIVE DIRECTION
+        CALL MPI_SENDRECV_REPLACE(DELTA, 1, FROM_NEG, MPI_PROC_NULL, 0, NEG, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE, IERR)
+        ! EXCHANGE WITH PROCESS IN THE POSITIVE DIRECTION
+        CALL MPI_SENDRECV_REPLACE(DELTA, 1, TO_POS, POS, 0, MPI_PROC_NULL, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE, IERR)
+
+        CALL MPI_TYPE_FREE(FROM_NEG, IERR)
+        CALL MPI_TYPE_FREE(TO_POS, IERR)
 
       ENDDO
 
     END SUBROUTINE EXCHANGE_HALO
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE BUILD_STENCIL(DIR, NEWCOMM)
+
+      INTEGER(IPP),                           INTENT(IN)  :: DIR                    !< STENCIL DIRECTION (1=X, 2=Y, 3=Z)
+      INTEGER(IPP),                           INTENT(OUT) :: NEWCOMM
+      INTEGER(IPP)                                        :: I, IERR
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1)             :: COLOR
+      LOGICAL,      DIMENSION(2)                          :: BOOL
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! GROUP PROCESSES IN STENCILS
+      DO I = 0, WORLD_SIZE - 1
+
+        COLOR(I) = 0
+
+        ! STENCIL ALONG X-AXIS
+        IF (DIR .EQ. 1) THEN
+          BOOL(1) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
+          BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
+        ! STENCIL ALONG Y-AXIS
+        ELSEIF (DIR .EQ. 2) THEN
+          BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
+          BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
+        ! STENCIL ALONG Z-AXIS
+        ELSEIF (DIR .EQ. 3) THEN
+          BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
+          BOOL(2) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
+        ENDIF
+
+        IF (ALL(BOOL .EQV. .TRUE.)) COLOR(I) = I + 1
+
+      ENDDO
+
+      ! PROCESS BELONGING TO THE SAME STENCIL HAVE SAME COLOR
+      COLOR(WORLD_RANK) = MAXVAL(COLOR, DIM = 1)
+
+      ! CREATE COMMUNICATOR SUBGROUP
+      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, NEWCOMM, IERR)
+
+    END SUBROUTINE BUILD_STENCIL
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -1559,35 +1645,31 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SYNC_INTERP(P, M, DELTA, XO, YO, ZO, FIELD)
+    SUBROUTINE INTERPOLATE(DH, DELTA, X, Y, Z, FIELD)
 
-      INTEGER(IPP),                            INTENT(IN)    :: P
-      INTEGER(IPP), DIMENSION(3),              INTENT(IN)    :: M
-      REAL(FPP),    DIMENSION(:,:,:),          INTENT(IN)    :: DELTA
-      REAL(FPP),    DIMENSION(:),              INTENT(IN)    :: XO, YO, ZO
-      REAL(FPP),    DIMENSION(:),              INTENT(INOUT) :: FIELD
-      INTEGER(IPP)                                           :: K
-      INTEGER(IPP)                                           :: COUNT, IERR
+      REAL(FPP),                   INTENT(IN)  :: DH
+      REAL(FPP), DIMENSION(:,:,:), INTENT(IN)  :: DELTA
+      REAL(FPP), DIMENSION(:),     INTENT(IN)  :: X, Y, Z
+      REAL(FPP), DIMENSION(:),     INTENT(OUT) :: FIELD
+      INTEGER(IPP)                             :: P
+      INTEGER(IPP)                             :: COUNT, IERR
+
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! NUMBER OF POINTS TO BE BROADCASTED
-      COUNT = M(1) * M(2) * M(3)
-
-      ! PROCESS "P" SEND ITS RANDOM FIELD (INCL. HALO) TO ALL PROCESSES
-      CALL MPI_BCAST(DELTA, COUNT, REAL_TYPE, P, MPI_COMM_WORLD, IERR)
+      DO P = 0, WORLD_SIZE - 1
 
 
 
+      ENDDO
 
-
-    END SUBROUTINE SYNC_INTERP
+    END SUBROUTINE INTERPOLATE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INTERPOLATE(X, Y, Z, V, XO, YO, ZO, FIELD)
+    SUBROUTINE TRILIN(X, Y, Z, V, XO, YO, ZO, FIELD)
 
       REAL(FPP),    DIMENSION(:),     INTENT(IN)    :: X, Y, Z                              !< COORDINATES INPUT POINTS
       REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)    :: V                                    !< INPUT FIELD
@@ -1606,6 +1688,12 @@ MODULE SCARFLIB_FFT3
       K = 0
 
       DO L = 1, SIZE(XO)
+
+! NEW CODE
+        I = NINT( (X(L) - OFF_AXIS(1)) / DH) + 1
+        J = NINT( (Y(L) - OFF_AXIS(2)) / DH) + 1
+        K = NINT( (Z(L) - OFF_AXIS(3)) / DH) + 1
+! END NEW CODE
 
         I = HUNT(X, XO(L), I)
 
@@ -1648,7 +1736,7 @@ MODULE SCARFLIB_FFT3
       ENDDO
 
 
-    END SUBROUTINE INTERPOLATE
+    END SUBROUTINE TRILIN
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -1684,107 +1772,7 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    FUNCTION HUNT(XX, X, HINT) RESULT(JLO)
-      !
-      ! DESCRIPTION:
-      !   GIVEN VECTOR XX(1:NPTS) AND SCALAR X, RETURNS INDEX JLO SUCH THAT X IS BETWEEN X(JLO) AND
-      !   X(JLO + 1). INPUT XX MUST BE MONOTONIC (DECREASING OR INCREASING). JLO=0 OR JLO=NPTS INDI-
-      !   CATES THAT X IS OUT OF RANGE. IF HINT IS PRESENT, IT IS USED AS INITIAL GUESS FOR JLO
-      !
-      ! AUTHOR:
-      !   PRESS ET AL. (1996), MODIFIED BY W. IMPERATORI
-      !
-      ! VERSION:
-      !   0.1
-      !
 
-      REAL(FPP),                            INTENT(IN) :: X
-      REAL(FPP),    DIMENSION(:),           INTENT(IN) :: XX
-      INTEGER(ISP),               OPTIONAL, INTENT(IN) :: HINT
-      INTEGER(ISP)                                     :: NPTS, INC, JHI, JM, JLO
-      LOGICAL                                          :: ASCND
-
-      !----------------------------------------------------------------------------------------------------------------------------
-
-      NPTS = SIZE(XX)
-
-      ASCND = (XX(NPTS) .GE. XX(1))
-
-      IF (.NOT.PRESENT(HINT)) THEN
-        JLO = 0
-      ELSE
-        JLO = HINT
-      ENDIF
-
-      IF (JLO .LE. 0 .OR. JLO .GT. NPTS) THEN
-
-        JLO = 0
-        JHI = NPTS + 1
-
-      ELSE
-
-        INC = 1
-
-        ! HUNT UP
-        IF (X .GE. XX(JLO) .EQV. ASCND) THEN
-
-          DO
-            JHI = JLO + INC
-
-            IF (JHI .GT. NPTS) THEN
-              JHI = NPTS + 1
-              EXIT
-            ELSE
-              IF (X .LT. XX(JHI) .EQV. ASCND) EXIT
-              JLO = JHI
-              INC = INC + INC
-            ENDIF
-
-          ENDDO
-
-          ! HUNT DOWN
-        ELSE
-
-          JHI = JLO
-
-          DO
-            JLO = JHI - INC
-
-            IF (JLO .LT. 1) THEN
-              JLO = 0
-              EXIT
-            ELSE
-              IF (X .GE. XX(JLO) .EQV. ASCND) EXIT
-              JHI = JLO
-              INC = INC + INC
-            ENDIF
-
-          ENDDO
-
-        ENDIF
-
-      ENDIF
-
-      ! BISECTION
-      DO
-
-        IF (JHI - JLO .LE. 1) THEN
-          IF (X .EQ. XX(NPTS)) JLO = NPTS - 1
-          IF (X .EQ. XX(1)) JLO = 1
-          EXIT
-        ELSE
-          JM = (JHI + JLO) / 2
-
-          IF (X .GE. XX(JM) .EQV. ASCND) THEN
-            JLO = JM
-          ELSE
-            JHI = JM
-          ENDIF
-        ENDIF
-
-      ENDDO
-
-    END FUNCTION HUNT
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
