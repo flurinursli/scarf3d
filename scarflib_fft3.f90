@@ -82,6 +82,8 @@ MODULE SCARFLIB_FFT3
       ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
       ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
+      ! "SEED" AND NUMBER OF POINTS "NPTS" SHOULD BE THE SAME TO GUARANTEE SAME RANDOM FIELD
+
       REAL(FPP),                     DIMENSION(:),     INTENT(IN)    :: X, Y, Z        !< POSITION OF POINTS ALONG X, Y, Z
       REAL(FPP),                                       INTENT(IN)    :: DH             !< GRID-STEP
       CHARACTER(LEN=*),                                INTENT(IN)    :: ACF            !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
@@ -97,18 +99,22 @@ MODULE SCARFLIB_FFT3
       COMPLEX(FPP),     ALLOCATABLE, DIMENSION(:,:,:)                :: SPEC           !< SPECTRUM/RANDOM FIELD
       INTEGER(IPP)                                                   :: IERR, TOPO     !< MPI STUFF
       INTEGER(IPP)                                                   :: I, J, K        !< COUNTERS
+      INTEGER(IPP)                                                   :: N              !< POINTS IN "BUFFER"
       INTEGER(IPP)                                                   :: OFFSET         !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
       INTEGER(IPP),                  DIMENSION(2)                    :: REQUEST
       INTEGER(IPP),                  DIMENSION(3)                    :: M              !< POINTS FOR CALLING PROCESS
       INTEGER(IPP),                  DIMENSION(3)                    :: COORDS         !< PROCESS COORDINATES
       INTEGER(IPP),                  DIMENSION(3)                    :: LS, LE         !< FIRST/LAST INDEX ALONG X, Y, Z
       INTEGER(IPP),                  DIMENSION(MPI_STATUS_SIZE)      :: STATUS
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                    :: NX, NY, NZ     !< POINTS FOR EACH PENCIL
       REAL(FPP)                                                      :: SCALING        !< SCALING FACTOR
       REAL(FPP)                                                      :: TICTOC
       REAL(FPP),                     DIMENSION(2)                    :: ET             !< DUMMY FOR ELAPSED TIME
       REAL(FPP),                     DIMENSION(3)                    :: MIN_EXTENT     !< LOWER MODEL LIMITS (GLOBAL)
       REAL(FPP),                     DIMENSION(3)                    :: MAX_EXTENT     !< UPPER MODEL LIMITS (GLOBAL)
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)                :: DUM1, DUM2     !< DUMMY ARRAYS FOR INTERPOLATION
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:)                  :: BUFFER
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)                :: STRIPE
+
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -117,6 +123,20 @@ MODULE SCARFLIB_FFT3
 
       ! GET AVAILABLE MPI PROCESSES
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
+
+      ! NUMBER OF PROCESSES ALONG EACH DIRECTION
+      ! [THIS SHOULD BE REPLACED BY A BEST-EXEC SOLUTION AS IN "2DFFTDECOMP"]
+      DIMS  = [2, 1, 2]
+
+      ! WE WORK IN 3D
+      NDIMS = 3
+
+      ! ALLOW REORDERING
+      REORDER = .TRUE.
+
+      ! ENABLE GRID PERIODICITY ALONG X- AND Y-DIRECTION: THIS IS USEFUL WHEN SHIFTING DATA BLOCKS (PERIODICITY IS NOT NEEDED ALONG
+      ! Z-DIRECTION)
+      ISPERIODIC = [.TRUE., .TRUE., .FALSE.]
 
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
       MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
@@ -130,13 +150,13 @@ MODULE SCARFLIB_FFT3
       ! OF THE FIRST POINT TO COUNTERACT FFT PERIODICITY
       DO I = 1, 3
 
-        ! SET NUMBER OF POINTS SUCH THAT RANDOM FIELD COVERS WHOLE DOMAIN
+        ! MINIMUM NUMBER OF POINTS SUCH THAT RANDOM FIELD COVERS WHOLE DOMAIN
         NPTS(I) = NINT( (MAX_EXTENT(I) - MIN_EXTENT(I)) / DH) + 1
 
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH) + 1
 
-        ! WE MUST EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
+        ! EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
         NPTS(I) = NPTS(I) + 2 * OFFSET
 
         ! MAKE SURE WE HAVE EVEN NUMBER OF POINTS
@@ -159,19 +179,6 @@ MODULE SCARFLIB_FFT3
 
       ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
       ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE PROCESS
-
-      ! WE WORK IN 3D
-      NDIMS = 3
-
-      ! NUMBER OF PROCESSES ALONG EACH DIRECTION
-      ! THIS SHOULD BE REPLACED BY A BEST-EXEC SOLUTION AS IN "2DFFTDECOMP"
-      DIMS  = [2, 1, 2]
-
-      ! ALLOW REORDERING
-      REORDER = .TRUE.
-
-      ! NO PERIODICITY
-      ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
 
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, TOPO, IERR)
@@ -220,42 +227,95 @@ MODULE SCARFLIB_FFT3
       ! SCALING PARAMETER
       SCALING = 1._FPP / SQRT(REAL(NPTS(1), FPP) * REAL(NPTS(2), FPP) * REAL(NPTS(3), FPP) * DH**3)
 
-      ALLOCATE(DELTA(M(1) + 1, M(2) + 1, M(3) + 1))
-
-      DELTA(:,:,:) = 0._FPP
-
       ! SCALE IFFT
       DO K = 1, M(3)
         DO J = 1, M(2)
           DO I = 1, M(1)
-            DELTA(I + 1, J + 1, K + 1) = REAL(SPEC(I, J, K), FPP) * SCALING
+            SPEC(I, J, K) = SPEC(I, J, K) * SCALING
           ENDDO
         ENDDO
       ENDDO
 
-      DEALLOCATE(SPEC)
+      ! GROUP ASSOCIATED TO COMMUNICATOR "MPI_COMM_WORLD"
+      CALL MPI_COMM_GROUP(MPI_COMM_WORLD, MPI_GROUP_WORLD, IERR)
+
+      ! ORGANIZE PROCESSES IN PENCILS ORIENTED ALONG DIFFERENT AXIS AND RETURN
+      CALL BUILD_PENCIL(0, XPENC, RANK(1), NTASKS(1), NX)
+      CALL BUILD_PENCIL(1, YPENC, RANK(2), NTASKS(2), NY)
+      CALL BUILD_PENCIL(2, ZPENC, RANK(3), NTASKS(3), NZ)
+
+      ! GROUP ASSOCIATED TO COMMUNICATOR "ZPENC"
+      CALL MPI_COMM_GROUP(ZPENC, ZGROUP, IERR)
+
+      ! ALLOCATE ARRAYS USED TO EXCHANGE DATA
+      ALLOCATE(BUFFER(0:M(1), 0:M(2)))
+      ALLOCATE(STRIPE(0:M(1), NPTS(2), 2))
 
       CALL WATCH_START(TICTOC)
 
-      CALL EXCHANGE_HALO(TOPO, DELTA)
+      ! MAKE REAL COPY OF SPECTRUM
+      CALL C2R(1, M, SPEC, BUFFER)
+
+      ! TOTAL NUMBER OF POINTS IN ARRAY "BUFFER"
+      N = SIZE(BUFFER)
+
+      ! FIND GLOBAL RANK OF LOCAL PROCESS (WITHIN "ZPENC") OWING POINT "K"
+      PID = K2ROOT(K, ZGROUP, NTASKS)
+
+      ! SEND "BUFFER" TO ALL OTHER PROCESSES IN COMMUNICATOR "ZPENC"
+      CALL MPI_BCAST(BUFFER, N, REAL_TYPE, PID, ZPENC, IERR)
+
+      ! EXCHANGE HALO DATA ALONG X-DIRECTION
+      CALL EXCHANGE_HALO(XPENC, NX, BUFFER)
+
+      ! DETERMINE NUMBER OF POINTS FOR EACH PROCESS FOR DATA EXCHANGE WITHIN PENCILS IN Y-DIRECTION
+      DO I = 0, NTASKS(2) - 1
+        RECVCOUNTS(I) = (M(1) + 1) * NY(I)
+      ENDDO
+
+      ! SET RELATIVE DISPLACEMENTS
+      CALL SET_DISPLACEMENT(1, RECVCOUNTS, DISPLS)
+
+      ! EXCHANGE DATA WITHIN PENCILS IN Y-DIRECTION
+      CALL MPI_ALLGATHERV(BUFFER, N, REAL_TYPE, STRIPE, RECVCOUNTS, DISPLS, REAL_TYPE, YPENC, IERR)
+
+      ! LOOP OVER Z-LEVELS
+      DO K = 2, NPTS(3)
+
+        ! FIND GLOBAL RANK OF LOCAL PROCESS (WITHIN "ZPENC") OWING POINT "K"
+        PID = K2ROOT(K, RANK, NTASKS)
+
+        ! TAKE PART OF THE TRANSFORMED SPECTRUM
+        CALL C2R(K, M, SPEC, BUFFER)
+
+        ! SEND "BUFFER" TO ALL OTHER PROCESSES IN COMMUNICATOR "ZPENC"
+        CALL MPI_BCAST(BUFFER, N, REAL_TYPE, ROOT, ZPENC, IERR)
+
+        ! EXCHANGE HALO WITH NEIGHBOURS ALONG X DIRECTION
+        CALL EXCHANGE_HALO(XPENC, BUFFER)
+
+        ! SET RELATIVE DISPLACEMENTS
+        CALL SET_DISPLACEMENT(K, RECVCOUNTS, DISPLS)
+
+        ! EXCHANGE DATA WITHIN PENCILS IN Y-DIRECTION
+        CALL MPI_ALLGATHERV(BUFFER, N, REAL_TYPE, STRIPE, RECVCOUNTS, DISPLS, REAL_TYPE, YPENC, IERR)
+
+        DO I = 0, DIMS(1) - 1
+
+          ! SHIFT DATA AND RETURN OWNER PROCESS
+          CALL SHIFT_DATA(XPENC, STRIPE, PID)
+
+          CALL INTERPOLATE(K, BUFFER, X, Y, Z, FIELD, PID)
+
+        ENDDO
+
+      ENDDO
 
       CALL WATCH_STOP(TICTOC)
 
       INFO(6) = TICTOC
 
-
-      CALL WATCH_START(TICTOC)
-
-      CALL INTERPOLATE(DH, DELTA, X, Y, Z, FIELD)
-
-      CALL WATCH_STOP(TICTOC)
-
-      INFO(7) = TICTOC
-
-
-
-
-
+      DEALLOCATE(BUFFER)
 
       !CALL IO_WRITE_ONE(REAL(SPEC, FPP), 'random_struct.bin')
       !CALL IO_WRITE_SLICE(1, 50, REAL(SPEC, FPP), 'random_struct_slice.bin')
@@ -265,6 +325,102 @@ MODULE SCARFLIB_FFT3
       CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
     END SUBROUTINE SCARF3D_FFT
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    INTEGER(IPP) FUNCTION K2ROOT(K, GROUP, NTASKS)
+
+      INTEGER(IPP),                       INTENT(IN) :: K                                     !< Z-INDEX
+      INTEGER(IPP),                       INTENT(IN) :: GROUP                                 !< GROUP FOR Z-PENCIL
+      INTEGER(IPP),                       INTENT(IN) :: NTASKS                                !< TOTAL NUMBER OF PROCESSES IN GROUP
+      INTEGER(IPP)                                   :: I                                     !< COUNTER
+      INTEGER(IPP), DIMENSION(0:NTASKS-1)            :: RANKS1, RANKS2
+      LOGICAL                                        :: BOOL
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! RANKS IN LOCAL (PENCIL) GROUP
+      DO I = 0, NTASKS - 1
+        RANKS1(I) = I
+      ENDDO
+
+      ! MAP RANKS IN "GROUP" INTO RANKS IN  "MPI_GROUP_WORLD"
+      CALL MPI_GROUP_TRANSLATE_RANKS(GROUP, NTASKS, RANKS1, MPI_GROUP_WORLD, RANKS2, IERR)
+
+      DO I = 0, NTASKS - 1
+
+        BOOL = (K .GE. GS(3, RANKS2(I))) .AND. (K .LE. GE(3, RANKS2(I)))
+
+        IF (BOOL .EQV. .TRUE.) THEN
+          K2ROOT = I
+          EXIT
+        ENDIF
+
+      ENDDO
+
+    END FUNCTION K2ROOT
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE SET_DISPLACEMENT(K, RECVCOUNTS, DISPLS)
+
+      ! SET DISPLACEMENT VALUES TO BE USED IN MPI_ALLGATHERV TO DETERMINE WHERE "BUFFER" IS PLACED INSIDE "STRIPE". PATTERN IS AS
+      ! AS FOLLOWS: [1 2], [3, 2], [3, 4], [5, 4], ETC.
+
+      INTEGER(IPP),               INTENT(IN)    :: K
+      INTEGER(IPP), DIMENSION(:), INTENT(IN)    :: RECVCOUNTS
+      INTEGER(IPP), DIMENSION(:), INTENT(INOUT) :: DISPLS
+      INTEGER(IPP)                              :: I, N                       !< COUNTERS
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      N = SIZE(DISPLS)
+
+      IF (MOD(K, 2) .EQ. 0) THEN
+        ! FOR EVEN "K", "BUFFER" IS PLACED AT BOTTOM OF "STRIPE"
+        DO I = 1, N
+          DISPLS(I) = DISPLS(I) + NPTS(2)
+        ENDDO
+      ELSE
+        ! FOR ODD "K", "BUFFER" IS PLACED AT TOP OF "STRIPE"
+        DISPLS(1) = 0
+        DO I = 2, N
+          DISPLS(I) = DISPLS(I - 1) + RECVCOUNT(I - 1)
+        ENDDO
+      ENDIF
+
+    END SUBROUTINE SET_DISPLACEMENT
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE C2R(K, N, SPECTRUM, BUFFER)
+
+      ! MAKE A PARTIAL COPY OF THE REAL PART OF "SPECTRUM"
+
+      INTEGER(IPP),                                INTENT(IN)  :: K
+      INTEGER(IPP), DIMENSION(3),                  INTENT(IN)  :: N
+      COMPLEX(FPP), DIMENSION(:,:,:),              INTENT(IN)  :: SPECTRUM
+      REAL(FPP),    DIMENSION(0:N(1),0:N(2),N(3)), INTENT(OUT) :: BUFFER
+      INTEGER(IPP)                                             :: I, J, L, C                 !< INDICES
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      DO L = 1, N(3)
+        C = L + K - 1
+        DO J = 1, N(2)
+          DO I = 1, N(1)
+            BUFFER(I, J, L) = REAL(SPECTRUM(I, J, C), FPP)
+          ENDDO
+        ENDDO
+      ENDDO
+
+    END SUBROUTINE C2R
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -1447,91 +1603,44 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXCHANGE_HALO(TOPO, DELTA)
+    SUBROUTINE EXCHANGE_HALO(COMM, RANK, NX, BUFFER)
 
-      INTEGER(IPP),                             INTENT(IN)    :: TOPO                            !< COMMUNICATOR WITH CARTESIAN TOPOLOGY
-      REAL(FPP),    DIMENSION(:,:,:),           INTENT(INOUT) :: DELTA                           !< RANDOM FIELD
+      INTEGER(IPP),                             INTENT(IN)    :: COMM                            !< LOCAL COMMUNICATOR
+      INTEGER(IPP),                             INTENT(IN)    :: RANK                            !< RANK OF CURRENT PROCESS WITHIN "XPENC"
+      INTEGER(IPP), DIMENSION(:),               INTENT(IN)    :: NX                              !< POINTS ALONG X-DIRECTION FOR EACH PROCESS
+      REAL(FPP),    DIMENSION(:,:,:),           INTENT(INOUT) :: BUFFER                          !< RANDOM FIELD
       INTEGER(IPP)                                            :: I
+      INTEGER(IPP)                                            :: NY                              !< POINTS ALONG Y-DIRECTION
       INTEGER(IPP)                                            :: IERR, NEG, POS
       INTEGER(IPP)                                            :: FROM_NEG, TO_POS
-      INTEGER(IPP), DIMENSION(3)                              :: SIZES, SUBSIZES, STARTS
-      INTEGER(IPP), DIMENSION(3,0:WORLD_SIZE-1)               :: N
+      INTEGER(IPP), DIMENSION(2)                              :: SIZES, SUBSIZES, STARTS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! NUMBER OF POINTS FOR EACH PROCESS
-      DO I = 0, WORLD_SIZE - 1
-        N(1, I) = GE(1, I) - GS(1, I) + 1
-        N(2, I) = GE(2, I) - GS(2, I) + 1
-        N(3, I) = GE(3, I) - GS(3, I) + 1
-      ENDDO
+      ! WE CAN USE GLOBAL ARRAYS TO DETERMINE POINTS ALONG Y-DIRECTION AS THESE ARE THE SAME FOR ALL PROCESSES IN LOCAL COMMUNICATOR
+      NY = GE(2, WORLD_RANK) - GS(2, WORLD_RANK) + 1
 
-      ! LOOP OVER DIRECTIONS
-      DO I = 0, 2
+      ! DETERMINE NEIGHBORS FOR A POSITIVE UNITATY SHIFT IN X-DIRECTION
+      CALL MPI_CART_SHIFT(COMM, 0, 1, NEG, POS, IERR)
 
-        ! DETERMINE NEIGHBOURS IN CURRENT DIRECTION
-        CALL MPI_CART_SHIFT(TOPO, I, 1, NEG, POS, IERR)
+      ! "BUFFER" IS EXPECTED TO HAVE ONE EXTRA COLUMN FOR HALO
+      SIZES = [NX(RANK) + 1, NY]
 
-        SIZES = N(:, WORLD_RANK) + 1
+      SUBSIZES = [1, NY]
 
-        ! EXCHANGE ALONG X
-        IF (I .EQ. 0) THEN
+      STARTS = [0, 0]
+      CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
+      CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
 
-          SUBSIZES = [1, N(2, WORLD_RANK), N(3, WORLD_RANK)]
+      STARTS = [NX(RANK), 0]
+      CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
+      CALL MPI_TYPE_COMMIT(TO_POS, IERR)
 
-          !STARTS = [1, 1, 1]
-          !CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_NEG, IERR)
-          !CALL MPI_TYPE_COMMIT(TO_NEG)
+      ! EXCHANGE HALO DATA WITH NEIGHBORS
+      CALL MPI_SENDRECV(BUFFER, 1, TO_POS, POS, 0, BUFFER, 1, FROM_NEG, NEG, 0, COMM, MPI_STATUS_IGNORE, IERR)
 
-          STARTS = [0, 1, 1]
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
-          CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
-
-          STARTS = [N(1, WORLD_RANK), 1, 1]
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
-          CALL MPI_TYPE_COMMIT(TO_POS, IERR)
-
-          !STARTS = [N(1, WORLD_RANK) + 1, 1, 1]
-          !CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_POS, IERR)
-          !CALL MPI_TYPE_COMMIT(FROM_POS)
-
-        ! EXCHANGE ALONG Y
-        ELSEIF (I .EQ. 1) THEN
-
-          SUBSIZES = [N(1, WORLD_RANK) + 1, 1, N(3, WORLD_RANK)]
-
-          STARTS = [0, 0, 1]
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
-          CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
-
-          STARTS = [0, N(2, WORLD_RANK), 1]
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
-          CALL MPI_TYPE_COMMIT(TO_POS, IERR)
-
-        ! EXCHANGE ALONG Z
-        ELSEIF (I .EQ. 2) THEN
-
-          SUBSIZES = [N(1, WORLD_RANK) + 1, N(2, WORLD_RANK) + 1, 1]
-
-          STARTS = [0, 0, 0]
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
-          CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
-
-          STARTS = [0, 0, N(3, WORLD_RANK)]
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
-          CALL MPI_TYPE_COMMIT(TO_POS, IERR)
-
-        ENDIF
-
-        ! EXCHANGE WITH PROCESS IN THE NEGATIVE DIRECTION
-        CALL MPI_SENDRECV_REPLACE(DELTA, 1, FROM_NEG, MPI_PROC_NULL, 0, NEG, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE, IERR)
-        ! EXCHANGE WITH PROCESS IN THE POSITIVE DIRECTION
-        CALL MPI_SENDRECV_REPLACE(DELTA, 1, TO_POS, POS, 0, MPI_PROC_NULL, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE, IERR)
-
-        CALL MPI_TYPE_FREE(FROM_NEG, IERR)
-        CALL MPI_TYPE_FREE(TO_POS, IERR)
-
-      ENDDO
+      CALL MPI_TYPE_FREE(FROM_NEG, IERR)
+      CALL MPI_TYPE_FREE(TO_POS, IERR)
 
     END SUBROUTINE EXCHANGE_HALO
 
@@ -1539,13 +1648,15 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE BUILD_STENCIL(DIR, NEWCOMM)
+    SUBROUTINE BUILD_PENCIL(DIR, NEWCOMM, RANK, NTASKS, N)
 
-      INTEGER(IPP),                           INTENT(IN)  :: DIR                    !< STENCIL DIRECTION (1=X, 2=Y, 3=Z)
-      INTEGER(IPP),                           INTENT(OUT) :: NEWCOMM
-      INTEGER(IPP)                                        :: I, IERR
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1)             :: COLOR
-      LOGICAL,      DIMENSION(2)                          :: BOOL
+      INTEGER(IPP),                                        INTENT(IN)  :: DIR                    !< STENCIL DIRECTION (0=X, 1=Y, 2=Z)
+      INTEGER(IPP),                                        INTENT(OUT) :: NEWCOMM
+      INTEGER(IPP),                                        INTENT(OUT) :: RANK, NTASKS
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:),             INTENT(OUT) :: N                      !< NUMBER OF POINTS PER PROCESS IN PENCIL DIRECTION
+      INTEGER(IPP)                                                     :: I, IERR
+      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COLOR
+      LOGICAL,                   DIMENSION(2)                          :: BOOL
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -1555,15 +1666,15 @@ MODULE SCARFLIB_FFT3
         COLOR(I) = 0
 
         ! STENCIL ALONG X-AXIS
-        IF (DIR .EQ. 1) THEN
+        IF (DIR .EQ. 0) THEN
           BOOL(1) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
           BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
         ! STENCIL ALONG Y-AXIS
-        ELSEIF (DIR .EQ. 2) THEN
+        ELSEIF (DIR .EQ. 1) THEN
           BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
           BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
         ! STENCIL ALONG Z-AXIS
-        ELSEIF (DIR .EQ. 3) THEN
+        ELSEIF (DIR .EQ. 2) THEN
           BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
           BOOL(2) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
         ENDIF
@@ -1578,7 +1689,16 @@ MODULE SCARFLIB_FFT3
       ! CREATE COMMUNICATOR SUBGROUP
       CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, NEWCOMM, IERR)
 
-    END SUBROUTINE BUILD_STENCIL
+      ! PROCESS ID AND COMMUNICATOR SIZE
+      CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
+      CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
+
+      ALLOCATE(N(0:NTASKS - 1))
+
+      ! MAKE ALL PROCESSES IN THE COMMUNICATOR AWARE OF POINTS ALONG DIRECTION "DIR" FOR EACH PROCESS
+      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, N, 1, MPI_INTEGER, NEWCOMM, IERR)
+
+    END SUBROUTINE BUILD_PENCIL
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
