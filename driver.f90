@@ -7,29 +7,27 @@ PROGRAM DRIVER
   ! the product of "dims" below should be equal to the number of processes
 
 
-  USE :: MPI
+  !USE :: MPI
 
-  USE, NON_INTRINSIC :: SCARFLIB
-  !USE, NON_INTRINSIC :: SCARFLIB_FFT
+  USE, NON_INTRINSIC :: SCARFLIB_COMMON
   USE, NON_INTRINSIC :: SCARFLIB_SPECTRAL
-  USE, NON_INTRINSIC :: SCARFLIB_FFT2
+  USE, NON_INTRINSIC :: SCARFLIB_FFT3
 
   IMPLICIT NONE
 
-  CHARACTER(:), ALLOCATABLE                   :: ACF
-  INTEGER(IPP)                                :: I, J, K
-  INTEGER(IPP)                                :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IPP)                                :: SEED, MUTE, TAPERING
-  INTEGER(IPP),              DIMENSION(3)     :: NPTS, FS, FE, COORDS, DIMS
-  INTEGER(IPP),              DIMENSION(3,2)   :: POI
-  LOGICAL                                     :: REORDER
-  LOGICAL,                   DIMENSION(3)     :: ISPERIODIC
-  REAL(FPP)                                           :: DH, SIGMA, HURST, TICTOC
-  REAL(FPP),                 DIMENSION(3)             :: CL
-  REAL(FPP),                 DIMENSION(3)             :: TOC
-  REAL(FPP),                 DIMENSION(:,:,:),   POINTER :: XP, YP, ZP, VP
-  REAL(FPP),    ALLOCATABLE, DIMENSION(:), TARGET  :: X, Y, Z
-  REAL(FPP),    ALLOCATABLE, DIMENSION(:), TARGET  :: V
+  CHARACTER(:), ALLOCATABLE                            :: ACF
+  INTEGER(IPP)                                         :: I, J, K
+  INTEGER(IPP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
+  INTEGER(IPP)                                         :: SEED, MUTE, TAPERING
+  INTEGER(IPP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
+  INTEGER(IPP),              DIMENSION(3,2)            :: POI
+  LOGICAL                                              :: REORDER
+  LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
+  REAL(FPP)                                            :: DH, SIGMA, HURST, TICTOC
+  REAL(FPP),                 DIMENSION(3)              :: CL
+  REAL(FPP),                 DIMENSION(10)             :: INFO
+  REAL(FPP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
+  REAL(FPP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
 
   !--------------------------------------------------------------------------------------------------------------------------------
 
@@ -48,7 +46,7 @@ PROGRAM DRIVER
   ! INPUT SECTION
 
   ! NUMBER OF POINTS FOR WHOLE MODEL
-  NPTS = [200, 200, 120]
+  N = [200, 200, 120]
 
   ! GRID STEP
   DH = 100._FPP
@@ -81,9 +79,14 @@ PROGRAM DRIVER
   ! END INPUT SECTION
   !-----------------------------------------------------------------------
 
-  ! HERE BELOW WE FIRST CREATE A SAMPLE CARTESIAN TOPOLOGY THAT COULD REPRESENT HOW A 3D DOMAIN IS DECOMPOSED, E.G., IN FINITE-DIFFERENCE
-  ! CODES. WE THEN COMPUTE THE RANDOM PERTURBATIONS AND ADD THEM TO AN HYPOTETHICAL VELOCITY FIELD. THE PERTURBED FIELD IS THEN WRITTEN
-  ! TO DISK.
+  ! STEPS BELOW:
+  !
+  ! A) CREATE SAMPLE STRUCTURED MESH, DESCRIBED BY CARTESIAN TOPOLOGY, REPRESENTING A PLAUSIBLE 3D DOMAIN AS IN, E.G., FINITE-DIFFERENCE
+  ! B) COMPUTE THE RANDOM FIELD
+  ! C) WRITE THE RANDOM FIELD TO DISK
+
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! STEP A)
 
   ! WE WORK IN 3D
   NDIMS = 3
@@ -103,82 +106,108 @@ PROGRAM DRIVER
   CALL MPI_CART_COORDS(TOPO, RANK, NDIMS, COORDS, IERR)
 
   ! SPLIT EACH AXIS AND ASSIGN POINTS TO CURRENT PROCESS
-  CALL MPI_SPLIT_TASK(NPTS, DIMS, COORDS, FS, FE)
+  CALL MPI_SPLIT_TASK(N, DIMS, COORDS, FS, FE)
 
+  ! PREPARE ARRAY FOR RANDOM FIELD
+  ALLOCATE(V1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
 
-  ! PREPARE ARRAY WITH SAMPLE VELOCITY FIELD
-  ALLOCATE(V((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ! MAP 1D ARRAY INTO 3D ONE
+  V3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => V1
 
-  VP(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => V
+  ! PREPARE ARRAY WITH MODEL POINTS POSITION
+  ALLOCATE(X1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ALLOCATE(Y1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ALLOCATE(Z1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
 
-  VP = 1._FPP
-
-  ! PREPARE ARRAY WITH POINTS POSITION
-  ALLOCATE(X((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(Y((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(Z((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-
-  XP(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => X
-  YP(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Y
-  ZP(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Z
+  X3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => X1
+  Y3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Y1
+  Z3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Z1
 
   DO K = FS(3), FE(3)
     DO J = FS(2), FE(2)
       DO I = FS(1), FE(1)
-        XP(I, J, K) = (I - 0.5) * DH
-        YP(I, J, K) = (J - 0.5) * DH
-        ZP(I, J, K) = (K - 0.5) * DH
+        X3(I, J, K) = (I - 0.5) * DH
+        Y3(I, J, K) = (J - 0.5) * DH
+        Z3(I, J, K) = (K - 0.5) * DH
       ENDDO
     ENDDO
   ENDDO
 
   ! COMPUTE ZERO-MEAN RANDOM FIELD
   !CALL SCARF3D_FFT(MPI_COMM_WORLD, [NX, NY, NZ], 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.1_fpp, 1235, POI, 4, 26)
-  !CALL SCARF3D_FFT(MPI_COMM_WORLD, NPTS, 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.5_fpp, 1235, POI, 0, 0)
+  !CALL SCARF3D_FFT(MPI_COMM_WORLD, N, 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.5_fpp, 1235, POI, 0, 0)
 
-  !=========== GPU ============
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! STEP B + C: GPU
 
   IF (RANK .EQ. 0) PRINT*, 'GPU'
 
-  CALL SCARF3D_SPEC(FS, FE, X, Y, Z, ACF, CL, SIGMA, HURST, SEED, POI, 0, 0, V, TICTOC)
+  !CALL SCARF3D_SPEC(FS, FE, X, Y, Z, ACF, CL, SIGMA, HURST, SEED, POI, 0, 0, V, TICTOC)
+  !CALL SCARF3D_SPEC(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, V1, INFO(1))
 
-  ! REMOVE AVERAGE VALUE FROM PERTURBED FIELD
-  V = V - 1._FPP
+  IF (RANK .EQ. 0) PRINT*, MINVAL(V1), MAXVAL(V1)
 
-  IF (RANK .EQ. 0) PRINT*, MINVAL(V), MAXVAL(V)
+  ! ARRAYS WHERE FIRST AND LAST INDICES FOR EACH PROCESS ARE STORED. THESE WILL BE USED TO WRITE FIELD SLICES TO DISK.
+  ALLOCATE(GS(3, 0:NTASKS-1), GE(3, 0:NTASKS-1))
+
+  ! STORE GLOBAL INDICES
+  GS(:, RANK) = FS
+  GE(:, RANK) = FE
+
+  ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
+  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
   ! WRITE A MODEL SLICE TO DISK
-  CALL IO_WRITE_SLICE(2, 1, VP, 'gpu_slice.bin')
+  !CALL IO_WRITE_SLICE(2, 1, V3, 'gpu_slice.bin')
 
   ! SOME TIMING INFO
-  IF (RANK .EQ. 0) PRINT*, 'TIMING GPU: ', REAL(TICTOC, KIND=REAL32)
-
-  NULLIFY(XP, YP, ZP)
-  DEALLOCATE(X, Y, Z)
+  IF (RANK .EQ. 0) PRINT*, 'TIMING GPU: ', REAL(INFO(1), KIND=REAL32)
 
   DEALLOCATE(GS, GE)
 
-  V = 1._FPP
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! STEP B + C: FFT
 
-  ! =========== FFT ==============
+  V1(:) = 0._FPP
 
   IF (RANK .EQ. 0) PRINT*, 'FFT'
 
-  CALL SCARF3D_STRUCTURED(FS, FE, DH, ACF, CL, SIGMA, HURST, SEED`, POI, 0, 0, VP, TOC)
+  !CALL SCARF3D_STRUCTURED(FS, FE, DH, ACF, CL, SIGMA, HURST, SEED`, POI, 0, 0, VP, TOC)
+  CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, V1, INFO)
 
-  ! REMOVE AVERAGE VALUE FROM PERTURBED FIELD
-  V = V - 1._FPP
+  IF (RANK .EQ. 0) PRINT*, MINVAL(V1), MAXVAL(V1)
 
-  IF (RANK .EQ. 0) PRINT*, MINVAL(V), MAXVAL(V)
+  ! ARRAYS WHERE FIRST AND LAST INDICES FOR EACH PROCESS ARE STORED. THESE WILL BE USED TO WRITE FIELD SLICES TO DISK.
+  ALLOCATE(GS(3, 0:NTASKS-1), GE(3, 0:NTASKS-1))
+
+  ! STORE GLOBAL INDICES
+  GS(:, RANK) = FS
+  GE(:, RANK) = FE
+
+  ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
+  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
   ! WRITE A MODEL SLICE TO DISK
-  CALL IO_WRITE_SLICE(2, 1, VP, 'fft_slice.bin')
+  !CALL IO_WRITE_SLICE(2, 1, V3, 'fft_slice.bin')
+
+  DEALLOCATE(GS, GE)
 
   ! SOME TIMING INFO
-  IF (RANK .EQ. 0) PRINT*, 'TIMING: ', REAL(TOC, KIND=REAL32)
+  IF (RANK .EQ. 0) THEN
+    PRINT*, 'TIMING SPECTRUM: ',   REAL(INFO(3), KIND=REAL32)
+    PRINT*, 'TIMING SYMMETRY: ',   REAL(INFO(4), KIND=REAL32)
+    PRINT*, 'TIMING IFFT: ',       REAL(INFO(5), KIND=REAL32)
+    PRINT*, 'TIMING BCAST: ',      REAL(INFO(6), KIND=REAL32)
+    PRINT*, 'TIMING HALO: ',       REAL(INFO(7), KIND=REAL32)
+    PRINT*, 'TIMING ALLGATHERV: ', REAL(INFO(8), KIND=REAL32)
+    PRINT*, 'TIMING SHIFT: ',      REAL(INFO(9), KIND=REAL32)
+    PRINT*, 'TIMING INTERP: ',     REAL(INFO(10), KIND=REAL32)
+  ENDIF
 
-  NULLIFY(VP)
-  DEALLOCATE(V)
+  NULLIFY(V3, X3, Y3, Z3)
+  DEALLOCATE(V1, X1, Y1, Z1)
 
   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
@@ -190,13 +219,13 @@ END PROGRAM DRIVER
 !===============================================================================================================================
 ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-SUBROUTINE MPI_SPLIT_TASK(NPTS, NTASKS, RANK, FS, FE)
+SUBROUTINE MPI_SPLIT_TASK(N, NTASKS, RANK, FS, FE)
 
-  USE, NON_INTRINSIC :: SCARFLIB
+  USE, NON_INTRINSIC :: SCARFLIB_COMMON
 
   IMPLICIT NONE
 
-  INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: NPTS                          !< NUMBER OF POINTS TO BE SPLIT
+  INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: N                          !< NUMBER OF POINTS TO BE SPLIT
   INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
   INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: RANK                       !< RANK OF CURRENT PREOCESS
   INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: FS, FE                     !< 1ST/LAST INDICES
@@ -205,8 +234,8 @@ SUBROUTINE MPI_SPLIT_TASK(NPTS, NTASKS, RANK, FS, FE)
   !------------------------------------------------------------------------------------------------------------------------------
 
   DO I = 1, 3
-    FS(I) = 1 + INT( REAL(NPTS(I), FPP) / REAL(NTASKS(I), FPP) * REAL(RANK(I), FPP) )
-    FE(I) = INT( REAL(NPTS(I), FPP) / REAL(NTASKS(I), FPP) * REAL(RANK(I) + 1, FPP) )
+    FS(I) = 1 + INT( REAL(N(I), FPP) / REAL(NTASKS(I), FPP) * REAL(RANK(I), FPP) )
+    FE(I) = INT( REAL(N(I), FPP) / REAL(NTASKS(I), FPP) * REAL(RANK(I) + 1, FPP) )
   ENDDO
 
 END SUBROUTINE MPI_SPLIT_TASK

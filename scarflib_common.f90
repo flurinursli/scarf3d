@@ -1,4 +1,4 @@
-MODULE SCARFLIB
+MODULE SCARFLIB_COMMON
 
   USE, INTRINSIC     :: ISO_FORTRAN_ENV
   USE, INTRINSIC     :: ISO_C_BINDING
@@ -12,34 +12,36 @@ MODULE SCARFLIB
 
   !PUBLIC :: SCARF3D_FFT, SCARF3D_SPEC
 
+  PUBLIC
+
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-  ! SET PRECISION FOR FLOATING POINT NUMBERS
-
-!#ifdef DOUBLE_PREC
- INTEGER, PARAMETER :: FPP          = REAL64
- INTEGER, PARAMETER :: C_FPP        = C_DOUBLE
- INTEGER, PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
- INTEGER, PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
- INTEGER, PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
-!#else
-  ! INTEGER, PARAMETER :: FPP          = REAL32
-  ! INTEGER, PARAMETER :: C_FPP        = C_FLOAT
-  ! INTEGER, PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
-  ! INTEGER, PARAMETER :: REAL_TYPE    = MPI_REAL
-  ! INTEGER, PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
-!#endif
+  ! SET PRECISION
 
   ! INTEGERS HAVE ALWAYS SAME "PRECISION"
   INTEGER, PARAMETER :: IPP = INT32
+
+  !#ifdef DOUBLE_PREC
+   INTEGER(IPP), PARAMETER :: FPP          = REAL64
+   INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
+   INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
+   INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
+   INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
+  !#else
+    ! INTEGER(IPP), PARAMETER :: FPP          = REAL32
+    ! INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
+    ! INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
+    ! INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
+    ! INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
+  !#endif
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
   ! INTERFACES
   ! INTERFACE
-  !   MODULE SUBROUTINE SCARF3D_FFT(COMM, N, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
+  !   MODULE SUBROUTINE SCARF3D_FFT(COMM, NPTS, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
   !     INTEGER(IPP),                      INTENT(IN) :: COMM               !< MPI COMMUNICATOR
-  !     INTEGER(IPP),     DIMENSION(3),    INTENT(IN) :: N                  !< MODEL SIZE: NUMBER OF POINTS ALONG X, Y, Z
+  !     INTEGER(IPP),     DIMENSION(3),    INTENT(IN) :: NPTS                  !< MODEL SIZE: NUMBER OF POINTS ALONG X, Y, Z
   !     REAL(FPP),                         INTENT(IN) :: DH                 !< GRID-STEP
   !     CHARACTER(LEN=*),                  INTENT(IN) :: ACF                !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
   !     REAL(FPP),        DIMENSION(3),    INTENT(IN) :: CL                 !< CORRELATION LENGTH
@@ -51,9 +53,9 @@ MODULE SCARFLIB
   !     INTEGER(IPP),                      INTENT(IN) :: TAPER              !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
   !   END SUBROUTINE SCARF3D_FFT
   !
-  !   MODULE SUBROUTINE SCARF3D_SPEC(COMM, N, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
+  !   MODULE SUBROUTINE SCARF3D_SPEC(COMM, NPTS, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
   !     INTEGER(IPP),                      INTENT(IN) :: COMM               !< MPI COMMUNICATOR
-  !     INTEGER(IPP),     DIMENSION(3),    INTENT(IN) :: N                  !< MODEL SIZE: NUMBER OF POINTS ALONG X, Y, Z
+  !     INTEGER(IPP),     DIMENSION(3),    INTENT(IN) :: NPTS                  !< MODEL SIZE: NUMBER OF POINTS ALONG X, Y, Z
   !     REAL(FPP),                         INTENT(IN) :: DH                 !< GRID-STEP
   !     CHARACTER(LEN=*),                  INTENT(IN) :: ACF                !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
   !     REAL(FPP),        DIMENSION(3),    INTENT(IN) :: CL                 !< CORRELATION LENGTH
@@ -69,7 +71,7 @@ MODULE SCARFLIB
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
   ! TOTAL NUMBER OF POINTS ALONG EACH AXIS (WHOLE MODEL)
-  INTEGER(IPP),                DIMENSION(3)             :: N
+  INTEGER(IPP),                DIMENSION(3)             :: NPTS
 
   ! MPI STUFF
   INTEGER(IPP)                                          :: WORLD_RANK, WORLD_SIZE
@@ -88,16 +90,21 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WATCH_START(TICTOC)
+    SUBROUTINE WATCH_START(TICTOC, COMM)
 
       ! START THE MPI-STOPWATCH
 
-      REAL(FPP),   INTENT(OUT) :: TICTOC                            !< INITIAL TIME
-      INTEGER(IPP)             :: IERR                              !< MPI STUFF
+      REAL(FPP),              INTENT(OUT) :: TICTOC                            !< INITIAL TIME
+      INTEGER(IPP), OPTIONAL, INTENT(IN)  :: COMM
+      INTEGER(IPP)                        :: IERR                              !< MPI STUFF
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      IF (.NOT.PRESENT(COMM)) THEN
+        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      ELSE
+        CALL MPI_BARRIER(COMM, IERR)
+      ENDIF
 
       TICTOC = MPI_WTIME()
 
@@ -107,16 +114,21 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WATCH_STOP(TICTOC)
+    SUBROUTINE WATCH_STOP(TICTOC, COMM)
 
       ! STOP THE MPI-STOPWATCH AND RETURN ELAPSED TIME
 
-      REAL(FPP),   INTENT(INOUT) :: TICTOC                          !< ELAPSED TIME
-      INTEGER(IPP)               :: IERR                            !< MPI STUFF
+      REAL(FPP),              INTENT(INOUT) :: TICTOC                          !< ELAPSED TIME
+      INTEGER(IPP), OPTIONAL, INTENT(IN)    :: COMM
+      INTEGER(IPP)                          :: IERR                            !< MPI STUFF
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      IF (.NOT.PRESENT(COMM)) THEN
+        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      ELSE
+        CALL MPI_BARRIER(COMM, IERR)
+      ENDIF
 
       TICTOC = MPI_WTIME() - TICTOC
 
@@ -172,7 +184,7 @@ MODULE SCARFLIB
       ENDDO
 
       ! CREATE SUBARRAY
-      CALL MPI_TYPE_CREATE_SUBARRAY(3, N, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
+      CALL MPI_TYPE_CREATE_SUBARRAY(3, NPTS, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
 
       CALL MPI_TYPE_COMMIT(NEWTYPE, IERR)
 
@@ -232,7 +244,7 @@ MODULE SCARFLIB
         SUBSIZES = [SIZE(V, 2), SIZE(V, 3)]
         STARTS   = [GS(2, WORLD_RANK) - 1, GS(3, WORLD_RANK) - 1]
 
-        DIMS = [N(2), N(3)]
+        DIMS = [NPTS(2), NPTS(3)]
 
         C = PLANE - GS(1, WORLD_RANK) + 1
 
@@ -244,7 +256,7 @@ MODULE SCARFLIB
         SUBSIZES = [SIZE(V, 1), SIZE(V, 3)]
         STARTS   = [GS(1, WORLD_RANK) - 1, GS(3, WORLD_RANK) - 1]
 
-        DIMS = [N(1), N(3)]
+        DIMS = [NPTS(1), NPTS(3)]
 
         C = PLANE - GS(2, WORLD_RANK) + 1
 
@@ -256,7 +268,7 @@ MODULE SCARFLIB
         SUBSIZES = [SIZE(V, 1), SIZE(V, 2)]
         STARTS   = [GS(1, WORLD_RANK) - 1, GS(2, WORLD_RANK) - 1]
 
-        DIMS = [N(1), N(2)]
+        DIMS = [NPTS(1), NPTS(2)]
 
         C = PLANE - GS(3, WORLD_RANK) + 1
 
@@ -350,4 +362,4 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-END MODULE SCARFLIB
+END MODULE SCARFLIB_COMMON
