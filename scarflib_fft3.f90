@@ -24,6 +24,12 @@ MODULE SCARFLIB_FFT3
 
   INTEGER(IPP)                                                  :: CARTOPO
 
+  ! PROCESS COORDINATES
+  INTEGER(IPP),                DIMENSION(3)                     :: COORDS
+
+  ! NUMBER OF PROCESSES ALONG EACH DIRECTION
+  INTEGER(IPP),                DIMENSION(3)                     :: DIMS
+
   ! ABSOLUTE POSITION OF MODEL'S FIRST POINT
   REAL(FPP),                   DIMENSION(3)                     :: OFF_AXIS
 
@@ -68,19 +74,19 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP)                                                 :: I, J, K              !< COUNTERS
       INTEGER(IPP)                                                 :: N                    !< POINTS IN "BUFFER"
       INTEGER(IPP)                                                 :: PID
+      INTEGER(IPP)                                                 :: DIR, STEP
+      INTEGER(IPP)                                                 :: RANK, NTASKS
       INTEGER(IPP)                                                 :: NDIMS
       INTEGER(IPP)                                                 :: XPENC, YPENC, ZPENC  !<
       INTEGER(IPP)                                                 :: OFFSET               !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
       INTEGER(IPP),                  DIMENSION(2)                  :: REQUEST
       INTEGER(IPP),                  DIMENSION(3)                  :: M                    !< POINTS FOR CALLING PROCESS
-      INTEGER(IPP),                  DIMENSION(3)                  :: COORDS               !< PROCESS COORDINATES
       INTEGER(IPP),                  DIMENSION(3)                  :: LS, LE               !< FIRST/LAST INDEX ALONG X, Y, Z
-      INTEGER(IPP),                  DIMENSION(3)                  :: RANK, NTASKS
-      INTEGER(IPP),                  DIMENSION(3)                  :: DIMS
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NX, NY, NZ           !< POINTS FOR EACH PENCIL
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: X_RANKING
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: Z_RANKING
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: RANKING
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: RECVCOUNTS, DISPLS   !< MPI STUFF
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:,:)                :: RANKMAP
       LOGICAL                                                      :: REORDER
       LOGICAL,                       DIMENSION(3)                  :: ISPERIODIC
       REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
@@ -88,8 +94,8 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
       REAL(FPP),                     DIMENSION(3)                  :: MIN_EXTENT           !< LOWER MODEL LIMITS (GLOBAL)
       REAL(FPP),                     DIMENSION(3)                  :: MAX_EXTENT           !< UPPER MODEL LIMITS (GLOBAL)
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:)                :: BUFFER
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: STRIPE
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:)                :: SLICE
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: BUFFER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -109,8 +115,8 @@ MODULE SCARFLIB_FFT3
       ! ALLOW REORDERING
       REORDER = .TRUE.
 
-      ! ENABLE GRID PERIODICITY ALONG X-DIRECTION: THIS IS USEFUL WHEN SHIFTING DATA STRIPES
-      ISPERIODIC = [.TRUE., .FALSE., .FALSE.]
+      ! ENABLE GRID PERIODICITY ALONG X-/Y-DIRECTION: THIS IS USEFUL WHEN SHIFTING DATA
+      ISPERIODIC = [.TRUE., .TRUE., .FALSE.]
 
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
       MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
@@ -163,6 +169,14 @@ MODULE SCARFLIB_FFT3
       ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
       CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
 
+      ALLOCATE(RANKMAP(DIMS(1), DIMS(2)))
+
+      ! MAKE A 2D MAP REPORTING GLOBAL RANKS AT EACH CARTESIAN COORDINATE
+      DO J = 1, DIMS(2)
+        DO I = 1, DIMS(1)
+          CALL MPI_CART_RANK(CARTOPO, [I - 1, J - 1, COORDS(3)], RANKMAP(I, J), IERR)
+        ENDDO
+      ENDDO
 
 print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
 
@@ -214,98 +228,86 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
         ENDDO
       ENDDO
 
-      ! ORGANIZE PROCESSES IN PENCILS ORIENTED ALONG DIFFERENT AXIS AND RETURN RANK, NUMBER OF PROCESSES AND POINTS PER PROCESS ALONG
-      ! PENCIL DIRECTION
-      CALL BUILD_PENCIL(0, XPENC, RANK(1), NTASKS(1), NX)
-      CALL BUILD_PENCIL(1, YPENC, RANK(2), NTASKS(2), NY)
-      CALL BUILD_PENCIL(2, ZPENC, RANK(3), NTASKS(3), NZ)
+PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
 
-      ALLOCATE(X_RANKING(0:NTASKS(1)-1), Z_RANKING(0:NTASKS(2)-1))
+      FIELD = 0._FPP
+
+      ! ORGANIZE PROCESSES IN PENCILS ORIENTED ALONG Z-AXIS AND RETURN RANK, NUMBER OF PROCESSES AND POINTS PER PROCESS ALONG
+      ! THAT DIRECTION
+      CALL BUILD_PENCIL(2, ZPENC, RANK, NTASKS, NZ)
+
+      ALLOCATE(RANKING(0:NTASKS-1))
 
       ! LOCAL-TO-GLOBAL RANK MAPPING
-      CALL MAP_RANK(XPENC, X_RANKING)
-      CALL MAP_RANK(ZPENC, Z_RANKING)
+      CALL MAP_RANK(ZPENC, RANKING)
 
       ! ALLOCATE ARRAYS USED TO EXCHANGE DATA
-      ALLOCATE(BUFFER(0:M(1), M(2)))
-      ALLOCATE(STRIPE(0:M(1), NPTS(2), 2))
+      ALLOCATE(SLICE(0:M(1), 0:M(2)))
+      ALLOCATE(BUFFER(0:M(1), 0:M(2), 2))
 
-      ! TOTAL NUMBER OF POINTS IN ARRAY "BUFFER"
-      N = SIZE(BUFFER)
-
-      ! FIND RANK OF PROCESS (WITHIN "ZPENC") OWING POINT "K"
-      PID = K2ROOT(1, Z_RANKING)
+      ! FIND RANK OF PROCESS (WITHIN "ZPENC") OWING POINT 1
+      PID = K2ROOT(1, RANKING)
 
       ! MAKE COPY OF SPECTRUM
-      IF (RANK(3) .EQ. PID) CALL C2R(1, M, SPEC, BUFFER)
+      IF (RANK .EQ. PID) CALL C2R(1, SPEC, SLICE)
+
+      N = SIZE(SLICE)
 
       ! SEND "BUFFER" TO ALL OTHER PROCESSES IN COMMUNICATOR "ZPENC"
-      CALL MPI_BCAST(BUFFER, N, REAL_TYPE, PID, ZPENC, IERR)
+      CALL MPI_BCAST(SLICE, N, REAL_TYPE, PID, ZPENC, IERR)
 
-      ! EXCHANGE HALO DATA ALONG X-DIRECTION
-      CALL EXCHANGE_HALO(CARTOPO, RANK(1), NX, BUFFER)
+      ! EXCHANGE HALO DATA
+      CALL EXCHANGE_HALO(SLICE)
 
-      ALLOCATE(RECVCOUNTS(0:NTASKS(2) - 1), DISPLS(0:NTASKS(2) - 1))
-
-      ! DETERMINE NUMBER OF POINTS FOR EACH PROCESS FOR DATA EXCHANGE WITHIN PENCILS IN Y-DIRECTION
-      DO I = 0, NTASKS(2) - 1
-        RECVCOUNTS(I) = (M(1) + 1) * NY(I)
-      ENDDO
-
-      ! SET RELATIVE DISPLACEMENTS
-      CALL SET_DISPLACEMENT(1, RECVCOUNTS, DISPLS)
-
-      ! EXCHANGE DATA WITHIN PENCILS IN Y-DIRECTION
-      CALL MPI_ALLGATHERV(BUFFER, N, REAL_TYPE, STRIPE, RECVCOUNTS, DISPLS, REAL_TYPE, YPENC, IERR)
+      CALL ADD2BUFFER(1, SLICE, BUFFER)
 
       ! LOOP OVER Z-LEVELS
       DO K = 2, NPTS(3)
 
-        ! FIND RANK OF PROCESS (WITHIN "ZPENC") OWING POINT "K""
-        PID = K2ROOT(K, Z_RANKING)
+        ! FIND RANK OF PROCESS (WITHIN "ZPENC") THAT CONTAINS POINT "K
+        PID = K2ROOT(K, RANKING)
 
         ! MAKE COPY OF SPECTRUM
-        IF (RANK(3) .EQ. PID) CALL C2R(K, M, SPEC, BUFFER)
+        IF (RANK .EQ. PID) CALL C2R(K, SPEC, SLICE)
 
         CALL WATCH_START(TICTOC, ZPENC)
 
         ! SEND "BUFFER" TO ALL OTHER PROCESSES IN COMMUNICATOR "ZPENC"
-        CALL MPI_BCAST(BUFFER, N, REAL_TYPE, PID, ZPENC, IERR)
+        CALL MPI_BCAST(SLICE, N, REAL_TYPE, PID, ZPENC, IERR)
 
         CALL WATCH_STOP(TICTOC, ZPENC); INFO(6) = INFO(6) + TICTOC
 
         CALL WATCH_START(TICTOC)
 
         ! EXCHANGE HALO WITH NEIGHBOURS ALONG X DIRECTION
-        CALL EXCHANGE_HALO(CARTOPO, RANK(1), NX, BUFFER)
+        CALL EXCHANGE_HALO(SLICE)
 
         CALL WATCH_STOP(TICTOC); INFO(7) = INFO(7) + TICTOC
 
-        ! SET RELATIVE DISPLACEMENTS
-        CALL SET_DISPLACEMENT(K, RECVCOUNTS, DISPLS)
+        CALL WATCH_START(TICTOC)
 
-        CALL WATCH_START(TICTOC, YPENC)
+        ! ADD CURRENT LAYER IN "BUFFER" TO "SLICE"
+        CALL ADD2BUFFER(K, SLICE, BUFFER)
 
-        ! EXCHANGE DATA WITHIN PENCILS IN Y-DIRECTION
-        CALL MPI_ALLGATHERV(BUFFER, N, REAL_TYPE, STRIPE, RECVCOUNTS, DISPLS, REAL_TYPE, YPENC, IERR)
-
-        CALL WATCH_STOP(TICTOC, YPENC); INFO(8) = INFO(8) + TICTOC
+        CALL WATCH_STOP(TICTOC); INFO(8) = INFO(8) + TICTOC
 
         ! SHIFT DATA ALONG X-DIRECTION. WHEN "I = DIMS(1)", WE OBTAIN AGAIN THE INITIAL DATA. THIS EXTRA SHIFT ALLOWS US TO USE "STRIPE"
         ! WITHOUT THE NEED TO COPY TO A TEMPORARY BUFFER
-        DO I = 1, DIMS(1)
+        DO I = 1, DIMS(1)*DIMS(2)
 
           CALL WATCH_START(TICTOC)
 
+          CALL SET_SHIFT(I, DIR, STEP)
+
           ! SHIFT DATA AND RETURN IN "PID" RANK OF PROCESS OWNING DATA IN "STRIPE"
-          CALL SHIFT_DATA(CARTOPO, I, X_RANKING, STRIPE, PID)
+          CALL SHIFT_DATA(DIR, STEP, RANKMAP, BUFFER, PID)
 
           CALL WATCH_STOP(TICTOC); INFO(9) = INFO(9) + TICTOC
 
           CALL WATCH_START(TICTOC)
 
           ! INTERPOLATE
-          CALL INTERPOLATE(K, PID, STRIPE, DH, X, Y, Z, FIELD)
+          CALL INTERPOLATE(K, PID, BUFFER, DH, X, Y, Z, FIELD)
 
           CALL WATCH_STOP(TICTOC); INFO(10) = INFO(10) + TICTOC
 
@@ -318,15 +320,12 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
       ! INFO(6) = TICTOC
 
       ! RELEASE MEMORY
-      DEALLOCATE(BUFFER, STRIPE)
-      DEALLOCATE(RECVCOUNTS, DISPLS)
-      DEALLOCATE(X_RANKING, Z_RANKING)
+      DEALLOCATE(BUFFER, SLICE)
+      DEALLOCATE(RANKING)
       DEALLOCATE(SPEC)
       DEALLOCATE(GS, GE)
 
       ! RELEASE MPI RESOURCES
-      CALL MPI_COMM_FREE(XPENC, IERR)
-      CALL MPI_COMM_FREE(YPENC, IERR)
       CALL MPI_COMM_FREE(ZPENC, IERR)
 
       !CALL IO_WRITE_ONE(REAL(SPEC, FPP), 'random_struct.bin')
@@ -407,58 +406,53 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SET_DISPLACEMENT(K, RECVCOUNTS, DISPLS)
+    SUBROUTINE C2R(K, SPEC, SLICE)
 
-      ! SET DISPLACEMENT VALUES TO BE USED IN MPI_ALLGATHERV TO DETERMINE WHERE "BUFFER" IS PLACED INSIDE "STRIPE". PATTERN IS AS
-      ! AS FOLLOWS: [1 2], [3, 2], [3, 4], [5, 4], ETC.
+      ! MAKE A PARTIAL COPY OF THE REAL PART OF "SPEC"
 
-      INTEGER(IPP),               INTENT(IN)    :: K
-      INTEGER(IPP), DIMENSION(:), INTENT(IN)    :: RECVCOUNTS
-      INTEGER(IPP), DIMENSION(:), INTENT(INOUT) :: DISPLS
-      INTEGER(IPP)                              :: I, N                       !< COUNTERS
+      INTEGER(IPP),                   INTENT(IN)  :: K                   !< GLOBAL INDEX ALONG Z
+      COMPLEX(FPP), DIMENSION(:,:,:), INTENT(IN)  :: SPEC                !< TRANSFORMED SPECTRUM
+      REAL(FPP),    DIMENSION(:,:),   INTENT(OUT) :: SLICE               !< REAL PART OF "SPEC" + HALO
+      INTEGER(IPP)                                :: I, J, K0            !< COUNTERS
+      INTEGER(IPP)                                :: NX, NY              !< NUMBER OF POINTS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      N = SIZE(DISPLS)
+      ! ACTUAL K-INDEX
+      K0 = K - GS(3, WORLD_RANK) + 1
 
-      IF (MOD(K, 2) .EQ. 0) THEN
-        ! FOR EVEN "K", "BUFFER" IS PLACED AT BOTTOM OF "STRIPE"
-        DO I = 1, N
-          DISPLS(I) = DISPLS(I) + NPTS(2)
-        ENDDO
-      ELSE
-        ! FOR ODD "K", "BUFFER" IS PLACED AT TOP OF "STRIPE"
-        DISPLS(1) = 0
-        DO I = 2, N
-          DISPLS(I) = DISPLS(I - 1) + RECVCOUNTS(I - 1)
-        ENDDO
-      ENDIF
+      NX = SIZE(SPEC, 1)
+      NY = SIZE(SPEC, 2)
 
-    END SUBROUTINE SET_DISPLACEMENT
+      DO J = 1, NY
+        DO I = 1, NX
+          SLICE(I + 1, J + 1) = REAL(SPEC(I, J, K0), FPP)
+        ENDDO
+      ENDDO
+
+    END SUBROUTINE C2R
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE C2R(K, N, SPECTRUM, BUFFER)
+    SUBROUTINE ADD2BUFFER(K, SLICE, BUFFER)
 
-      ! MAKE A PARTIAL COPY OF THE REAL PART OF "SPECTRUM"
+      ! ADD NEW "SLICE" TO EXISTING "BUFFER" AT THE RIGHT POSITION: UPPER Z-LEVEL FOR ODD "K", LOWER Z-LEVEL FOR EVEN "K"
 
-      INTEGER(IPP),                         INTENT(IN)  :: K
-      INTEGER(IPP), DIMENSION(3),           INTENT(IN)  :: N
-      COMPLEX(FPP), DIMENSION(:,:,:),       INTENT(IN)  :: SPECTRUM
-      REAL(FPP),    DIMENSION(0:N(1),N(2)), INTENT(OUT) :: BUFFER              !<
-      INTEGER(IPP)                                      :: I, J                !< COUNTERS
+      INTEGER(IPP),                   INTENT(IN)    :: K
+      REAL(FPP),    DIMENSION(:,:),   INTENT(IN)    :: SLICE
+      REAL(FPP),    DIMENSION(:,:,:), INTENT(INOUT) :: BUFFER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      DO J = 1, N(2)
-        DO I = 1, N(1)
-          BUFFER(I, J) = REAL(SPECTRUM(I, J, K), FPP)
-        ENDDO
-      ENDDO
+      IF (MOD(K, 2) .EQ. 0) THEN
+        BUFFER(:, :, 2) = SLICE
+      ELSE
+        BUFFER(:, :, 1) = SLICE
+      ENDIF
 
-    END SUBROUTINE C2R
+    END SUBROUTINE ADD2BUFFER
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -1641,50 +1635,59 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXCHANGE_HALO(COMM, RANK, NX, BUFFER)
+    SUBROUTINE EXCHANGE_HALO(BUFFER)
 
-      INTEGER(IPP),                           INTENT(IN)    :: COMM                            !< LOCAL COMMUNICATOR
-      INTEGER(IPP),                           INTENT(IN)    :: RANK                            !< RANK OF CURRENT PROCESS WITHIN "XPENC"
-      INTEGER(IPP), DIMENSION(:),             INTENT(IN)    :: NX                              !< POINTS ALONG X-DIRECTION FOR EACH PROCESS
-      REAL(FPP),    DIMENSION(:,:),           INTENT(INOUT) :: BUFFER                          !< RANDOM FIELD
-      INTEGER(IPP)                                          :: I
-      INTEGER(IPP)                                          :: NY                              !< POINTS ALONG Y-DIRECTION
-      INTEGER(IPP)                                          :: IERR, NEG, POS
-      INTEGER(IPP)                                          :: FROM_NEG, TO_POS
-      INTEGER(IPP), DIMENSION(2)                            :: SIZES, SUBSIZES, STARTS
+      ! EXCHANGE HALO BETWEEN NEIGHBORING PROCESSES. THE HALO IS REPRESENTED BY THE FIRST COLUMN/ROW (ALONG X/Y, RESPECTIVELY) OF
+      ! "BUFFER"
+
+      REAL(FPP),    DIMENSION(:,:), INTENT(INOUT) :: BUFFER                          !< RANDOM FIELD
+      INTEGER(IPP)                                :: I
+      INTEGER(IPP)                                :: NX, NY                          !< POINTS ALONG X-/Y-DIRECTION
+      INTEGER(IPP)                                :: IERR, NEG, POS
+      INTEGER(IPP)                                :: FROM_NEG, TO_POS
+      INTEGER(IPP), DIMENSION(2)                  :: SIZES, SUBSIZES, STARTS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! WE CAN USE GLOBAL ARRAYS TO DETERMINE POINTS ALONG Y-DIRECTION AS THESE ARE THE SAME FOR ALL PROCESSES IN LOCAL COMMUNICATOR
-      NY = GE(2, WORLD_RANK) - GS(2, WORLD_RANK) + 1
+      ! POINTS ALONG X AND Y WITHOUT EXTRA ROW/COLUMN
+      NX = SIZE(BUFFER, 1) - 1
+      NY = SIZE(BUFFER, 2) - 1
 
-      ! DETERMINE NEIGHBORS FOR A POSITIVE UNITATY SHIFT IN X-DIRECTION
-      CALL MPI_CART_SHIFT(CARTOPO, 0, 1, NEG, POS, IERR)
+      ! TOTAL SIZE OF "BUFFER" WITH EXTRA ROW/COLUMN FOR HALO EXCHANGE
+      SIZES = [NX + 1, NY + 1]
 
-      ! "BUFFER" IS EXPECTED TO HAVE ONE EXTRA COLUMN FOR HALO
-      !SIZES = [NX(RANK + 1) + 1, NY]
-      SIZES = [GE(1, WORLD_RANK) - GS(1, WORLD_RANK) + 1, NY]
+      ! EXCHANGE FIRST ALONG X-, THEN ALONG Y-DIRECTION
+      DO I = 0, 1
 
-      SUBSIZES = [1, NY]
+        ! DETERMINE NEIGHBORS FOR A POSITIVE UNITARY SHIFT ALONG CURRENT DIRECTION
+        CALL MPI_CART_SHIFT(CARTOPO, I, 1, NEG, POS, IERR)
 
-      ! FIRST COLUMN (TO BE RECEIVED)
-      STARTS = [0, 0]
-      CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
-      CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
+        IF (I .EQ. 0) THEN
+          SUBSIZES = [1, NY]             !< SHAPE OF HALO
+          STARTS   = [0, 1]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
+          STARTS   = [NX, 1]             !< INITIAL ADDRESS FOR DATA TO BE SENT
+        ELSE
+          SUBSIZES = [NX + 1, 1]         !< SHAPE OF HALO
+          STARTS   = [0, 0]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
+          STARTS   = [0, NY]             !< INITIAL ADDRESS FOR DATA TO BE SENT
+        ENDIF
 
-      ! LAST COLUMN (TO BE SENT)
-      !STARTS = [NX(RANK + 1), 0]
-      STARTS = [GE(1, WORLD_RANK) - GS(1, WORLD_RANK) + 1 - 1, 0]
+        ! DATA TO BE RECEIVED
+        CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
+        CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
 
-      CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
-      CALL MPI_TYPE_COMMIT(TO_POS, IERR)
+        ! DATA TO BE SENT
+        CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
+        CALL MPI_TYPE_COMMIT(TO_POS, IERR)
 
-      ! EXCHANGE HALO DATA WITH NEIGHBORS. SINCE WE OPERATE ON FIRST AND LAST COLUMNS, SEND "BUFFER" IS DISJOINT FROM RECV "BUFFER"
-      CALL MPI_SENDRECV(BUFFER, 1, TO_POS, POS, 0, BUFFER, 1, FROM_NEG, NEG, 0, COMM, MPI_STATUS_IGNORE, IERR)
+        ! EXCHANGE HALO DATA WITH NEIGHBORS. SINCE WE OPERATE ON FIRST AND LAST COLUMNS, SEND "BUFFER" IS DISJOINT FROM RECV "BUFFER"
+        CALL MPI_SENDRECV(BUFFER, 1, TO_POS, POS, 0, BUFFER, 1, FROM_NEG, NEG, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE, IERR)
 
-      ! REALEASE RESOURCES
-      CALL MPI_TYPE_FREE(FROM_NEG, IERR)
-      CALL MPI_TYPE_FREE(TO_POS, IERR)
+        ! REALEASE RESOURCES
+        CALL MPI_TYPE_FREE(FROM_NEG, IERR)
+        CALL MPI_TYPE_FREE(TO_POS, IERR)
+
+      ENDDO
 
     END SUBROUTINE EXCHANGE_HALO
 
@@ -1751,46 +1754,71 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SHIFT_DATA(COMM, I, RANKLIST, STRIPE, PID)
+    SUBROUTINE SET_SHIFT(I, DIR, STEP)
 
-      INTEGER(IPP),                                        INTENT(IN)    :: COMM                      !< COMMUNICATOR
-      INTEGER(IPP),                                        INTENT(IN)    :: I                         !< SHIFT INDEX
-      INTEGER(IPP),              DIMENSION(:),             INTENT(IN)    :: RANKLIST                  !< LIST OF GLOBAL RANKS ASSOCIATED TO "COMM"
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:,:),         INTENT(INOUT) :: STRIPE                    !< DATA TRANSFERRED/RECEIVED
-      INTEGER(IPP),                                        INTENT(OUT)   :: PID                       !< GLOBAL RANK OF PROCESS FROM WHICH DATA ARE RECEIVED
-      INTEGER(IPP)                                                       :: NEG, POS, IERR            !< MPI STUFF
-      INTEGER(IPP)                                                       :: SENDCOUNT, RECVCOUNT
-      INTEGER(IPP),              DIMENSION(SIZE(RANKLIST))               :: DUM
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:,:)                        :: BUFFER
+      ! DETERMINE SHIFT DIRECTION
+
+      INTEGER(IPP), INTENT(IN)  :: I
+      INTEGER(IPP), INTENT(OUT) :: DIR
+      INTEGER(IPP), INTENT(OUT) :: STEP
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! DETERMINE NEIGHBORS FOR A POSITIVE SHIFT IN X-DIRECTION
-      !IF (I .EQ. 0) THEN
-      !  CALL MPI_CART_SHIFT(CARTOPO, 0, 0, NEG, POS, IERR)                 !< NO SHIFT
-      !ELSE
-        CALL MPI_CART_SHIFT(CARTOPO, 0, 1, NEG, POS, IERR)                 !< UNITARY SHIFT
-      !ENDIF
+      ! MOVE ALONG POSITIVE X-DIRECTION
+      DIR  = 0
+      STEP = 1
 
-      ! SHIFT LIST OF RANKS ACCORDING TO SHIFT INDEX
-      DUM = CSHIFT(RANKLIST, -I)
+      ! WHEN "I" IS MULTIPLE OF "DIMS(1)", MOVE ALONG POSITIVE Y-DIRECTION
+      IF (MOD(I, DIMS(1)) .EQ. 0) DIR  = 1
 
-      ! GET GLOBAL RANK OF PROCESS SENDING DATA TO CALLING PROCESS
-      PID = DUM(1)
+      ! AFTER A SHIFT IN Y-DIRECTION, MOVE ALONG NEGATIVE X-DIRECTION
+      IF (MOD(I / DIMS(1), 2) .EQ. 1) STEP = -1
 
-      ALLOCATE(BUFFER(GE(1, PID) - GS(1, PID) + 1 + 1, NPTS(2), 2))
+    END SUBROUTINE SET_SHIFT
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE SHIFT_DATA(DIR, STEP, RANKMAP, BUFFER, PID)
+
+      ! SEND/RECEIVE DATA TO/FROM NEIGHBORS ALONG A SPECIFIC DIRECTION
+
+      INTEGER(IPP),                                        INTENT(IN)    :: DIR                       !< SHIFT DIRECTION
+      INTEGER(IPP),                                        INTENT(IN)    :: STEP                      !< SENSE OF SHIFT (+VE OR -VE)
+      INTEGER(IPP),              DIMENSION(:,:),           INTENT(INOUT) :: RANKMAP                   !< LIST OF GLOBAL RANKS ASSOCIATED TO "COMM"
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:,:),         INTENT(INOUT) :: BUFFER                    !< DATA TRANSFERRED/RECEIVED
+      INTEGER(IPP),                                        INTENT(OUT)   :: PID                       !< GLOBAL RANK OF PROCESS FROM WHICH DATA ARE RECEIVED
+      INTEGER(IPP)                                                       :: NEG, POS, IERR            !< MPI STUFF
+      INTEGER(IPP)                                                       :: SENDCOUNT, RECVCOUNT
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:,:)                        :: DUM
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! DETERMINE NEIGHBORS ACCORDING TO SHIFT DIRECTION (AS DETERMINED BY "DIR" AND "STEP")
+      CALL MPI_CART_SHIFT(CARTOPO, DIR, STEP, NEG, POS, IERR)
+
+      ! SHIFT MAP WITH RANKS ACCORDINGLY
+      RANKMAP = CSHIFT(RANKMAP, -STEP, DIR + 1)
+
+      ! RANK OF PROCESS OWNING INCOMING DATA BEFORE ANY SHIFT
+      PID = RANKMAP(COORDS(1) + 1, COORDS(2) + 1)
+
+      ! PREPARE ARRAY FOR INCOMING DATA: EXTRA POINT ALONG X AND Y IS TOO TAKE HALO INTO ACCOUNT
+      ALLOCATE(DUM(GE(1, PID) - GS(1, PID) + 2, GE(2, PID) - GS(2, PID) + 2 , 2))
 
       ! NUMBER OF DATA BEING RECEIVED
-      RECVCOUNT = SIZE(BUFFER)
+      RECVCOUNT = SIZE(DUM)
 
       ! NUMBER OF DATA BEING SENT
-      SENDCOUNT = SIZE(STRIPE)
+      SENDCOUNT = SIZE(BUFFER)
 
-      ! SEND "STRIPE" TO "POS" AND RECEIVE "DUM" FROM "NEG"
-      CALL MPI_SENDRECV(STRIPE, SENDCOUNT, REAL_TYPE, POS, 0, BUFFER, RECVCOUNT, REAL_TYPE, NEG, 0, COMM, MPI_STATUS_IGNORE, IERR)
+      ! SEND "BUFFER" TO "POS" AND RECEIVE "DUM" FROM "NEG"
+      CALL MPI_SENDRECV(BUFFER, SENDCOUNT, REAL_TYPE, POS, 0, DUM, RECVCOUNT, REAL_TYPE, NEG, 0, MPI_COMM_WORLD,    &
+                        MPI_STATUS_IGNORE, IERR)
 
-      ! TRANSFER CONTENT OF "BUFFER" INTO "STRIPE"
-      CALL MOVE_ALLOC(BUFFER, STRIPE)
+      ! TRANSFER CONTENT OF "DUM" INTO "BUFFER"
+      CALL MOVE_ALLOC(DUM, BUFFER)
 
     END SUBROUTINE SHIFT_DATA
 
@@ -1798,16 +1826,16 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INTERPOLATE(K0, PID, STRIPE, DH, X, Y, Z, FIELD)
+    SUBROUTINE INTERPOLATE(K0, PID, BUFFER, DH, X, Y, Z, FIELD)
 
       INTEGER(IPP),                   INTENT(IN)  :: K0                               !< INDEX
       INTEGER(IPP),                   INTENT(IN)  :: PID                              !< GLOBAL INDEX OF PROCESS OWING DATA
-      REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)  :: STRIPE                           !< DATA
+      REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)  :: BUFFER                           !< DATA
       REAL(FPP),                      INTENT(IN)  :: DH                               !< GRID-STEP
       REAL(FPP),    DIMENSION(:),     INTENT(IN)  :: X, Y, Z                          !< POINTS LOCATION
       REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: FIELD                            !< INTERPOLATED VALUES
       INTEGER(IPP)                                :: P, I, J, K                       !< COUNTERS
-      INTEGER(IPP)                                :: I0, I1, L1, L2                   !< COUNTERS
+      INTEGER(IPP)                                :: I0, I1, J0, J1, L1, L2           !< COUNTERS
       LOGICAL                                     :: BOOL
       REAL(FPP)                                   :: PX, PY, PZ, IPX, IPY             !< INTERPOLATION STUFF
       REAL(FPP)                                   :: A, B                             !< INTERPOLATION STUFF
@@ -1815,11 +1843,15 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! FIRST/LAST INDEX ALONG X-DIRECTION
+      ! FIRST/LAST INDEX ALONG X-DIRECTION, ACCOUNTING FOR HALO
       I0 = GS(1, PID)
-      I1 = GE(1, PID)
+      I1 = GE(1, PID) + 1
 
-      ! HANDLE DIFFERENT ARRANGEMENT IN "STRIPE"
+      ! FIRST/LAST INDEX ALONG Y-DIRECTION, ACCOUNTING FOR HALO
+      J0 = GS(2, PID)
+      J1 = GE(2, PID) + 1
+
+      ! HANDLE DIFFERENT ARRANGEMENT OF Z-SLICES IN "BUFFER"
       IF (MOD(K0, 2) .EQ. 0) THEN
         L1 = 1
         L2 = 2
@@ -1833,23 +1865,34 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
 
         K = FLOOR( (Z(P) - OFF_AXIS(3)) / DH ) + 1
 
-        ! "TRUE" IF POINT IS OUTSIDE Z-RANGE OR COINCIDE EXACTLY WITH LAST POINT
-        BOOL = (K .GE. K0) .OR. (K .LT. K0 - 1)
+        ! "TRUE" IF POINT IS OUTSIDE Z-RANGE
+        BOOL = (K .NE. K0 - 1)
 
         IF (BOOL .EQV. .TRUE.) CYCLE
 
         ! RETURN CORRESPONDING X INDEX
-        I = FLOOR( (X(P) - OFF_AXIS(1)) / DH ) + 1 - I0 + 1
+        I = FLOOR( (X(P) - OFF_AXIS(1)) / DH ) + 2
 
         ! "TRUE" IF POINT IS OUTSIDE X-RANGE OR COINCIDE EXACTLY WITH LAST POINT
         BOOL = (I .GE. I1) .OR. (I .LT. I0)
 
+        ! POSITION RESPECT TO FIRST POINT IN "BUFFER"
+        I = I - I0 + 1
+
         IF (BOOL .EQV. .TRUE.) CYCLE
 
-        J = FLOOR( (Y(P) - OFF_AXIS(2)) / DH ) + 1
+        J = FLOOR( (Y(P) - OFF_AXIS(2)) / DH ) + 2
 
-        F(:, 1) = STRIPE(I:I + 1, J, L1)
-        F(:, 2) = STRIPE(I:I + 1, J + 1, L1)
+        ! "TRUE" IF POINT IS OUTSIDE X-RANGE OR COINCIDE EXACTLY WITH LAST POINT
+        BOOL = (J .GE. J1) .OR. (J .LT. J0)
+
+        IF (BOOL .EQV. .TRUE.) CYCLE
+
+        ! POSITION RESPECT TO FIRST POINT IN "BUFFER"
+        J = J - J0 + 1
+
+        F(:, 1) = BUFFER(I:I + 1, J, L1)
+        F(:, 2) = BUFFER(I:I + 1, J + 1, L1)
 
         PX = X(P) - I
         PY = Y(P) - J
@@ -1860,8 +1903,8 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
         ! BILINEAR INTERPOLATION AT LEVEL 1
         A = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
 
-        F(:, 1) = STRIPE(I:I + 1, J, L2)
-        F(:, 2) = STRIPE(I:I + 1, J + 1, L2)
+        F(:, 1) = BUFFER(I:I + 1, J, L2)
+        F(:, 2) = BUFFER(I:I + 1, J + 1, L2)
 
         ! BILINEAR INTERPOLATION AT LEVEL 2
         B = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
