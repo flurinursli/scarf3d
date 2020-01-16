@@ -71,7 +71,7 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),                     DIMENSION(10),    INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
       COMPLEX(FPP),     ALLOCATABLE, DIMENSION(:,:,:)              :: SPEC                 !< SPECTRUM/RANDOM FIELD
       INTEGER(IPP)                                                 :: IERR                 !< MPI STUFF
-      INTEGER(IPP)                                                 :: I, J, K              !< COUNTERS
+      INTEGER(IPP)                                                 :: I, J, K, P              !< COUNTERS
       INTEGER(IPP)                                                 :: N                    !< POINTS IN "BUFFER"
       INTEGER(IPP)                                                 :: PID
       INTEGER(IPP)                                                 :: DIR, STEP
@@ -126,6 +126,8 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
 
+!IF (WORLD_RANK == 0) PRINT*, 'MIN ', MIN_EXTENT, ' MAX ', MAX_EXTENT
+
       ! CYCLE OVER THE THREE MAIN DIRECTIONS TO DETERMINE THE NECESSARY MODEL SIZE (IN NUMBER OF POINTS) AND THE ABSOLUTE POSITION OF
       ! OF THE FIRST POINT TO COUNTERACT FFT PERIODICITY
       DO I = 1, 3
@@ -136,6 +138,8 @@ MODULE SCARFLIB_FFT3
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH) + 1
 
+!offset = 0
+
         ! EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
         NPTS(I) = NPTS(I) + 2 * OFFSET
 
@@ -143,7 +147,7 @@ MODULE SCARFLIB_FFT3
         IF (MOD(NPTS(I), 2) .NE. 0) NPTS(I) = NPTS(I) + 1
 
         ! ABSOLUTE POSITION OF FIRST POINT (IT COULD BE NEGATIVE)
-        OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET - 1) * DH
+        OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET - 0) * DH
 
       ENDDO
 
@@ -178,8 +182,25 @@ MODULE SCARFLIB_FFT3
         ENDDO
       ENDDO
 
-print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'RANKMAP ', WORLD_RANK
+!     DO J = 1, DIMS(2)
+!       PRINT*, RANKMAP(:, J)
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
 
+      DO I = 0, NTASKS - 1
+        IF (RANK .EQ. I) THEN
+          PRINT*, 'FFT MESH: RANK', WORLD_RANK, '= ', LS(1), LE(1), ' -- ', LS(2), LE(2), ' -- ', LS(3), LE(3)
+        ENDIF
+        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      ENDDO
+
+      IF (WORLD_RANK == 0) PRINT*, 'NPTS: ', NPTS, ', OFF_AXIS= ', OFF_AXIS
 
       ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
       ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
@@ -228,7 +249,21 @@ print*, world_rank, ls(1), le(1), ' x ', ls(2), le(2), ' x ', ls(3), le(3)
         ENDDO
       ENDDO
 
-PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
+! N = 0
+! DO K = 1, NPTS(3)
+!   DO J = 1, NPTS(2)
+!     DO I = 1, NPTS(1)
+!       N = N + 1
+!       IF ( (I .GE. GS(1, WORLD_RANK)) .AND. (I .LE. GE(1, WORLD_RANK))   .AND.    &
+!            (J .GE. GS(2, WORLD_RANK)) .AND. (J .LE. GE(2, WORLD_RANK))   .AND.    &
+!            (K .GE. GS(3, WORLD_RANK)) .AND. (K .LE. GE(3, WORLD_RANK)) ) THEN
+!         SPEC(I - GS(1, WORLD_RANK) + 1, J - GS(2, WORLD_RANK) + 1, K - GS(3, WORLD_RANK) + 1) = N
+!       ENDIF
+!     ENDDO
+!   ENDDO
+! ENDDO
+!
+! PRINT*, 'MIN/MAX REAL(SPECTRUM) ', WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
 
       FIELD = 0._FPP
 
@@ -241,12 +276,22 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
       ! LOCAL-TO-GLOBAL RANK MAPPING
       CALL MAP_RANK(ZPENC, RANKING)
 
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'ZPENC RANKING ', WORLD_RANK, RANK, ' X ', RANKING
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
+
       ! ALLOCATE ARRAYS USED TO EXCHANGE DATA
       ALLOCATE(SLICE(0:M(1), 0:M(2)))
       ALLOCATE(BUFFER(0:M(1), 0:M(2), 2))
 
       ! FIND RANK OF PROCESS (WITHIN "ZPENC") OWING POINT 1
       PID = K2ROOT(1, RANKING)
+
+      SLICE = 0._FPP
 
       ! MAKE COPY OF SPECTRUM
       IF (RANK .EQ. PID) CALL C2R(1, SPEC, SLICE)
@@ -256,16 +301,51 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
       ! SEND "BUFFER" TO ALL OTHER PROCESSES IN COMMUNICATOR "ZPENC"
       CALL MPI_BCAST(SLICE, N, REAL_TYPE, PID, ZPENC, IERR)
 
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'SLICE BCAST ', WORLD_RANK, RANK, PID
+!     DO J = 0, M(2)
+!       PRINT*, SLICE(:, J)
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
+
       ! EXCHANGE HALO DATA
       CALL EXCHANGE_HALO(SLICE)
 
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'HALO ', WORLD_RANK
+!     DO J = 0, M(2)
+!       PRINT*, SLICE(:, J)
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
+
       CALL ADD2BUFFER(1, SLICE, BUFFER)
+
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'ADDBUFFER ', WORLD_RANK
+!     DO J = 0, M(2)
+!       PRINT*, BUFFER(:, J, 1)
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
 
       ! LOOP OVER Z-LEVELS
       DO K = 2, NPTS(3)
 
         ! FIND RANK OF PROCESS (WITHIN "ZPENC") THAT CONTAINS POINT "K
         PID = K2ROOT(K, RANKING)
+
+        SLICE = 0._FPP
 
         ! MAKE COPY OF SPECTRUM
         IF (RANK .EQ. PID) CALL C2R(K, SPEC, SLICE)
@@ -282,6 +362,17 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
         ! EXCHANGE HALO WITH NEIGHBOURS ALONG X DIRECTION
         CALL EXCHANGE_HALO(SLICE)
 
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'HALO ', WORLD_RANK, K
+!     DO J = 0, M(2)
+!       PRINT*, SLICE(:, J)
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
+
         CALL WATCH_STOP(TICTOC); INFO(7) = INFO(7) + TICTOC
 
         CALL WATCH_START(TICTOC)
@@ -291,9 +382,34 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
 
         CALL WATCH_STOP(TICTOC); INFO(8) = INFO(8) + TICTOC
 
+! DO I = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == I) THEN
+!     PRINT*, 'ADDBUFFER ', WORLD_RANK, ' Z-LEVEL ', K, ' X ', SHAPE(BUFFER), ' X ', SHAPE(SLICE)
+!     DO P = 1, 2
+!       PRINT*, 'Z ', P
+!       DO J = 0, M(2)
+!         PRINT*, BUFFER(:, J, P)
+!       ENDDO
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
+
         ! SHIFT DATA ALONG X-DIRECTION. WHEN "I = DIMS(1)", WE OBTAIN AGAIN THE INITIAL DATA. THIS EXTRA SHIFT ALLOWS US TO USE "STRIPE"
         ! WITHOUT THE NEED TO COPY TO A TEMPORARY BUFFER
         DO I = 1, DIMS(1)*DIMS(2)
+
+! DO P = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == P) THEN
+!     PRINT*, 'BEFORE ', WORLD_RANK, ' PID ', PID, ' SHIFT ', I
+!     DO J = 0, M(2)
+!       PRINT*, BUFFER(:, J, 1)
+!     ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
 
           CALL WATCH_START(TICTOC)
 
@@ -303,6 +419,17 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
           CALL SHIFT_DATA(DIR, STEP, RANKMAP, BUFFER, PID)
 
           CALL WATCH_STOP(TICTOC); INFO(9) = INFO(9) + TICTOC
+
+! DO P = 0, WORLD_SIZE - 1
+!   IF (WORLD_RANK == P) THEN
+!     PRINT*, 'AFTER ', WORLD_RANK, ' PID ', PID, ' SHIFT ', I
+!     ! DO J = 0, M(2)
+!     !   PRINT*, BUFFER(:, J, 1)
+!     ! ENDDO
+!   ENDIF
+!   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+!   CALL SLEEP(1)
+! ENDDO
 
           CALL WATCH_START(TICTOC)
 
@@ -1645,7 +1772,7 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
       INTEGER(IPP)                                :: NX, NY                          !< POINTS ALONG X-/Y-DIRECTION
       INTEGER(IPP)                                :: IERR, NEG, POS
       INTEGER(IPP)                                :: FROM_NEG, TO_POS
-      INTEGER(IPP), DIMENSION(2)                  :: SIZES, SUBSIZES, STARTS
+      INTEGER(IPP), DIMENSION(2)                  :: SIZES, SUBSIZES, RSTARTS, SSTARTS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -1664,20 +1791,20 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
 
         IF (I .EQ. 0) THEN
           SUBSIZES = [1, NY]             !< SHAPE OF HALO
-          STARTS   = [0, 1]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
-          STARTS   = [NX, 1]             !< INITIAL ADDRESS FOR DATA TO BE SENT
+          RSTARTS  = [0, 1]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
+          SSTARTS  = [NX, 1]             !< INITIAL ADDRESS FOR DATA TO BE SENT
         ELSE
           SUBSIZES = [NX + 1, 1]         !< SHAPE OF HALO
-          STARTS   = [0, 0]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
-          STARTS   = [0, NY]             !< INITIAL ADDRESS FOR DATA TO BE SENT
+          RSTARTS  = [0, 0]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
+          SSTARTS  = [0, NY]             !< INITIAL ADDRESS FOR DATA TO BE SENT
         ENDIF
 
         ! DATA TO BE RECEIVED
-        CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
+        CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
         CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
 
         ! DATA TO BE SENT
-        CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
+        CALL MPI_TYPE_CREATE_SUBARRAY(2, SIZES, SUBSIZES, SSTARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
         CALL MPI_TYPE_COMMIT(TO_POS, IERR)
 
         ! EXCHANGE HALO DATA WITH NEIGHBORS. SINCE WE OPERATE ON FIRST AND LAST COLUMNS, SEND "BUFFER" IS DISJOINT FROM RECV "BUFFER"
@@ -1764,15 +1891,37 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! MOVE ALONG POSITIVE X-DIRECTION
+      ! DEFAULT IS NO MOVEMENT AT ALL, USEFUL IF WE HAVE JUST ONE PROCESS ALONG X- AND Y-DIRECTION
       DIR  = 0
-      STEP = 1
+      STEP = 0
 
-      ! WHEN "I" IS MULTIPLE OF "DIMS(1)", MOVE ALONG POSITIVE Y-DIRECTION
-      IF (MOD(I, DIMS(1)) .EQ. 0) DIR  = 1
+      ! DO WE HAVE MORE THAN ONE PROCESS ALONG X-DIRECTION?
+      IF (DIMS(1) .GT. 1) THEN
 
-      ! AFTER A SHIFT IN Y-DIRECTION, MOVE ALONG NEGATIVE X-DIRECTION
-      IF (MOD(I / DIMS(1), 2) .EQ. 1) STEP = -1
+        ! MOVE ALONG POSITIVE X-DIRECTION
+        STEP = 1
+
+        ! DO WE HAVE MORE THAN ONE PROCESS ALONG Y-DIRECTION?
+        IF (DIMS(2) .GT. 1) THEN
+
+          ! WHEN "I" IS MULTIPLE OF "DIMS(1)", MOVE ALONG POSITIVE Y-DIRECTION
+          IF (MOD(I, DIMS(1)) .EQ. 0) DIR = 1
+
+          ! AFTER A SHIFT IN Y-DIRECTION, MOVE ALONG NEGATIVE X-DIRECTION
+          IF (MOD(I / DIMS(1), 2) .EQ. 1) STEP = -1
+
+        ENDIF
+
+      ! DO WE HAVE JUST ONE PROCESS ALONG X-DIRECTION?
+      ELSE
+
+        ! DO WE HAVE MORE THAN ONE PROCESS ALONG Y-DIRECTION?
+        IF (DIMS(2) .GT. 1) THEN
+          DIR  = 1
+          STEP = 1
+        ENDIF
+
+      ENDIF
 
     END SUBROUTINE SET_SHIFT
 
@@ -1801,11 +1950,11 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
       ! SHIFT MAP WITH RANKS ACCORDINGLY
       RANKMAP = CSHIFT(RANKMAP, -STEP, DIR + 1)
 
-      ! RANK OF PROCESS OWNING INCOMING DATA BEFORE ANY SHIFT
+      ! RANK OF PROCESS OWNING INCOMING DATA BEFORE INITIAL SHIFT
       PID = RANKMAP(COORDS(1) + 1, COORDS(2) + 1)
 
       ! PREPARE ARRAY FOR INCOMING DATA: EXTRA POINT ALONG X AND Y IS TOO TAKE HALO INTO ACCOUNT
-      ALLOCATE(DUM(GE(1, PID) - GS(1, PID) + 2, GE(2, PID) - GS(2, PID) + 2 , 2))
+      ALLOCATE(DUM(0:GE(1, PID) - GS(1, PID) + 1, 0:GE(2, PID) - GS(2, PID) + 1 , 2))
 
       ! NUMBER OF DATA BEING RECEIVED
       RECVCOUNT = SIZE(DUM)
@@ -1834,22 +1983,23 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
       REAL(FPP),                      INTENT(IN)  :: DH                               !< GRID-STEP
       REAL(FPP),    DIMENSION(:),     INTENT(IN)  :: X, Y, Z                          !< POINTS LOCATION
       REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: FIELD                            !< INTERPOLATED VALUES
-      INTEGER(IPP)                                :: P, I, J, K                       !< COUNTERS
-      INTEGER(IPP)                                :: I0, I1, J0, J1, L1, L2           !< COUNTERS
+      INTEGER(IPP)                                :: P                                !< COUNTERS
+      INTEGER(IPP)                                :: IS, JS, I0, J0, L1, L2           !< INDICES
+      INTEGER(IPP), DIMENSION(2)                  :: N
       LOGICAL                                     :: BOOL
-      REAL(FPP)                                   :: PX, PY, PZ, IPX, IPY             !< INTERPOLATION STUFF
+      REAL(FPP)                                   :: I, J, K
+      REAL(FPP)                                   :: PX, PY, IPZ, IPX, IPY             !< INTERPOLATION STUFF
       REAL(FPP)                                   :: A, B                             !< INTERPOLATION STUFF
       REAL(FPP),    DIMENSION(2,2)                :: F                                !< INTERPOLATION STUFF
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! FIRST/LAST INDEX ALONG X-DIRECTION, ACCOUNTING FOR HALO
-      I0 = GS(1, PID)
-      I1 = GE(1, PID) + 1
+      ! GLOBAL INDEX FIRST POINT (INITIAL PROCESS)
+      IS = GS(1, PID)
+      JS = GS(2, PID)
 
-      ! FIRST/LAST INDEX ALONG Y-DIRECTION, ACCOUNTING FOR HALO
-      J0 = GS(2, PID)
-      J1 = GE(2, PID) + 1
+      N(1) = SIZE(BUFFER, 1)
+      N(2) = SIZE(BUFFER, 2)
 
       ! HANDLE DIFFERENT ARRANGEMENT OF Z-SLICES IN "BUFFER"
       IF (MOD(K0, 2) .EQ. 0) THEN
@@ -1863,39 +2013,36 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
       ! LOOP OVER POINTS
       DO P = 1, SIZE(X)
 
-        K = FLOOR( (Z(P) - OFF_AXIS(3)) / DH ) + 1
+        !K = FLOOR( (Z(P) - OFF_AXIS(3)) / DH ) + 1
+        K = (Z(P) - OFF_AXIS(3)) / DH + 1._FPP
 
         ! "TRUE" IF POINT IS OUTSIDE Z-RANGE
-        BOOL = (K .NE. K0 - 1)
+        BOOL = (K .GE. K0) .OR. (K .LT. K0 - 1)
 
         IF (BOOL .EQV. .TRUE.) CYCLE
 
-        ! RETURN CORRESPONDING X INDEX
-        I = FLOOR( (X(P) - OFF_AXIS(1)) / DH ) + 2
+        ! RETURN CORRESPONDING INDEX FOR "BUFFER"
+        I  = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - IS
+        I0 = FLOOR(I)
 
         ! "TRUE" IF POINT IS OUTSIDE X-RANGE OR COINCIDE EXACTLY WITH LAST POINT
-        BOOL = (I .GE. I1) .OR. (I .LT. I0)
-
-        ! POSITION RESPECT TO FIRST POINT IN "BUFFER"
-        I = I - I0 + 1
+        BOOL = (I0 .GE. N(1)) .OR. (I0 .LT. 1)
 
         IF (BOOL .EQV. .TRUE.) CYCLE
 
-        J = FLOOR( (Y(P) - OFF_AXIS(2)) / DH ) + 2
+        J  = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - JS
+        J0 = FLOOR(J)
 
         ! "TRUE" IF POINT IS OUTSIDE X-RANGE OR COINCIDE EXACTLY WITH LAST POINT
-        BOOL = (J .GE. J1) .OR. (J .LT. J0)
+        BOOL = (J0 .GE. N(2)) .OR. (J0 .LT. 1)
 
         IF (BOOL .EQV. .TRUE.) CYCLE
 
-        ! POSITION RESPECT TO FIRST POINT IN "BUFFER"
-        J = J - J0 + 1
+        F(:, 1) = BUFFER(I0:I0 + 1, J0, L1)
+        F(:, 2) = BUFFER(I0:I0 + 1, J0 + 1, L1)
 
-        F(:, 1) = BUFFER(I:I + 1, J, L1)
-        F(:, 2) = BUFFER(I:I + 1, J + 1, L1)
-
-        PX = X(P) - I
-        PY = Y(P) - J
+        PX = I - I0
+        PY = J - J0
 
         IPX = (1._FPP - PX)
         IPY = (1._FPP - PY)
@@ -1903,16 +2050,37 @@ PRINT*, WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
         ! BILINEAR INTERPOLATION AT LEVEL 1
         A = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
 
-        F(:, 1) = BUFFER(I:I + 1, J, L2)
-        F(:, 2) = BUFFER(I:I + 1, J + 1, L2)
+        F(:, 1) = BUFFER(I0:I0 + 1, J0, L2)
+        F(:, 2) = BUFFER(I0:I0 + 1, J0 + 1, L2)
 
         ! BILINEAR INTERPOLATION AT LEVEL 2
         B = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
 
-        PZ = Z(P) - K
+        !PZ = Z(P) - K
+        IPZ = K0 - K
 
         ! LINEAR INTERPOLATED BETWEEN LEVEL 1 AND 2
-        FIELD(P) = A * (1._FPP - PZ) + B * PZ
+        !FIELD(P) = A * (1._FPP - PZ) + B * PZ
+        FIELD(P) = A * IPZ + B * (1._FPP - IPZ)
+
+
+! IF (WORLD_RANK == 0) THEN
+!   PRINT*, 'INTP ', WORLD_RANK, ' PID ', PID, ' Z-LEVEL ', K0
+!   PRINT*, X(P), Y(P), Z(P)
+!   PRINT*, FLOOR( (X(P) - OFF_AXIS(1)) / DH ) + 2, FLOOR( (Y(P) - OFF_AXIS(2)) / DH ) + 2, FLOOR( (Z(P) - OFF_AXIS(3)) / DH ) + 1
+!   PRINT*, I0, J0
+!   PRINT*, I, J, L1, L2
+!   PRINT*, PX, PY, IPX, IPY
+!   PRINT*, A, B, IPZ, FIELD(P)
+!   ! DO J = 0, M(2)
+!   !   PRINT*, BUFFER(:, J, 1)
+!   ! ENDDO
+!   CALL EXIT
+! ENDIF
+
+
+
+
 
       ENDDO
 
