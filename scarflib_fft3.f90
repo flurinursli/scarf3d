@@ -193,8 +193,8 @@ MODULE SCARFLIB_FFT3
 !   CALL SLEEP(1)
 ! ENDDO
 
-      DO I = 0, NTASKS - 1
-        IF (RANK .EQ. I) THEN
+      DO I = 0, WORLD_SIZE - 1
+        IF (WORLD_RANK .EQ. I) THEN
           PRINT*, 'FFT MESH: RANK', WORLD_RANK, '= ', LS(1), LE(1), ' -- ', LS(2), LE(2), ' -- ', LS(3), LE(3)
         ENDIF
         CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
