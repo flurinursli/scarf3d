@@ -33,6 +33,8 @@ MODULE SCARFLIB_FFT3
   ! MIN/MAX INDEX OF INPUT POINTS WHEN PROJECTED ONTO COMPUTATIONAL GRID
   INTEGER(IPP),   ALLOCATABLE, DIMENSION(:,:)                   :: PS, PE
 
+  REAL(FPP),                                          PARAMETER :: BIG = HUGE(1._FPP)
+
   ! ABSOLUTE POSITION OF MODEL'S FIRST POINT
   REAL(FPP),                   DIMENSION(3)                     :: OFF_AXIS
 
@@ -76,22 +78,19 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP)                                                 :: IERR                 !< MPI STUFF
       INTEGER(IPP)                                                 :: I, J, K, P              !< COUNTERS
       INTEGER(IPP)                                                 :: N                    !< POINTS IN "BUFFER"
-      INTEGER(IPP)                                                 :: PID
-      INTEGER(IPP)                                                 :: DIR, STEP
+      ! INTEGER(IPP)                                                 :: PID
+      ! INTEGER(IPP)                                                 :: DIR, STEP
       INTEGER(IPP)                                                 :: RANK, NTASKS
       INTEGER(IPP)                                                 :: NDIMS
-      INTEGER(IPP)                                                 :: XPENC, YPENC, ZPENC  !<
+      INTEGER(IPP)                                                 :: COMM
       INTEGER(IPP)                                                 :: OFFSET               !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
-      INTEGER(IPP),                  DIMENSION(2)                  :: REQUEST
       INTEGER(IPP),                  DIMENSION(3)                  :: M                    !< POINTS FOR CALLING PROCESS
       INTEGER(IPP),                  DIMENSION(3)                  :: LS, LE               !< FIRST/LAST INDEX ALONG X, Y, Z
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NX, NY, NZ           !< POINTS FOR EACH PENCIL
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: COMPLETED
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: ISBUSY
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NPOINTS
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: BUDDIES
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: X_RANKING
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: RANKING
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: RECVCOUNTS, DISPLS   !< MPI STUFF
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:,:)                :: RANKMAP
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: I0, I1
       LOGICAL                                                      :: REORDER
       LOGICAL,                       DIMENSION(3)                  :: ISPERIODIC
       REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
@@ -99,8 +98,7 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
       REAL(FPP),                     DIMENSION(3)                  :: MIN_EXTENT           !< LOWER MODEL LIMITS (GLOBAL)
       REAL(FPP),                     DIMENSION(3)                  :: MAX_EXTENT           !< UPPER MODEL LIMITS (GLOBAL)
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:)                :: SLICE
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: BUFFER
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: DELTA
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -171,10 +169,10 @@ MODULE SCARFLIB_FFT3
       ! MIN/MAX INDEX OF INPUT POINTS WHEN PROJECTED ONTO COMPUTATIONAL GRID
       PS(1, WORLD_RANK) = FLOOR((MINVAL(X, DIM = 1) - OFF_AXIS(1)) / DH) + 1
       PE(1, WORLD_RANK) = FLOOR((MAXVAL(X, DIM = 1) - OFF_AXIS(1)) / DH) + 1
-      PS(2, WORLD_RANK) = FLOOR((MINVAL(Y, DIM = 1) - OFF_AXIS(1)) / DH) + 1
-      PE(2, WORLD_RANK) = FLOOR((MAXVAL(Y, DIM = 1) - OFF_AXIS(1)) / DH) + 1
-      PS(3, WORLD_RANK) = FLOOR((MINVAL(Z, DIM = 1) - OFF_AXIS(1)) / DH) + 1
-      PE(3, WORLD_RANK) = FLOOR((MAXVAL(Z, DIM = 1) - OFF_AXIS(1)) / DH) + 1
+      PS(2, WORLD_RANK) = FLOOR((MINVAL(Y, DIM = 1) - OFF_AXIS(2)) / DH) + 1
+      PE(2, WORLD_RANK) = FLOOR((MAXVAL(Y, DIM = 1) - OFF_AXIS(2)) / DH) + 1
+      PS(3, WORLD_RANK) = FLOOR((MINVAL(Z, DIM = 1) - OFF_AXIS(3)) / DH) + 1
+      PE(3, WORLD_RANK) = FLOOR((MAXVAL(Z, DIM = 1) - OFF_AXIS(3)) / DH) + 1
 
       ! MAKE ALL PROCESSES AWARE OF THESE INDICES
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, PS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
@@ -183,10 +181,13 @@ MODULE SCARFLIB_FFT3
       ALLOCATE(NPOINTS(0:WORLD_SIZE - 1))
 
       ! NUMBER OF INPUT POINTS
-      NPOINTS(WORLD_SIZE) = SIZE(X)
+      NPOINTS(WORLD_RANK) = SIZE(X)
 
       ! SHARE THIS INFORMATION AMONGST PROCESSES
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+
+
+      PRINT*, WORLD_RANK, 'POINTS: ', NPOINTS(WORLD_RANK), ', PS/PE= ', PS(:,WORLD_RANK), PE(:,WORLD_RANK)
 
 
       ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
@@ -279,7 +280,7 @@ MODULE SCARFLIB_FFT3
 !
 ! PRINT*, 'MIN/MAX REAL(SPECTRUM) ', WORLD_RANK, MINVAL(REAL(SPEC)), MAXVAL(REAL(SPEC))
 
-      FIELD = 0._FPP
+      FIELD = BIG
 
       ALLOCATE(COMPLETED(0:WORLD_SIZE - 1), ISBUSY(0:WORLD_SIZE - 1))
 
@@ -338,9 +339,14 @@ MODULE SCARFLIB_FFT3
 
         CALL MPI_SPLIT_TASK(NPOINTS(BUDDIES(1)), N, I0, I1)
 
+        DO I = 0, WORLD_SIZE - 1
+          IF (I .EQ. WORLD_RANK) PRINT*, 'BLOCKS ', WORLD_RANK, ' -- ', N, ' -- ', I0, ' -- ', I1
+          CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+        ENDDO
+
         ! LOOP OVER BLOCKS
         DO I = 1, N
-          CALL SHARE_AND_INTERPOLATE(COMM, I0(I), I1(I), DH, DELTA, X, Y, Z, FIELD)
+          CALL SHARE_AND_INTERPOLATE(COMM, RANK, NTASKS, I0(I), I1(I), DH, DELTA, X, Y, Z, FIELD)
         ENDDO
 
         CALL MPI_COMM_FREE(COMM, IERR)
@@ -364,8 +370,7 @@ MODULE SCARFLIB_FFT3
       DEALLOCATE(DELTA)
       DEALLOCATE(GS, GE)
 
-      ! RELEASE MPI RESOURCES
-      CALL MPI_COMM_FREE(ZPENC, IERR)
+
 
       !CALL IO_WRITE_ONE(REAL(SPEC, FPP), 'random_struct.bin')
       !CALL IO_WRITE_SLICE(1, 50, REAL(SPEC, FPP), 'random_struct_slice.bin')
@@ -388,8 +393,9 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),    DIMENSION(:),         INTENT(IN)    :: X, Y, Z
       REAL(FPP),    DIMENSION(:),         INTENT(INOUT) :: FIELD
       INTEGER(IPP)                                      :: I, N                         !< COUNTERS
+      INTEGER(IPP)                                      :: IERR
       INTEGER(IPP), DIMENSION(0:NTASKS-1)               :: RECVCOUNTS, DISPLS
-      REAL(FPP),    DIMENSION(I0:I1)                    :: XP, YP, ZP                   !< TEMPORARY ARRAYS
+      REAL(FPP),    DIMENSION(I0:I1)                    :: XP, YP, ZP, VP                   !< TEMPORARY ARRAYS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -406,25 +412,28 @@ MODULE SCARFLIB_FFT3
       ENDIF
 
       ! BCAST DATA TO SLAVES
-      CALL BCAST(XP, N, REAL_TYPE, 0, COMM, IERR)
-      CALL BCAST(YP, N, REAL_TYPE, 0, COMM, IERR)
-      CALL BCAST(ZP, N, REAL_TYPE, 0, COMM, IERR)
+      CALL MPI_BCAST(XP, N, REAL_TYPE, 0, COMM, IERR)
+      CALL MPI_BCAST(YP, N, REAL_TYPE, 0, COMM, IERR)
+      CALL MPI_BCAST(ZP, N, REAL_TYPE, 0, COMM, IERR)
 
       CALL INTERPOLATE(DH, XP, YP, ZP, DELTA, VP)
 
+      ! SET INITIAL VALUE FOR COUNTER
       N = I0 - 1
 
-      ASSOCIATE( VAL => XP, POS => YP)
+      ! RE-USE TEMPORARY ARRAYS BUT RENAME VARIABLES FOR CLARITY, KEEP ORIGINAL BOUNDS
+      ASSOCIATE( VAL => XP, POS => YP )
 
-      ! MANUAL PACKING OF INTERPOLATED POINTS (REUSE TEMPORARY ARRAYS)
+      ! MANUAL PACKING OF INTERPOLATED POINTS
       DO I = I0, I1
-        IF (VP(J) .NE. BIG) THEN
+        IF (VP(I) .NE. BIG) THEN
           N      = N + 1
           VAL(N) = VP(I)
           POS(N) = REAL(I, FPP)
         ENDIF
       ENDDO
 
+      ! GET EFFECTIVE NUMBER OF INTERPOLATED POINTS
       N = N - I0 + 1
 
       ! STORE NUMBER OF INTERPOLATED VALUES FOR EACH PROCESS
@@ -446,7 +455,7 @@ MODULE SCARFLIB_FFT3
       ! ONLY MASTER COPY INTERPOLATED VALUES AT RIGHT LOCATION
       IF (RANK .EQ. 0) THEN
         DO I = I0, I1
-          FIELD(POS(I)) = VAL(I)
+          FIELD(NINT(POS(I))) = VAL(I)
         ENDDO
       ENDIF
 
@@ -461,14 +470,14 @@ MODULE SCARFLIB_FFT3
     SUBROUTINE FIND_BUDDIES(RANK, BUDDIES)
 
       INTEGER(IPP),                            INTENT(IN)  :: RANK                   !< GLOBAL PROCESS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: BUDDIES
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(INOUT) :: BUDDIES
       INTEGER(IPP)                                         :: I, J
       LOGICAL,                   DIMENSION(3)              :: BOOL
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! FOR SURE WE NEED TO INCLUDE PROCESS OWNING POINTS
-      BUDDIES(0) = RANK
+      BUDDIES = [RANK]
 
       ! LOOP OVER ALL PROCESSES
       DO I = 0, WORLD_SIZE - 1
@@ -476,9 +485,10 @@ MODULE SCARFLIB_FFT3
         ! SKIP IF WE STUMBLE OVER CALLING PROCESS
         IF (I .EQ. RANK) CYCLE
 
-        ! THE "-1" IS DUE TO THE PRESENCE OF HALO
         DO J = 1, 3
-          BOOL(J) = (PS(J, RANK) .GE. (GS(J, I) - 1)) .AND. (PE(J, RANK) .LT. GE(J, I))
+          ! BOOL(J) = (PS(J, RANK) .GE. (GS(J, I) - 1)) .AND. (PE(J, RANK) .LT. GE(J, I))
+          BOOL(J) = (PS(J, RANK) .LT. GE(J, I)) .AND. (PS(J, RANK) .GE. (GS(J, I) - 1)) .OR.    &
+                    (PS(J, RANK) .LT. GE(J, I)) .AND. (PS(J, RANK) .GE. (GS(J, I) - 1))
         ENDDO
 
         ! ADD I-TH PROCESS (USE AUTOMATIC REALLOCATION)
@@ -1799,7 +1809,7 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP), DIMENSION(3)                  :: N
       LOGICAL ,     DIMENSION(3)                  :: BOOL
       REAL(FPP)                                   :: I, J, K
-      REAL(FPP)                                   :: PX, PY, IPZ, IPX, IPY             !< INTERPOLATION STUFF
+      REAL(FPP)                                   :: PX, PY, PZ, IPX, IPY             !< INTERPOLATION STUFF
       REAL(FPP)                                   :: A, B                             !< INTERPOLATION STUFF
       REAL(FPP),    DIMENSION(2,2)                :: F                                !< INTERPOLATION STUFF
 
@@ -1824,14 +1834,14 @@ MODULE SCARFLIB_FFT3
         J0 = FLOOR(J)
         K0 = FLOOR(K)
 
-        BOOL(1) = (I0 .LT. 1) .OR .(I0 .GE. N(1))
-        BOOL(2) = (J0 .LT. 1) .OR .(J0 .GE. N(2))
-        BOOL(3) = (K0 .LT. 1) .OR .(K0 .GE. N(3))
+        BOOL(1) = (I0 .LT. 1) .OR. (I0 .GE. N(1))
+        BOOL(2) = (J0 .LT. 1) .OR. (J0 .GE. N(2))
+        BOOL(3) = (K0 .LT. 1) .OR. (K0 .GE. N(3))
 
         IF (ANY(BOOL .EQV. .TRUE.)) CYCLE
 
-        F(:, 1) = BUFFER(I0:I0 + 1, J0, K0)
-        F(:, 2) = BUFFER(I0:I0 + 1, J0 + 1, K0)
+        F(:, 1) = DELTA(I0:I0 + 1, J0, K0)
+        F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0)
 
         PX = I - I0
         PY = J - J0
@@ -1842,18 +1852,16 @@ MODULE SCARFLIB_FFT3
         ! BILINEAR INTERPOLATION AT LEVEL 1
         A = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
 
-        F(:, 1) = BUFFER(I0:I0 + 1, J0, K0 + 1)
-        F(:, 2) = BUFFER(I0:I0 + 1, J0 + 1, K0 + 1)
+        F(:, 1) = DELTA(I0:I0 + 1, J0, K0 + 1)
+        F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0 + 1)
 
         ! BILINEAR INTERPOLATION AT LEVEL 2
         B = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
 
-        !PZ = Z(P) - K
-        IPZ = K0 - K
+        PZ = K - K0
 
         ! LINEAR INTERPOLATED BETWEEN LEVEL 1 AND 2
-        !FIELD(P) = A * (1._FPP - PZ) + B * PZ
-        FIELD(P) = A * IPZ + B * (1._FPP - IPZ)
+        FIELD(P) = A * (1._FPP - PZ) + B * PZ
 
 
 ! IF (WORLD_RANK == 0) THEN
