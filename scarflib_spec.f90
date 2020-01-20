@@ -327,63 +327,63 @@ MODULE SCARFLIB_SPECTRAL
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  FUNCTION VARIANCE(R) RESULT(V)
-
-    ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM
-
-    REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-    INTEGER(IPP)                              :: I, J, K
-    REAL(FPP)                                 :: MU, S1, S2, X, V
-
-    !-----------------------------------------------------------------------------------------------------------------------------
-
-    MU = MEAN(R)
-
-    S1 = 0._FPP
-    S2 = 0._FPP
-
-    DO K = 1, SIZE(R, 3)
-      DO J = 1, SIZE(R, 2)
-        DO I = 1, SIZE(R, 1)
-          X = R(I, J, K) - MU
-          S1 = S1 + X
-          S2 = S2 + X**2
-        ENDDO
-      ENDDO
-    ENDDO
-
-    S1 = (S1**2) / REAL(SIZE(R), FPP)
-
-    V = (S2 - S1) / REAL(SIZE(R) - 1, FPP)
-
-  END FUNCTION VARIANCE
+  ! FUNCTION VARIANCE(R) RESULT(V)
+  !
+  !   ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM
+  !
+  !   REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
+  !   INTEGER(IPP)                              :: I, J, K
+  !   REAL(FPP)                                 :: MU, S1, S2, X, V
+  !
+  !   !-----------------------------------------------------------------------------------------------------------------------------
+  !
+  !   MU = MEAN(R)
+  !
+  !   S1 = 0._FPP
+  !   S2 = 0._FPP
+  !
+  !   DO K = 1, SIZE(R, 3)
+  !     DO J = 1, SIZE(R, 2)
+  !       DO I = 1, SIZE(R, 1)
+  !         X = R(I, J, K) - MU
+  !         S1 = S1 + X
+  !         S2 = S2 + X**2
+  !       ENDDO
+  !     ENDDO
+  !   ENDDO
+  !
+  !   S1 = (S1**2) / REAL(SIZE(R), FPP)
+  !
+  !   V = (S2 - S1) / REAL(SIZE(R) - 1, FPP)
+  !
+  ! END FUNCTION VARIANCE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
   !===============================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-  FUNCTION MEAN(R) RESULT(V)
-
-    REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-    INTEGER(IPP)                              :: I, J, K
-    REAL(FPP)                                 :: V, C
-
-    !-------------------------------------------------------------------------------------------------------------------------------
-
-    !V = COMPENSATED_SUM(R) / REAL(SIZE(R), FPP)
-
-    V = 0._FPP
-    C = 1._FPP
-
-    DO K = 1, SIZE(R, 3)
-      DO J = 1, SIZE(R, 2)
-        DO I = 1, SIZE(R, 1)
-          V = V + (R(I, J, K) - V) / C
-          C = C + 1._FPP
-        ENDDO
-      ENDDO
-    ENDDO
-
-  END FUNCTION MEAN
+  ! 
+  ! FUNCTION MEAN(R) RESULT(V)
+  !
+  !   REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
+  !   INTEGER(IPP)                              :: I, J, K
+  !   REAL(FPP)                                 :: V, C
+  !
+  !   !-------------------------------------------------------------------------------------------------------------------------------
+  !
+  !   !V = COMPENSATED_SUM(R) / REAL(SIZE(R), FPP)
+  !
+  !   V = 0._FPP
+  !   C = 1._FPP
+  !
+  !   DO K = 1, SIZE(R, 3)
+  !     DO J = 1, SIZE(R, 2)
+  !       DO I = 1, SIZE(R, 1)
+  !         V = V + (R(I, J, K) - V) / C
+  !         C = C + 1._FPP
+  !       ENDDO
+  !     ENDDO
+  !   ENDDO
+  !
+  ! END FUNCTION MEAN
 
 END MODULE SCARFLIB_SPECTRAL

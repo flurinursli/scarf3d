@@ -25,7 +25,7 @@ PROGRAM DRIVER
   LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
   REAL(FPP)                                            :: DH, SIGMA, HURST, TICTOC
   REAL(FPP),                 DIMENSION(3)              :: CL
-  REAL(FPP),                 DIMENSION(10)             :: INFO
+  REAL(FPP),                 DIMENSION(8)              :: INFO
   REAL(FPP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
   REAL(FPP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
 
@@ -200,18 +200,26 @@ PROGRAM DRIVER
   ! WRITE A MODEL SLICE TO DISK
   CALL IO_WRITE_SLICE(2, 100, V3, 'fft_slice.bin')
 
+  CALL IO_WRITE_ONE(V3, 'fft_whole.bin')
+
+
+  DO I = 0, NTASKS - 1
+    IF (RANK .EQ. I) PRINT*, RANK, MINVAL(V3), MAXVAL(V3)
+    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+  ENDDO
+
   DEALLOCATE(GS, GE)
 
   ! SOME TIMING INFO
   IF (RANK .EQ. 0) THEN
+    PRINT*, 'DOMAIN TOO SMALL?',   NINT(INFO(1))
+    PRINT*, 'DH TOO LARGE?',       NINT(INFO(2))
     PRINT*, 'TIMING SPECTRUM: ',   REAL(INFO(3), KIND=REAL32)
     PRINT*, 'TIMING SYMMETRY: ',   REAL(INFO(4), KIND=REAL32)
     PRINT*, 'TIMING IFFT: ',       REAL(INFO(5), KIND=REAL32)
-    PRINT*, 'TIMING BCAST: ',      REAL(INFO(6), KIND=REAL32)
-    PRINT*, 'TIMING HALO: ',       REAL(INFO(7), KIND=REAL32)
-    PRINT*, 'TIMING ADD2BUFFER: ', REAL(INFO(8), KIND=REAL32)
-    PRINT*, 'TIMING SHIFT: ',      REAL(INFO(9), KIND=REAL32)
-    PRINT*, 'TIMING INTERP: ',     REAL(INFO(10), KIND=REAL32)
+    PRINT*, 'TIMING INTERP: ',     REAL(INFO(6), KIND=REAL32)
+    PRINT*, 'STAND. DEV.: ',       REAL(INFO(7), KIND=REAL32)
+    PRINT*, 'MEAN: ',              REAL(INFO(8), KIND=REAL32)
   ENDIF
 
   NULLIFY(V3, X3, Y3, Z3)

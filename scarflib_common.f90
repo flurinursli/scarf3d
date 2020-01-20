@@ -22,17 +22,17 @@ MODULE SCARFLIB_COMMON
   INTEGER, PARAMETER :: IPP = INT32
 
   !#ifdef DOUBLE_PREC
-   INTEGER(IPP), PARAMETER :: FPP          = REAL64
-   INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
-   INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
-   INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
-   INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
+   ! INTEGER(IPP), PARAMETER :: FPP          = REAL64
+   ! INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
+   ! INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
+   ! INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
+   ! INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
   !#else
-    ! INTEGER(IPP), PARAMETER :: FPP          = REAL32
-    ! INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
-    ! INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
-    ! INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
-    ! INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
+    INTEGER(IPP), PARAMETER :: FPP          = REAL32
+    INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
+    INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
+    INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
+    INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
   !#endif
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
@@ -352,14 +352,117 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    REAL(FPP) FUNCTION VARIANCE(R)
+
+      ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM. CALCULATIONS ARE ALWAYS IN DOUBLE
+      ! PRECISION.
+
+      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
+      INTEGER(IPP)                          :: I
+      REAL(REAL64)                          :: MU, S1, S2, X, V
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      MU = MEAN(R)
+
+      S1 = 0._REAL64
+      S2 = 0._REAL64
+
+      DO I = 1, SIZE(R)
+        X = REAL(R(I), REAL64) - MU
+        S1 = S1 + X
+        S2 = S2 + X**2
+      ENDDO
+
+      S1 = (S1**2) / REAL(SIZE(R), REAL64)
+
+      V = (S2 - S1) / REAL(SIZE(R) - 1, REAL64)
+
+      VARIANCE = REAL(V, FPP)
+
+    END FUNCTION VARIANCE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    REAL(FPP) FUNCTION MEAN(R)
+
+      ! COMPUTE MEAN OF DATASET "R" AVOIDING FLOATING POINT INACCURACIES. CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
+
+      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
+      INTEGER(IPP)                          :: I
+      REAL(REAL64)                          :: V, C
+
+      !-------------------------------------------------------------------------------------------------------------------------------
+
+      V = 0._REAL64
+      C = 1._REAL64
+
+      DO I = 1, SIZE(R)
+        V = V + (REAL(R(I), REAL64) - V) / C
+        C = C + 1._REAL64
+      ENDDO
+
+      ! RETURN MEAN AT DESIRED PRECISION
+      MEAN = REAL(V, FPP)
+
+    END FUNCTION MEAN
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE PARALLEL_VARIANCE(VARSET, AVGSET, NSET, VAR, AVG)
+
+      ! GIVEN A SEQUENCE OF VARIANCE "VARSET" AND MEAN "AVGSET" VALUES, EACH BASED ON "NSET" NUMBER OF POINTS, THIS SUBROUTINE RETURNS
+      ! THE RESULTING TOTAL VARIANCE AND MEAN BASED ON THE ALGORITHM OF CHAN ET AL. (1979). CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
+
+      REAL(FPP),    DIMENSION(:), INTENT(IN)  :: VARSET                             !< SET OF VARIANCE VALUES
+      REAL(FPP),    DIMENSION(:), INTENT(IN)  :: AVGSET                             !< SET OF MEAN VALUES
+      INTEGER(IPP), DIMENSION(:), INTENT(IN)  :: NSET                               !< NUMBER OF POINTS FOR EACH SET
+      REAL(FPP),                  INTENT(OUT) :: VAR                                !< RESULTING VARIANCE
+      REAL(FPP),                  INTENT(OUT) :: AVG                                !< RESULTING AVERAGE
+      INTEGER(IPP)                            :: I                                  !< COUNTER
+      REAL(KIND=REAL64)                       :: SIG, MU, N, DELTA, M1, M2, M       !< LOCAL VARIABLES
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! VARIANCE, MEAN AND NUMBER OF POINTS OF FIRST SET
+      SIG = REAL(VARSET(1), REAL64)
+      MU  = REAL(AVGSET(1), REAL64)
+      N   = REAL(NSET(1), REAL64)
+
+      ! LOOP OVER SET OF VARIANCE/MEAN VALUES
+      DO I = 2, SIZE(NSET)
+
+        DELTA = REAL(AVGSET(I), REAL64) - MU
+
+        M1 = SIG * (N - 1._REAL64)
+        M2 = REAL(VARSET(I), REAL64) * (NSET(I) - 1._REAL64)
+
+        M = M1 + M2 + DELTA**2 * N * REAL(NSET(I), REAL64) / (N + REAL(NSET(I), REAL64))
+
+        ! RESULTING MEAN
+        MU = (MU * N + REAL(AVGSET(I), REAL64) * REAL(NSET(I), REAL64)) / (N + REAL(NSET(I), REAL64))
+
+        ! RESULTING NUMBER OF POINTS
+        N = N + REAL(NSET(I), REAL64)
+
+        ! RESULTING VARIANCE
+        SIG = M / (N - 1._REAL64)
+
+      ENDDO
+
+      ! RETURN WITH DESIRED PRECISION
+      VAR = REAL(SIG, FPP)
+      AVG = REAL(MU, FPP)
+
+    END SUBROUTINE PARALLEL_VARIANCE
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
 
 END MODULE SCARFLIB_COMMON

@@ -679,99 +679,99 @@ print*, rank, FFT_START(1), FFT_END(1), ' ', FFT_START(2), FFT_END(2), ' ', FFT_
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    FUNCTION MEAN(R) RESULT(V)
-
-      REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-      INTEGER(IPP)                              :: I, J, K
-      REAL(FPP)                                 :: V, C
-
-      !-------------------------------------------------------------------------------------------------------------------------------
-
-      !V = COMPENSATED_SUM(R) / REAL(SIZE(R), FPP)
-
-      V = 0._FPP
-      C = 1._FPP
-
-      DO K = 1, SIZE(R, 3)
-        DO J = 1, SIZE(R, 2)
-          DO I = 1, SIZE(R, 1)
-            V = V + (R(I, J, K) - V) / C
-            C = C + 1._FPP
-          ENDDO
-        ENDDO
-      ENDDO
-
-    END FUNCTION MEAN
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    FUNCTION VARIANCE(R) RESULT(V)
-
-      ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM
-
-      REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-      INTEGER(IPP)                              :: I, J, K
-      REAL(FPP)                                 :: MU, S1, S2, X, V
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      MU = MEAN(R)
-
-      S1 = 0._FPP
-      S2 = 0._FPP
-
-      DO K = 1, SIZE(R, 3)
-        DO J = 1, SIZE(R, 2)
-          DO I = 1, SIZE(R, 1)
-            X = R(I, J, K) - MU
-            S1 = S1 + X
-            S2 = S2 + X**2
-          ENDDO
-        ENDDO
-      ENDDO
-
-      S1 = (S1**2) / REAL(SIZE(R), FPP)
-
-      V = (S2 - S1) / REAL(SIZE(R) - 1, FPP)
-
-    END FUNCTION VARIANCE
+    ! FUNCTION MEAN(R) RESULT(V)
+    !
+    !   REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
+    !   INTEGER(IPP)                              :: I, J, K
+    !   REAL(FPP)                                 :: V, C
+    !
+    !   !-------------------------------------------------------------------------------------------------------------------------------
+    ! 
+    !   !V = COMPENSATED_SUM(R) / REAL(SIZE(R), FPP)
+    !
+    !   V = 0._FPP
+    !   C = 1._FPP
+    !
+    !   DO K = 1, SIZE(R, 3)
+    !     DO J = 1, SIZE(R, 2)
+    !       DO I = 1, SIZE(R, 1)
+    !         V = V + (R(I, J, K) - V) / C
+    !         C = C + 1._FPP
+    !       ENDDO
+    !     ENDDO
+    !   ENDDO
+    !
+    ! END FUNCTION MEAN
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE PARALLEL_VARIANCE(VAR, MU, N)
+    ! FUNCTION VARIANCE(R) RESULT(V)
+    !
+    !   ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM
+    !
+    !   REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
+    !   INTEGER(IPP)                              :: I, J, K
+    !   REAL(FPP)                                 :: MU, S1, S2, X, V
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   MU = MEAN(R)
+    !
+    !   S1 = 0._FPP
+    !   S2 = 0._FPP
+    !
+    !   DO K = 1, SIZE(R, 3)
+    !     DO J = 1, SIZE(R, 2)
+    !       DO I = 1, SIZE(R, 1)
+    !         X = R(I, J, K) - MU
+    !         S1 = S1 + X
+    !         S2 = S2 + X**2
+    !       ENDDO
+    !     ENDDO
+    !   ENDDO
+    !
+    !   S1 = (S1**2) / REAL(SIZE(R), FPP)
+    !
+    !   V = (S2 - S1) / REAL(SIZE(R) - 1, FPP)
+    !
+    ! END FUNCTION VARIANCE
 
-      REAL(FPP),    DIMENSION(2), INTENT(INOUT) :: VAR
-      REAL(FPP),    DIMENSION(2), INTENT(INOUT) :: MU
-      INTEGER(IPP), DIMENSION(2), INTENT(INOUT) :: N
-      REAL(FPP)                                 :: DELTA, M2
-      REAL(FPP),    DIMENSION(2)                :: M
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      DELTA = MU(2) - MU(1)
-
-      M(1) = VAR(1) * REAL(N(1) - 1, FPP)
-      M(2) = VAR(2) * REAL(N(2) - 1, FPP)
-
-      M2 = SUM(M) + DELTA**2 * REAL(PRODUCT(N), FPP) / REAL(SUM(N), FPP)
-
-      M2 = M2 / REAL(SUM(N) - 1, FPP)
-
-      ! OUTPUT MEAN
-      !MU(2) = MU(1) + DELTA * REAL(N(2), FPP) / REAL(SUM(N), FPP)
-      MU(2) = (N(1) * MU(1) + N(2) * MU(2)) / REAL(SUM(N), FPP)          !< THIS SHOULD BE MORE STABLE WHEN N(1)~N(2)
-
-      ! OUTPUT VARIANCE
-      VAR(2) = M2
-
-      ! UPDATE TOTAL NUMBER OF POINTS
-      N(2) = SUM(N)
-
-    END SUBROUTINE PARALLEL_VARIANCE
+    ! SUBROUTINE PARALLEL_VARIANCE(VAR, MU, N)
+    !
+    !   REAL(FPP),    DIMENSION(2), INTENT(INOUT) :: VAR
+    !   REAL(FPP),    DIMENSION(2), INTENT(INOUT) :: MU
+    !   INTEGER(IPP), DIMENSION(2), INTENT(INOUT) :: N
+    !   REAL(FPP)                                 :: DELTA, M2
+    !   REAL(FPP),    DIMENSION(2)                :: M
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   DELTA = MU(2) - MU(1)
+    !
+    !   M(1) = VAR(1) * REAL(N(1) - 1, FPP)
+    !   M(2) = VAR(2) * REAL(N(2) - 1, FPP)
+    !
+    !   M2 = SUM(M) + DELTA**2 * REAL(PRODUCT(N), FPP) / REAL(SUM(N), FPP)
+    !
+    !   M2 = M2 / REAL(SUM(N) - 1, FPP)
+    !
+    !   ! OUTPUT MEAN
+    !   !MU(2) = MU(1) + DELTA * REAL(N(2), FPP) / REAL(SUM(N), FPP)
+    !   MU(2) = (N(1) * MU(1) + N(2) * MU(2)) / REAL(SUM(N), FPP)          !< THIS SHOULD BE MORE STABLE WHEN N(1)~N(2)
+    !
+    !   ! OUTPUT VARIANCE
+    !   VAR(2) = M2
+    !
+    !   ! UPDATE TOTAL NUMBER OF POINTS
+    !   N(2) = SUM(N)
+    !
+    ! END SUBROUTINE PARALLEL_VARIANCE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
