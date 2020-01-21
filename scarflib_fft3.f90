@@ -76,10 +76,9 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),                     DIMENSION(8),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
       COMPLEX(FPP),     ALLOCATABLE, DIMENSION(:,:,:)              :: SPEC                 !< SPECTRUM/RANDOM FIELD
       INTEGER(IPP)                                                 :: IERR                 !< MPI STUFF
-      INTEGER(IPP)                                                 :: I, J, K, P              !< COUNTERS
+      INTEGER(IPP)                                                 :: I, J, K              !< COUNTERS
       INTEGER(IPP)                                                 :: N                    !< POINTS IN "BUFFER"
-      ! INTEGER(IPP)                                                 :: PID
-      ! INTEGER(IPP)                                                 :: DIR, STEP
+      INTEGER(IPP)                                                 :: ITER
       INTEGER(IPP)                                                 :: RANK, NTASKS
       INTEGER(IPP)                                                 :: NDIMS
       INTEGER(IPP)                                                 :: COMM
@@ -94,7 +93,7 @@ MODULE SCARFLIB_FFT3
       LOGICAL                                                      :: REORDER
       LOGICAL,                       DIMENSION(3)                  :: ISPERIODIC
       REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
-      REAL(FPP)                                                    :: TICTOC
+      REAL(REAL64)                                                 :: TICTOC
       REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
       REAL(FPP),                     DIMENSION(3)                  :: MIN_EXTENT           !< LOWER MODEL LIMITS (GLOBAL)
       REAL(FPP),                     DIMENSION(3)                  :: MAX_EXTENT           !< UPPER MODEL LIMITS (GLOBAL)
@@ -109,19 +108,6 @@ MODULE SCARFLIB_FFT3
       ! GET AVAILABLE MPI PROCESSES
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
 
-      ! NUMBER OF PROCESSES ALONG EACH DIRECTION
-      ! [THIS SHOULD BE REPLACED BY A BEST-EXEC SOLUTION AS IN "2DFFTDECOMP"]
-      DIMS  = [2, 1, 2]
-
-      ! WE WORK IN 3D
-      NDIMS = 3
-
-      ! ALLOW REORDERING
-      REORDER = .TRUE.
-
-      ! ENABLE GRID PERIODICITY ALONG X-/Y-DIRECTION: THIS IS USEFUL WHEN SHIFTING DATA
-      ISPERIODIC = [.TRUE., .TRUE., .FALSE.]
-
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
       MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
       MAX_EXTENT = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
@@ -130,7 +116,7 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
 
-!IF (WORLD_RANK == 0) PRINT*, 'MIN ', MIN_EXTENT, ' MAX ', MAX_EXTENT
+      !IF (WORLD_RANK == 0) PRINT*, 'MIN ', MIN_EXTENT, ' MAX ', MAX_EXTENT
 
       ! CYCLE OVER THE THREE MAIN DIRECTIONS TO DETERMINE THE NECESSARY MODEL SIZE (IN NUMBER OF POINTS) AND THE ABSOLUTE POSITION OF
       ! OF THE FIRST POINT TO COUNTERACT FFT PERIODICITY
@@ -142,7 +128,7 @@ MODULE SCARFLIB_FFT3
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH) + 1
 
-!offset = 0
+        !OFFSET = 0
 
         ! EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
         NPTS(I) = NPTS(I) + 2 * OFFSET
@@ -151,7 +137,7 @@ MODULE SCARFLIB_FFT3
         IF (MOD(NPTS(I), 2) .NE. 0) NPTS(I) = NPTS(I) + 1
 
         ! ABSOLUTE POSITION OF FIRST POINT (IT COULD BE NEGATIVE)
-        OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET + 0) * DH
+        OFF_AXIS(I) = MIN_EXTENT(I) - OFFSET * DH
         !OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET - 0.5_FPP) * DH
 
       ENDDO
@@ -189,11 +175,31 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
 
-      PRINT*, WORLD_RANK, 'POINTS: ', NPOINTS(WORLD_RANK), ', PS/PE= ', PS(:,WORLD_RANK), PE(:,WORLD_RANK)
+      ! PRINT*, WORLD_RANK, 'POINTS: ', NPOINTS(WORLD_RANK), ', PS/PE= ', PS(:,WORLD_RANK), PE(:,WORLD_RANK)
 
 
       ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
       ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE PROCESS
+
+      ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
+      ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
+
+      CALL BEST_CONFIG(DIMS, ITER)
+
+      IF (WORLD_RANK == 0) PRINT*, 'BEST DIMS ', DIMS, ' -- ', ITER
+
+      ! NUMBER OF PROCESSES ALONG EACH DIRECTION
+      ! [THIS SHOULD BE REPLACED BY A BEST-EXEC SOLUTION AS IN "2DFFTDECOMP"]
+      !DIMS  = [2, 1, 2]
+
+      ! WE WORK IN 3D
+      NDIMS = 3
+
+      ! ALLOW REORDERING
+      REORDER = .TRUE.
+
+      ! SET GRID PERIODICITY
+      ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
 
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
@@ -204,17 +210,14 @@ MODULE SCARFLIB_FFT3
       ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
       CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
 
-      DO I = 0, WORLD_SIZE - 1
-        IF (WORLD_RANK .EQ. I) THEN
-          PRINT*, 'FFT MESH: RANK', WORLD_RANK, '= ', LS(1), LE(1), ' -- ', LS(2), LE(2), ' -- ', LS(3), LE(3)
-        ENDIF
-        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-      ENDDO
-
-      IF (WORLD_RANK == 0) PRINT*, 'NPTS: ', NPTS, ', OFF_AXIS= ', OFF_AXIS
-
-      ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
-      ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
+      ! DO I = 0, WORLD_SIZE - 1
+      !   IF (WORLD_RANK .EQ. I) THEN
+      !     PRINT*, 'FFT MESH: RANK', WORLD_RANK, '= ', LS(1), LE(1), ' -- ', LS(2), LE(2), ' -- ', LS(3), LE(3)
+      !   ENDIF
+      !   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      ! ENDDO
+      !
+      ! IF (WORLD_RANK == 0) PRINT*, 'NPTS: ', NPTS, ', OFF_AXIS= ', OFF_AXIS
 
       GS(:, WORLD_RANK) = LS
       GE(:, WORLD_RANK) = LE
@@ -259,7 +262,7 @@ MODULE SCARFLIB_FFT3
       DO K = 1, M(3)
         DO J = 1, M(2)
           DO I = 1, M(1)
-            DELTA(I, J, K) = SPEC(I, J, K) * SCALING
+            DELTA(I, J, K) = REAL(SPEC(I, J, K), FPP) * SCALING
           ENDDO
         ENDDO
       ENDDO
@@ -277,7 +280,7 @@ MODULE SCARFLIB_FFT3
       CALL EXCHANGE_HALO(DELTA)
 
       ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
-      DO WHILE(ANY(COMPLETED .EQ. 0))
+      DO K = 1, ITER
 
         ! RESET "BUSY PROCESS" FLAG
         ISBUSY(:) = 0
@@ -292,7 +295,7 @@ MODULE SCARFLIB_FFT3
             ! PRODUCE A TENTATIVE LIST OF PROCESSES THAT MAY JOIN THE NEW COMMUNICATOR
             CALL FIND_BUDDIES(I, BUFFER)
 
-            IF (WORLD_RANK == 0) PRINT*, 'BUDDIES FOR RANK: ', I, ', ', BUFFER, ' -- ALL FREE?', ALL(ISBUSY(BUFFER) == 0)
+            !IF (WORLD_RANK == 0) PRINT*, 'BUDDIES FOR RANK: ', I, ', ', BUFFER, ' -- ALL FREE?', ALL(ISBUSY(BUFFER) == 0)
 
             ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
             IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
@@ -318,12 +321,10 @@ MODULE SCARFLIB_FFT3
 
 
         ! LIST COMMUNICATORS (DEBUGGING)
-        DO I = 0, WORLD_SIZE - 1
-          IF (I .EQ. WORLD_RANK) PRINT*, 'COM ', WORLD_RANK, ' -- ', BUDDIES, ' -- ', RANK, ' COMM==NULL?', COMM == MPI_COMM_NULL
-          CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-        ENDDO
-
-        !CALL SLEEP(1)
+        ! DO I = 0, WORLD_SIZE - 1
+        !   IF (I .EQ. WORLD_RANK) PRINT*, 'COM ', WORLD_RANK, ' -- ', BUDDIES, ' -- ', RANK, ' COMM==NULL?', COMM == MPI_COMM_NULL
+        !   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+        ! ENDDO
 
 
         ! ONLY PROCESSES ASSOCIATED TO A COMMUNICATOR CAN EXECUTE INSTRUCTIONS BELOW, OTHERWISE ALREADY COMPUTED POINTS MAY GET
@@ -376,7 +377,7 @@ MODULE SCARFLIB_FFT3
       DEALLOCATE(DELTA)
       DEALLOCATE(GS, GE)
 
-
+      CALL MPI_COMM_FREE(CARTOPO, IERR)
 
       !CALL IO_WRITE_ONE(REAL(SPEC, FPP), 'random_struct.bin')
       !CALL IO_WRITE_SLICE(1, 50, REAL(SPEC, FPP), 'random_struct_slice.bin')
@@ -693,12 +694,20 @@ MODULE SCARFLIB_FFT3
       ALLOCATE(RECVBUF(NZ * LX(RANK)))
 
       ! BUFFER "CDUM" WILL BE USED FOR TRANSFORM AND IT IS ALLOCATED USING FFTW MEMORY ALLOCATION UTILITY
+#ifdef DOUBLE_PREC
+      PC = FFTW_ALLOC_COMPLEX(INT(LX(RANK) * NZ, C_SIZE_T))
+#else
       PC = FFTWF_ALLOC_COMPLEX(INT(LX(RANK) * NZ, C_SIZE_T))
+#endif
 
       CALL C_F_POINTER(PC, CDUM, [LX(RANK) * NZ])
 
       ! PREPARE FFTW PLAN ALONG Z-AXIS ("LX(RANK)" TRANSFORMS, EACH HAVING "NZ" NUMBER OF POINTS)
+#ifdef DOUBLE_PREC
+      P1 = FFTW_PLAN_MANY_DFT(1, [NZ], LX(RANK), CDUM, [NZ], LX(RANK), 1, CDUM, [NZ], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
+#else
       P1 = FFTWF_PLAN_MANY_DFT(1, [NZ], LX(RANK), CDUM, [NZ], LX(RANK), 1, CDUM, [NZ], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
+#endif
 
       ! WORK Y-SLICES ONE BY ONE
       DO J = 1, NY
@@ -719,7 +728,11 @@ MODULE SCARFLIB_FFT3
         CALL MPI_ALLTOALLV(SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, CDUM, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, PENCIL, IERR)
 
         ! IFFT
+#ifdef DOUBLE_PREC
+        CALL FFTW_EXECUTE_DFT(P1, CDUM, CDUM)
+#else
         CALL FFTWF_EXECUTE_DFT(P1, CDUM, CDUM)
+#endif
 
         C = 0
 
@@ -746,11 +759,20 @@ MODULE SCARFLIB_FFT3
       ENDDO
 
       ! DESTROY PLAN
+#ifdef DOUBLE_PREC
+      CALL FFTW_DESTROY_PLAN(P1)
+#else
       CALL FFTWF_DESTROY_PLAN(P1)
+#endif
 
       ! RELEASE MEMORY
       NULLIFY(CDUM)
+
+#ifdef DOUBLE_PREC
+      CALL FFTW_FREE(PC)
+#else
       CALL FFTWF_FREE(PC)
+#endif
 
       DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
       DEALLOCATE(I0, I1, K0, K1)
@@ -869,12 +891,20 @@ MODULE SCARFLIB_FFT3
       ALLOCATE(RECVBUF(NY * LX(RANK)))
 
       ! BUFFER "CDUM" WILL BE USED FOR TRANSFORM AND IT IS ALLOCATED USING FFTW MEMORY ALLOCATION UTILITY
+#ifdef DOUBLE_PREC
+      PC = FFTW_ALLOC_COMPLEX(INT(LX(RANK) * NY, C_SIZE_T))
+#else
       PC = FFTWF_ALLOC_COMPLEX(INT(LX(RANK) * NY, C_SIZE_T))
+#endif
 
       CALL C_F_POINTER(PC, CDUM, [LX(RANK) * NY])
 
       ! PREPARE FFTW PLAN ALONG Y-AXIS ("LX(RANK)" TRANSFORMS, EACH HAVING "NY" NUMBER OF POINTS)
+#ifdef DOUBLE_PREC
+      P1 = FFTW_PLAN_MANY_DFT(1, [NY], LX(RANK), CDUM, [NY], LX(RANK), 1, CDUM, [NY], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
+#else
       P1 = FFTWF_PLAN_MANY_DFT(1, [NY], LX(RANK), CDUM, [NY], LX(RANK), 1, CDUM, [NY], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
+#endif
 
       ! WORK Z-SLICES ONE BY ONE
       DO K = 1, NZ
@@ -895,7 +925,11 @@ MODULE SCARFLIB_FFT3
         CALL MPI_ALLTOALLV(SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, CDUM, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, PENCIL, IERR)
 
         ! IFFT
+#ifdef DOUBLE_PREC
+        CALL FFTW_EXECUTE_DFT(P1, CDUM, CDUM)
+#else
         CALL FFTWF_EXECUTE_DFT(P1, CDUM, CDUM)
+#endif
 
         C = 0
 
@@ -922,11 +956,20 @@ MODULE SCARFLIB_FFT3
       ENDDO
 
       ! DESTROY PLAN
+#ifdef DOUBLE_PREC
+      CALL FFTW_DESTROY_PLAN(P1)
+#else
       CALL FFTWF_DESTROY_PLAN(P1)
+#endif
 
       ! RELEASE MEMORY
       NULLIFY(CDUM)
+
+#ifdef DOUBLE_PREC
+      CALL FFTW_FREE(PC)
+#else
       CALL FFTWF_FREE(PC)
+#endif
 
       DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
       DEALLOCATE(I0, I1, J0, J1)
@@ -1083,15 +1126,22 @@ MODULE SCARFLIB_FFT3
       ALLOCATE(RECVBUF(NY * LX(RANK)))
 
       ! ALLOCATE MEMORY USING FFTW ALLOCATION UTILITY
+#ifdef DOUBLE_PREC
+      PC = FFTW_ALLOC_COMPLEX(INT(LY(RANK) * NYQUIST, C_SIZE_T))
+#else
       PC = FFTWF_ALLOC_COMPLEX(INT(LY(RANK) * NYQUIST, C_SIZE_T))
+#endif
 
       ! FOR IN-PLACE TRANSFORMS, OUTPUT REAL ARRAY IS SLIGHTLY LONGER THAN ACTUAL PHYSICAL DIMENSION
       CALL C_F_POINTER(PC, CDUM, [LY(RANK) * NYQUIST])
       CALL C_F_POINTER(PC, RDUM, [LY(RANK) * NYQUIST * 2])
 
       ! PREPARE FFTW PLAN ALONG X-AXIS ("LY(RANK)" TRANSFORMS, EACH HAVING "NPTS(1)" NUMBER OF POINTS)
-      P1 = FFTWF_PLAN_MANY_DFT_C2R(1, [NPTS(1)], LY(RANK), CDUM, [NPTS(1)], LY(RANK), 1, RDUM, [NPTS(1)], LY(RANK), 1,   &
-           FFTW_ESTIMATE)
+#ifdef DOUBLE_PREC
+      P1 = FFTW_PLAN_MANY_DFT_C2R(1, [NPTS(1)], LY(RANK), CDUM, [NPTS(1)], LY(RANK), 1, RDUM, [NPTS(1)], LY(RANK), 1, FFTW_ESTIMATE)
+#else
+      P1 = FFTWF_PLAN_MANY_DFT_C2R(1, [NPTS(1)], LY(RANK), CDUM, [NPTS(1)], LY(RANK), 1, RDUM, [NPTS(1)], LY(RANK), 1,FFTW_ESTIMATE)
+#endif
 
       ! WORK Z-SLICES ONE BY ONE
       DO K = 1, NZ
@@ -1112,7 +1162,11 @@ MODULE SCARFLIB_FFT3
         CALL MPI_ALLTOALLV(SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, CDUM, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, PENCIL, IERR)
 
         ! IFFT
+#ifdef DOUBLE_PREC
+        CALL FFTW_EXECUTE_DFT_C2R(P1, CDUM, RDUM)
+#else
         CALL FFTWF_EXECUTE_DFT_C2R(P1, CDUM, RDUM)
+#endif
 
         C = 0
 
@@ -1139,11 +1193,20 @@ MODULE SCARFLIB_FFT3
       ENDDO
 
       ! DESTROY PLAN
+#ifdef DOUBLE_PREC
+      CALL FFTW_DESTROY_PLAN(P1)
+#else
       CALL FFTWF_DESTROY_PLAN(P1)
+#endif
 
       ! RELEASE MEMORY
       NULLIFY(CDUM, RDUM)
+
+#ifdef DOUBLE_PREC
+      CALL FFTW_FREE(PC)
+#else
       CALL FFTWF_FREE(PC)
+#endif
 
       DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
       DEALLOCATE(R_SENDBUF, R_SDISPLS, R_RDISPLS, R_SENDCOUNTS, R_RECVCOUNTS)
@@ -1176,12 +1239,12 @@ MODULE SCARFLIB_FFT3
       LOGICAL,          DIMENSION(3)                                                :: BOOL
       REAL(FPP)                                                                     :: BUTTER, NUM, AMP      !< USED TO COMPUTE SPECTRUM
       REAL(FPP)                                                                     :: KNYQ, KC, KR          !< USED TO COMPUTE SPECTRUM
-      REAL(FPP)                                                                     :: TICTOC                !< USED FOR TIMING
+      REAL(REAL64)                                                                  :: TICTOC                !< USED FOR TIMING
       REAL(FPP),        DIMENSION(3)                                                :: DK                    !< RESOLUTION IN WAVENUMBER DOMAIN
-      REAL(FPP),        DIMENSION(NPTS(1))                                             :: HARVEST               !< RANDOM VALUES
-      REAL(FPP),        DIMENSION(NPTS(1))                                             :: KX                    !< WAVENUMBER VECTOR (X)
-      REAL(FPP),        DIMENSION(NPTS(2))                                             :: KY                    !< WAVENUMBER VECTOR (Y)
-      REAL(FPP),        DIMENSION(NPTS(3))                                             :: KZ                    !< WAVENUMBER VECTOR (Z)
+      REAL(FPP),        DIMENSION(NPTS(1))                                          :: HARVEST               !< RANDOM VALUES
+      REAL(FPP),        DIMENSION(NPTS(1))                                          :: KX                    !< WAVENUMBER VECTOR (X)
+      REAL(FPP),        DIMENSION(NPTS(2))                                          :: KY                    !< WAVENUMBER VECTOR (Y)
+      REAL(FPP),        DIMENSION(NPTS(3))                                          :: KZ                    !< WAVENUMBER VECTOR (Z)
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -1251,7 +1314,7 @@ MODULE SCARFLIB_FFT3
               HARVEST(I) = HARVEST(I) * 2._FPP * PI
 
               ! COMBINE AMPLITUDE AND RANDOM PHASE
-              SPEC(I, J, K) = CMPLX(COS(HARVEST(I)) * AMP, SIN(HARVEST(I)) * AMP)
+              SPEC(I, J, K) = CMPLX(COS(HARVEST(I)) * AMP, SIN(HARVEST(I)) * AMP, FPP)
 
             ENDIF
 
@@ -1833,6 +1896,8 @@ MODULE SCARFLIB_FFT3
 
     SUBROUTINE INTERPOLATE(DH, X, Y, Z, DELTA, FIELD)
 
+      !
+
       REAL(FPP),                      INTENT(IN)  :: DH                               !< GRID-STEP
       REAL(FPP),    DIMENSION(:),     INTENT(IN)  :: X, Y, Z                          !< POINTS LOCATION
       REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)  :: DELTA                            !< RANDOM FIELD
@@ -1922,6 +1987,272 @@ MODULE SCARFLIB_FFT3
       ENDDO
 
     END SUBROUTINE COORDS2INDEX
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE BEST_CONFIG(DIMS, NITER)
+
+      ! COMPUTE BEST GRID OF PROCESSES
+
+      INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: DIMS
+      INTEGER(IPP),               INTENT(OUT) :: NITER
+
+      INTEGER(IPP)                            :: I, J, K
+      INTEGER(IPP)                            :: N, N2, N3, NI, NJ
+      INTEGER(IPP)                            :: A, B
+      INTEGER(IPP),              DIMENSION(3) :: NP, DUM
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:) :: FACT_3D, FACT_2D
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      NITER = HUGE(1)
+
+      ! FACTORISE TOTAL NUMBER OF PROCESSES
+      CALL FACTORIZATION(WORLD_SIZE, FACT_3D)
+
+      N3 = SIZE(FACT_3D)
+
+      NI = N3 / 2
+
+      IF (MOD(N3, 2) .NE. 0) NI = NI + 1
+
+      ! LOOP OVER FACTORISED PROCESSES
+      DO I = 1, NI
+
+        A = FACT_3D(I)
+        B = FACT_3D(N3 - I + 1)
+
+        ! FACTORISE FIRST TERM ("A")
+        CALL FACTORIZATION(A, FACT_2D)
+
+        N2 = SIZE(FACT_2D)
+
+        NJ = N2 / 2
+
+        IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
+
+        ! LOOP OVER ALL FACTORS FOR "A"
+        DO J = 1, NJ
+
+          NP = [FACT_2D(J), FACT_2D(N2 - J + 1), B]
+
+          DO K = 0, 2
+
+            NP = CSHIFT(NP, 1)
+
+            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+            CALL TEST_CONFIG(NP, N)
+
+            IF (N .LT. NITER) THEN
+              DIMS  = NP
+              NITER = N
+            ENDIF
+
+            ! SWAP SECOND AND THIRD ELEMENT
+            DUM = [NP(1), NP(3), NP(2)]
+
+            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+            CALL TEST_CONFIG(DUM, N)
+
+            IF (N .LT. NITER) THEN
+              DIMS  = DUM
+              NITER = N
+            ENDIF
+
+          ENDDO
+
+        ENDDO
+
+        DEALLOCATE(FACT_2D)
+
+        ! FACTORISE SECOND TERM ("B")
+        CALL FACTORIZATION(B, FACT_2D)
+
+        N2 = SIZE(FACT_2D)
+
+        NJ = N2 / 2
+
+        IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
+
+        ! LOOP OVER ALL FACTORS FOR "B"
+        DO J = 1, NJ
+
+          NP = [A, FACT_2D(J), FACT_2D(N2 - J + 1)]
+
+          DO K = 0, 2
+
+            NP = CSHIFT(NP, K)
+
+            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+            CALL TEST_CONFIG(NP, N)
+
+            IF (N .LT. NITER) THEN
+              DIMS  = NP
+              NITER = N
+            ENDIF
+
+            ! SWAP SECOND AND THIRD ELEMENT
+            DUM = [NP(1), NP(3), NP(2)]
+
+            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+            CALL TEST_CONFIG(DUM, N)
+
+            IF (N .LT. NITER) THEN
+              DIMS  = DUM
+              NITER = N
+            ENDIF
+
+          ENDDO
+
+        ENDDO
+
+        DEALLOCATE(FACT_2D)
+
+      ENDDO
+
+      DEALLOCATE(FACT_3D)
+
+    END SUBROUTINE
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE TEST_CONFIG(DIMS, NITER)
+
+      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: DIMS
+      INTEGER(IPP),               INTENT(OUT) :: NITER
+      INTEGER(IPP)                            :: IERR, I
+      INTEGER(IPP),               DIMENSION(3) :: LS, LE
+      INTEGER(IPP),               PARAMETER   :: NDIMS = 3
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1) :: COMPLETED, ISBUSY
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:) :: BUFFER
+      LOGICAL,                    PARAMETER   :: REORDER = .TRUE.
+      LOGICAL,      DIMENSION(3), PARAMETER   :: ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
+
+
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! CREATE TOPOLOGY
+      CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
+
+      ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
+      CALL MPI_CART_COORDS(CARTOPO, WORLD_RANK, NDIMS, COORDS, IERR)
+
+      ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
+      CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
+
+      GS(:, WORLD_RANK) = LS
+      GE(:, WORLD_RANK) = LE
+
+      ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
+      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+
+
+      ! INITIALISE LIST WITH PROCESSES HAVING THEIR POINTS ASSIGNED
+      COMPLETED(:) = 0
+
+      NITER = 0
+
+      ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
+      DO WHILE(ANY(COMPLETED .EQ. 0))
+
+        ! RESET "BUSY PROCESS" FLAG
+        ISBUSY(:) = 0
+
+        !COMM = MPI_COMM_NULL
+
+        ! CREATE AS MANY COMMUNICATORS AS POSSIBLE
+        DO I = 0, WORLD_SIZE - 1
+
+          IF (COMPLETED(I) .EQ. 0) THEN
+
+            ! PRODUCE A TENTATIVE LIST OF PROCESSES THAT MAY JOIN THE NEW COMMUNICATOR
+            CALL FIND_BUDDIES(I, BUFFER)
+
+            ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
+            IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
+
+              ! CREATE COMMUNICATOR. ONLY PROCESSES BELONGING TO CURRENT COMMUNICATOR HAVE THEIR "BUDDIES", "COMM", "RANK" AND "NTASKS"
+              ! ATTRIBUTES CHANGED
+              !CALL MAKE_COMMUNICATOR(BUFFER, BUDDIES, COMM, RANK, NTASKS)
+
+              ! SET PROCESSES BELONGING TO NEW COMMUNICATOR AS BUSY
+              ISBUSY(BUFFER) = 1
+
+              ! SET I-TH PROCESS AS COMPLETED
+              COMPLETED(I) = 1
+
+            ENDIF
+
+          ENDIF
+
+        ENDDO
+
+        NITER = NITER + 1
+
+      ENDDO
+
+
+
+    END SUBROUTINE TEST_CONFIG
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE FACTORIZATION(N, FACTORS)
+
+      ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
+
+      INTEGER(IPP),                            INTENT(IN)  :: N
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: FACTORS
+      INTEGER(IPP)                                         :: I, C, S
+      INTEGER(IPP)                                         :: X
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)              :: BUFFER
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! MAX POSSIBLE FACTOR
+      S = FLOOR(SQRT(REAL(N, FPP)))
+
+      ALLOCATE(BUFFER(S * 2))
+
+      BUFFER(:) = 0
+
+      ! TEST FACTORS
+      DO I = 1, S
+
+        X = N / I
+
+        IF (MOD(N, I) .EQ. 0) THEN
+          BUFFER(I)           = I                          !< ADD FACTOR ...
+          BUFFER(2*S - I + 1) = X                          !< ... AND ITS COMPANION
+        ENDIF
+
+      ENDDO
+
+      ! ACTUAL FACTORS FOUND
+      I = COUNT(BUFFER .NE. 0)
+
+      ALLOCATE(FACTORS(I))
+
+      ! COPY FACTORS TO OUTPUT ARRAY
+      C = 0
+      DO I = 1, 2 * S
+        IF (BUFFER(I) .NE. 0) THEN
+          C = C + 1
+          FACTORS(C) = BUFFER(I)
+        ENDIF
+      ENDDO
+
+      DEALLOCATE(BUFFER)
+
+    END SUBROUTINE FACTORIZATION
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

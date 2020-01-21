@@ -21,19 +21,19 @@ MODULE SCARFLIB_COMMON
   ! INTEGERS HAVE ALWAYS SAME "PRECISION"
   INTEGER, PARAMETER :: IPP = INT32
 
-  !#ifdef DOUBLE_PREC
-   ! INTEGER(IPP), PARAMETER :: FPP          = REAL64
-   ! INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
-   ! INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
-   ! INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
-   ! INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
-  !#else
+#ifdef DOUBLE_PREC
+   INTEGER(IPP), PARAMETER :: FPP          = REAL64
+   INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
+   INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
+   INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
+   INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
+#else
     INTEGER(IPP), PARAMETER :: FPP          = REAL32
     INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
     INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
     INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
     INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
-  !#endif
+#endif
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
@@ -94,7 +94,7 @@ MODULE SCARFLIB_COMMON
 
       ! START THE MPI-STOPWATCH
 
-      REAL(FPP),              INTENT(OUT) :: TICTOC                            !< INITIAL TIME
+      REAL(REAL64),           INTENT(OUT) :: TICTOC                            !< INITIAL TIME
       INTEGER(IPP), OPTIONAL, INTENT(IN)  :: COMM
       INTEGER(IPP)                        :: IERR                              !< MPI STUFF
 
@@ -118,7 +118,7 @@ MODULE SCARFLIB_COMMON
 
       ! STOP THE MPI-STOPWATCH AND RETURN ELAPSED TIME
 
-      REAL(FPP),              INTENT(INOUT) :: TICTOC                          !< ELAPSED TIME
+      REAL(REAL64),           INTENT(INOUT) :: TICTOC                          !< ELAPSED TIME
       INTEGER(IPP), OPTIONAL, INTENT(IN)    :: COMM
       INTEGER(IPP)                          :: IERR                            !< MPI STUFF
 
@@ -424,7 +424,7 @@ MODULE SCARFLIB_COMMON
       REAL(FPP),                  INTENT(OUT) :: VAR                                !< RESULTING VARIANCE
       REAL(FPP),                  INTENT(OUT) :: AVG                                !< RESULTING AVERAGE
       INTEGER(IPP)                            :: I                                  !< COUNTER
-      REAL(KIND=REAL64)                       :: SIG, MU, N, DELTA, M1, M2, M       !< LOCAL VARIABLES
+      REAL(REAL64)                            :: SIG, MU, N, DELTA, M1, M2, M       !< LOCAL VARIABLES
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
