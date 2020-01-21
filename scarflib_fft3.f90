@@ -192,8 +192,7 @@ MODULE SCARFLIB_FFT3
 
       CALL WATCH_STOP(TICTOC)
 
-      IF (WORLD_RANK == 0) PRINT*, 'BEST DIMS ', DIMS, ' -- ', ITER, ' -- ', REAL(TITOC, REAL32)
-
+      IF (WORLD_RANK == 0) PRINT*, 'BEST DIMS ', DIMS, ' -- ', ITER, ' -- ', REAL(TICTOC, REAL32)
 
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
@@ -1972,127 +1971,239 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    ! SUBROUTINE BEST_CONFIG(DIMS, NITER)
+    !
+    !   ! COMPUTE BEST GRID OF PROCESSES
+    !
+    !   INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: DIMS
+    !   INTEGER(IPP),               INTENT(OUT) :: NITER
+    !
+    !   INTEGER(IPP)                            :: I, J, K
+    !   INTEGER(IPP)                            :: N, N2, N3, NI, NJ
+    !   INTEGER(IPP)                            :: A, B
+    !   INTEGER(IPP),              DIMENSION(3) :: NP, DUM
+    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:) :: FACT_3D, FACT_2D
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   NITER = HUGE(1)
+    !
+    !   ! FACTORISE NUMBER OF AVAILABLE PROCESSES
+    !   CALL FACTORIZATION(WORLD_SIZE, FACT_3D)
+    !
+    !   N3 = SIZE(FACT_3D)
+    !
+    !   NI = N3 / 2
+    !
+    !   IF (MOD(N3, 2) .NE. 0) NI = NI + 1
+    !
+    !   ! LOOP OVER FACTORISED PROCESSES
+    !   DO I = 1, NI
+    !
+    !     A = FACT_3D(I)
+    !     B = FACT_3D(N3 - I + 1)
+    !
+    !     ! FACTORISE FIRST TERM ("A")
+    !     CALL FACTORIZATION(A, FACT_2D)
+    !
+    !     N2 = SIZE(FACT_2D)
+    !
+    !     NJ = N2 / 2
+    !
+    !     IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
+    !
+    !     ! LOOP OVER ALL FACTORS FOR "A"
+    !     DO J = 1, NJ
+    !
+    !       NP = [FACT_2D(J), FACT_2D(N2 - J + 1), B]
+    !
+    !       DO K = 0, 2
+    !
+    !         NP = CSHIFT(NP, 1)
+    !
+    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+    !         CALL TEST_CONFIG(NP, N)
+    !
+    !         IF (N .LT. NITER) THEN
+    !           DIMS  = NP
+    !           NITER = N
+    !         ENDIF
+    !
+    !         ! SWAP SECOND AND THIRD ELEMENT
+    !         DUM = [NP(1), NP(3), NP(2)]
+    !
+    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+    !         CALL TEST_CONFIG(DUM, N)
+    !
+    !         IF (N .LT. NITER) THEN
+    !           DIMS  = DUM
+    !           NITER = N
+    !         ENDIF
+    !
+    !       ENDDO
+    !
+    !     ENDDO
+    !
+    !     DEALLOCATE(FACT_2D)
+    !
+    !     ! FACTORISE SECOND TERM ("B")
+    !     CALL FACTORIZATION(B, FACT_2D)
+    !
+    !     N2 = SIZE(FACT_2D)
+    !
+    !     NJ = N2 / 2
+    !
+    !     IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
+    !
+    !     ! LOOP OVER ALL FACTORS FOR "B"
+    !     DO J = 1, NJ
+    !
+    !       NP = [A, FACT_2D(J), FACT_2D(N2 - J + 1)]
+    !
+    !       DO K = 0, 2
+    !
+    !         NP = CSHIFT(NP, K)
+    !
+    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+    !         CALL TEST_CONFIG(NP, N)
+    !
+    !         IF (N .LT. NITER) THEN
+    !           DIMS  = NP
+    !           NITER = N
+    !         ENDIF
+    !
+    !         ! SWAP SECOND AND THIRD ELEMENT
+    !         DUM = [NP(1), NP(3), NP(2)]
+    !
+    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
+    !         CALL TEST_CONFIG(DUM, N)
+    !
+    !         IF (N .LT. NITER) THEN
+    !           DIMS  = DUM
+    !           NITER = N
+    !         ENDIF
+    !
+    !       ENDDO
+    !
+    !     ENDDO
+    !
+    !     DEALLOCATE(FACT_2D)
+    !
+    !   ENDDO
+    !
+    !   DEALLOCATE(FACT_3D)
+    !
+    ! END SUBROUTINE
+
     SUBROUTINE BEST_CONFIG(DIMS, NITER)
 
       ! COMPUTE BEST GRID OF PROCESSES
 
-      INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: DIMS
-      INTEGER(IPP),               INTENT(OUT) :: NITER
+      INTEGER(IPP),              DIMENSION(3), INTENT(OUT) :: DIMS
+      INTEGER(IPP),                            INTENT(OUT) :: NITER
 
-      INTEGER(IPP)                            :: I, J, K
-      INTEGER(IPP)                            :: N, N2, N3, NI, NJ
-      INTEGER(IPP)                            :: A, B
-      INTEGER(IPP),              DIMENSION(3) :: NP, DUM
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:) :: FACT_3D, FACT_2D
+      INTEGER(IPP)                                         :: I, J, K, L, C
+      INTEGER(IPP)                                         :: N, N2, N3
+      INTEGER(IPP)                                         :: A, B
+      INTEGER(IPP),              DIMENSION(3)              :: V1, V2
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: LIST
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       NITER = HUGE(1)
 
+      C = 0
+
       ! FACTORISE NUMBER OF AVAILABLE PROCESSES
-      CALL FACTORIZATION(WORLD_SIZE, FACT_3D)
+      CALL FACTORIZATION(WORLD_SIZE, FACT3)
 
-      N3 = SIZE(FACT_3D)
+      N3 = SIZE(FACT3, 2)
 
-      NI = N3 / 2
-
-      IF (MOD(N3, 2) .NE. 0) NI = NI + 1
+      ALLOCATE(LIST(3, N3 * 2))
 
       ! LOOP OVER FACTORISED PROCESSES
-      DO I = 1, NI
+      DO L = 1, N3
 
-        A = FACT_3D(I)
-        B = FACT_3D(N3 - I + 1)
+        DO K = 1, 2
 
-        ! FACTORISE FIRST TERM ("A")
-        CALL FACTORIZATION(A, FACT_2D)
+          IF (K .EQ. 1) THEN
+            A = FACT3(1, L)
+            B = FACT3(2, L)
+          ELSE
+            B = FACT3(1, L)
+            A = FACT3(2, L)
+          ENDIF
 
-        N2 = SIZE(FACT_2D)
+          CALL FACTORIZATION(B, FACT2)
 
-        NJ = N2 / 2
+          N2 = SIZE(FACT2, 2)
 
-        IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
+          DO J = 1, N2
 
-        ! LOOP OVER ALL FACTORS FOR "A"
-        DO J = 1, NJ
+            V1 = [A, FACT2(:, J)]
 
-          NP = [FACT_2D(J), FACT_2D(N2 - J + 1), B]
+            ! SKIP TO NEXT PROCESSES GRID IF ALREADY ANALYSED
+            IF (MATCH(V1, C, LIST) .EQV. .TRUE.) CYCLE
 
-          DO K = 0, 2
+            C = C + 1
 
-            NP = CSHIFT(NP, 1)
+            ! ADD TO LIST
+            LIST(:, C) = V1
 
-            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-            CALL TEST_CONFIG(NP, N)
+            DO I = 0, 2
 
-            IF (N .LT. NITER) THEN
-              DIMS  = NP
-              NITER = N
-            ENDIF
+              V1 = CSHIFT(V1, 1)
 
-            ! SWAP SECOND AND THIRD ELEMENT
-            DUM = [NP(1), NP(3), NP(2)]
+              CALL TEST_CONFIG(V1, N)
 
-            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-            CALL TEST_CONFIG(DUM, N)
+              IF (N .LT. NITER) THEN
+                DIMS  = V1
+                NITER = N
+              ENDIF
 
-            IF (N .LT. NITER) THEN
-              DIMS  = DUM
-              NITER = N
-            ENDIF
+              V2 = [V1(1), V1(3), V1(2)]
 
-          ENDDO
+              CALL TEST_CONFIG(V2, N)
 
-        ENDDO
+              IF (N .LT. NITER) THEN
+                DIMS  = V2
+                NITER = N
+              ENDIF
 
-        DEALLOCATE(FACT_2D)
-
-        ! FACTORISE SECOND TERM ("B")
-        CALL FACTORIZATION(B, FACT_2D)
-
-        N2 = SIZE(FACT_2D)
-
-        NJ = N2 / 2
-
-        IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
-
-        ! LOOP OVER ALL FACTORS FOR "B"
-        DO J = 1, NJ
-
-          NP = [A, FACT_2D(J), FACT_2D(N2 - J + 1)]
-
-          DO K = 0, 2
-
-            NP = CSHIFT(NP, K)
-
-            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-            CALL TEST_CONFIG(NP, N)
-
-            IF (N .LT. NITER) THEN
-              DIMS  = NP
-              NITER = N
-            ENDIF
-
-            ! SWAP SECOND AND THIRD ELEMENT
-            DUM = [NP(1), NP(3), NP(2)]
-
-            ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-            CALL TEST_CONFIG(DUM, N)
-
-            IF (N .LT. NITER) THEN
-              DIMS  = DUM
-              NITER = N
-            ENDIF
+            ENDDO
+            ! END PERMUTATIONS
 
           ENDDO
+          ! END LOOP OVER FACTOR PAIRS FOR "A/B"
 
         ENDDO
-
-        DEALLOCATE(FACT_2D)
+        ! END LOOP OVER "A/B"
 
       ENDDO
+      ! END LOOP OVER FACTOR PAIRS FOR "WORLD_SIZE"
 
-      DEALLOCATE(FACT_3D)
+      DEALLOCATE(FACT3, FACT2, LIST)
+
+      !---------------------------------------------------------------------------------------------------
+
+      CONTAINS
+
+      LOGICAL FUNCTION MATCH(VEC, IMAX, LIST)
+
+        INTEGER(IPP), DIMENSION(3),   INTENT(IN) :: VEC
+        INTEGER(IPP),                 INTENT(IN) :: IMAX
+        INTEGER(IPP), DIMENSION(:,:), INTENT(IN) :: LIST
+        INTEGER(IPP)                             :: I
+
+        !---------------------------------------------------------------------------------------------------------------------------------------
+
+        DO I = 1, IMAX
+          MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))
+          IF (MATCH .EQV. .TRUE.) EXIT
+        ENDDO
+
+      END FUNCTION MATCH
 
     END SUBROUTINE
 
@@ -2175,24 +2286,73 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    ! SUBROUTINE FACTORIZATION(N, FACTORS)
+    !
+    !   ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
+    !
+    !   INTEGER(IPP),                            INTENT(IN)  :: N
+    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: FACTORS
+    !   INTEGER(IPP)                                         :: I, C, S
+    !   INTEGER(IPP)                                         :: X
+    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)              :: BUFFER
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   ! MAX POSSIBLE FACTOR
+    !   S = FLOOR(SQRT(REAL(N, FPP)))
+    !
+    !   ALLOCATE(BUFFER(S * 2))
+    !
+    !   BUFFER(:) = 0
+    !
+    !   ! TEST FACTORS
+    !   DO I = 1, S
+    !
+    !     X = N / I
+    !
+    !     IF (MOD(N, I) .EQ. 0) THEN
+    !       BUFFER(I)           = I                          !< ADD FACTOR ...
+    !       BUFFER(2*S - I + 1) = X                          !< ... AND ITS COMPANION
+    !     ENDIF
+    !
+    !   ENDDO
+    !
+    !   ! ACTUAL FACTORS FOUND
+    !   I = COUNT(BUFFER .NE. 0)
+    !
+    !   ALLOCATE(FACTORS(I))
+    !
+    !   ! COPY FACTORS TO OUTPUT ARRAY
+    !   C = 0
+    !   DO I = 1, 2 * S
+    !     IF (BUFFER(I) .NE. 0) THEN
+    !       C = C + 1
+    !       FACTORS(C) = BUFFER(I)
+    !     ENDIF
+    !   ENDDO
+    !
+    !   DEALLOCATE(BUFFER)
+    !
+    ! END SUBROUTINE FACTORIZATION
+
     SUBROUTINE FACTORIZATION(N, FACTORS)
 
       ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
 
-      INTEGER(IPP),                            INTENT(IN)  :: N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: FACTORS
-      INTEGER(IPP)                                         :: I, C, S
-      INTEGER(IPP)                                         :: X
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)              :: BUFFER
+      INTEGER(IPP),                              INTENT(IN)  :: N
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: FACTORS
+      INTEGER(IPP)                                           :: I, C, S
+      INTEGER(IPP)                                           :: X
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)              :: BUFFER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! MAX POSSIBLE FACTOR
       S = FLOOR(SQRT(REAL(N, FPP)))
 
-      ALLOCATE(BUFFER(S * 2))
+      ALLOCATE(BUFFER(2, S))
 
-      BUFFER(:) = 0
+      BUFFER(:,:) = 0
 
       ! TEST FACTORS
       DO I = 1, S
@@ -2200,23 +2360,23 @@ MODULE SCARFLIB_FFT3
         X = N / I
 
         IF (MOD(N, I) .EQ. 0) THEN
-          BUFFER(I)           = I                          !< ADD FACTOR ...
-          BUFFER(2*S - I + 1) = X                          !< ... AND ITS COMPANION
+          BUFFER(1, I) = I                          !< ADD FACTOR ...
+          BUFFER(2, I) = X                          !< ... AND ITS COMPANION
         ENDIF
 
       ENDDO
 
       ! ACTUAL FACTORS FOUND
-      I = COUNT(BUFFER .NE. 0)
+      I = COUNT(BUFFER(1, :) .NE. 0)
 
-      ALLOCATE(FACTORS(I))
+      ALLOCATE(FACTORS(2, I))
 
       ! COPY FACTORS TO OUTPUT ARRAY
       C = 0
-      DO I = 1, 2 * S
-        IF (BUFFER(I) .NE. 0) THEN
+      DO I = 1, S
+        IF (BUFFER(1, I) .NE. 0) THEN
           C = C + 1
-          FACTORS(C) = BUFFER(I)
+          FACTORS(:, C) = BUFFER(:, I)
         ENDIF
       ENDDO
 
