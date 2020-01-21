@@ -22,27 +22,28 @@ MODULE SCARFLIB_FFT3
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTEGER(IPP)                                                  :: CARTOPO
-
-  ! PROCESS COORDINATES
-  INTEGER(IPP),                DIMENSION(3)                     :: COORDS
-
-  ! NUMBER OF PROCESSES ALONG EACH DIRECTION
-  INTEGER(IPP),                DIMENSION(3)                     :: DIMS
+  ! CARTESIAN GRID MUST BE 3-DIMENSIONAL
+  INTEGER(IPP),                             PARAMETER :: NDIMS = 3
 
   ! MIN/MAX INDEX OF INPUT POINTS WHEN PROJECTED ONTO COMPUTATIONAL GRID
-  INTEGER(IPP),   ALLOCATABLE, DIMENSION(:,:)                   :: PS, PE
+  INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)           :: PS, PE
 
-  REAL(FPP),                                          PARAMETER :: BIG = HUGE(1._FPP)
+  ! ALLOW GRID RE-ORDERING
+  LOGICAL,                                  PARAMETER :: REORDER = .TRUE.
+
+  ! SET CARTESIAN GRID PERIODICITY
+  LOGICAL,                   DIMENSION(3),  PARAMETER :: ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
+
+  REAL(FPP),                                PARAMETER :: BIG = HUGE(1._FPP)
 
   ! ABSOLUTE POSITION OF MODEL'S FIRST POINT
-  REAL(FPP),                   DIMENSION(3)                     :: OFF_AXIS
+  REAL(FPP),                 DIMENSION(3)             :: OFF_AXIS
 
   ! POINTER FOR FOURIER TRANSFORM
-  COMPLEX(C_CPP),              DIMENSION(:),            POINTER :: CDUM => NULL()
+  COMPLEX(C_CPP),            DIMENSION(:),  POINTER   :: CDUM => NULL()
 
   ! POINTER FOR FOURIER TRANSFORM
-  REAL(C_FPP),                 DIMENSION(:),            POINTER :: RDUM => NULL()
+  REAL(C_FPP),               DIMENSION(:),  POINTER   :: RDUM => NULL()
 
   ! POINTER TO FFTW PLAN
   TYPE(C_PTR)                                                   :: PC
@@ -80,25 +81,25 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP)                                                 :: N                    !< POINTS IN "BUFFER"
       INTEGER(IPP)                                                 :: ITER
       INTEGER(IPP)                                                 :: RANK, NTASKS
-      INTEGER(IPP)                                                 :: NDIMS
+      INTEGER(IPP)                                                 :: CARTOPO
       INTEGER(IPP)                                                 :: COMM
       INTEGER(IPP)                                                 :: OFFSET               !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
       INTEGER(IPP),                  DIMENSION(3)                  :: M                    !< POINTS FOR CALLING PROCESS
       INTEGER(IPP),                  DIMENSION(3)                  :: LS, LE               !< FIRST/LAST INDEX ALONG X, Y, Z
+      INTEGER(IPP),                  DIMENSION(3)                  :: COORDS
+      INTEGER(IPP),                  DIMENSION(3)                  :: DIMS
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: COMPLETED
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: ISBUSY
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NPOINTS
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: BUDDIES, BUFFER
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: I0, I1
-      LOGICAL                                                      :: REORDER
-      LOGICAL,                       DIMENSION(3)                  :: ISPERIODIC
       REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
-      REAL(REAL64)                                                 :: TICTOC
+      REAL(REAL64)                                                 :: TICTOC               !< TIMING
       REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
       REAL(FPP),                     DIMENSION(3)                  :: MIN_EXTENT           !< LOWER MODEL LIMITS (GLOBAL)
       REAL(FPP),                     DIMENSION(3)                  :: MAX_EXTENT           !< UPPER MODEL LIMITS (GLOBAL)
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:)                  :: VAR, MU
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: DELTA
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:)                  :: VAR, MU              !< STATISTICS: VARIANCE AND AVERAGE
+      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: DELTA                !< RANDOM PERTURBATIONS ON CARTESIAN GRID
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -184,22 +185,15 @@ MODULE SCARFLIB_FFT3
       ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
       ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
 
+      CALL WATCH_START(TICTOC)
+
+      ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
       CALL BEST_CONFIG(DIMS, ITER)
 
-      IF (WORLD_RANK == 0) PRINT*, 'BEST DIMS ', DIMS, ' -- ', ITER
+      CALL WATCH_STOP(TICTOC)
 
-      ! NUMBER OF PROCESSES ALONG EACH DIRECTION
-      ! [THIS SHOULD BE REPLACED BY A BEST-EXEC SOLUTION AS IN "2DFFTDECOMP"]
-      !DIMS  = [2, 1, 2]
+      IF (WORLD_RANK == 0) PRINT*, 'BEST DIMS ', DIMS, ' -- ', ITER, ' -- ', REAL(TITOC, REAL32)
 
-      ! WE WORK IN 3D
-      NDIMS = 3
-
-      ! ALLOW REORDERING
-      REORDER = .TRUE.
-
-      ! SET GRID PERIODICITY
-      ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
 
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
@@ -277,7 +271,7 @@ MODULE SCARFLIB_FFT3
       CALL WATCH_START(TICTOC)
 
       ! EXCHANGE HALO
-      CALL EXCHANGE_HALO(DELTA)
+      CALL EXCHANGE_HALO(CARTOPO, DELTA)
 
       ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
       DO K = 1, ITER
@@ -311,6 +305,8 @@ MODULE SCARFLIB_FFT3
               COMPLETED(I) = 1
 
             ENDIF
+
+            DEALLOCATE(BUFFER)
 
           ENDIF
 
@@ -360,13 +356,10 @@ MODULE SCARFLIB_FFT3
 
         CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
-        IF (WORLD_RANK == 0) PRINT*, '******'
-
-        DEALLOCATE(BUFFER)
+        !IF (WORLD_RANK == 0) PRINT*, '******'
 
       ENDDO
       ! END "WHILE" LOOP
-
 
       CALL WATCH_STOP(TICTOC)
 
@@ -397,6 +390,10 @@ MODULE SCARFLIB_FFT3
 
       ! RETURN STANDARD DEVIATION
       INFO(7) = SQRT(INFO(7))
+
+      ! SINCE WE HAVE SELECTED A SUBSET OF THE COMPUTED RANDOM FIELD (E.G. SEE "OFFSET"), MEAN MAY DEVIATE SOMEWHAT FROM ZERO. FOR
+      ! THIS REASON, NOW REMOVE MEAN FROM OUTPUT RANDOM FIELD TO GET AN EFFECTIVELY ZERO-MEAN
+      FIELD = FIELD - INFO(8)
 
       DEALLOCATE(VAR, MU, NPOINTS)
 
@@ -505,10 +502,10 @@ MODULE SCARFLIB_FFT3
       ! MAKE A LIST OF PROCESSES WHOSE FFT GRID INCLUDE CURRENT SELECTION OF INPUT POINTS. NOTE THAT "GS" DO NOT INCLUDE HALOS! THESE
       ! CAN BE INCLUDED BY USING "GS - 1"
 
-      INTEGER(IPP),                            INTENT(IN)    :: RANK                   !< GLOBAL PROCESS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(INOUT) :: BUDDIES                !< LIST OF PROCESSES
-      INTEGER(IPP)                                           :: I, J                   !< COUNTERS
-      LOGICAL,                   DIMENSION(3)                :: BOOL                   !< DETERMINE IF N-TH PROCESS MUST BE INCLUDED
+      INTEGER(IPP),                            INTENT(IN)  :: RANK                   !< GLOBAL PROCESS
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: BUDDIES                !< LIST OF PROCESSES
+      INTEGER(IPP)                                         :: I, J                   !< COUNTERS
+      LOGICAL,                   DIMENSION(3)              :: BOOL                   !< DETERMINE IF N-TH PROCESS MUST BE INCLUDED
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -601,50 +598,24 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP)                                               :: RANK, NTASKS, IERR         !< MPI STUFF
       INTEGER(IPP)                                               :: PENCIL
       INTEGER(IPP)                                               :: NX, NY, NZ                 !< TOTAL NUMBER OF POINTS FOR PENCIL ALONG EACH AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: COLOR                      !< ARRAY USED TO CREATE PENCIL COMMUNICATOR
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: I0, I1                     !< LOCAL I-INDEX FOR PROCESSES BELONGING TO PENCIL
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: K0, K1                     !< LOCAL K-INDEX FOR PROCESSES BELONGING TO PENCIL
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: LX, LZ                     !< LOCAL NUMBER OF POINTS ALONG X AND Z AXIS
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SENDCOUNTS, RECVCOUNTS     !< MPI STUFF
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SDISPLS, RDISPLS           !< MPI STUFF
-      LOGICAL,                   DIMENSION(2)                    :: BOOL
       TYPE(C_PTR)                                                :: P1
 
       !-------------------------------------------------------------------------------------------------------------------------------
 
-      ALLOCATE(COLOR(0:WORLD_SIZE-1))
+      ! GROUP PROCESSES IN PENCILS ORIENTED ALONG Z-AXIS. "LZ" CONTAINS NUMBER OF POINTS FOR EACH PROCESS IN "PENCIL" ALONG Z
+      CALL BUILD_PENCIL(2, PENCIL, RANK, NTASKS, LZ)
 
-      ! GROUP PROCESSES SPANNING SAME X/Y-AXIS IN STENCILS ORIENTED ALONG Z-AXIS
-      DO I = 0, WORLD_SIZE - 1
-        COLOR(I) = 0
-        BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
-        BOOL(2) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
-        IF (ALL(BOOL .EQV. .TRUE.)) COLOR(I) = I + 1
-      ENDDO
-
-      COLOR(WORLD_RANK) = MAXVAL(COLOR, DIM = 1)
-
-      ! CREATE COMMUNICATOR SUBGROUP
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, PENCIL, IERR)
-
-      DEALLOCATE(COLOR)
-
-      ! PROCESS ID AND COMMUNICATOR SIZE
-      CALL MPI_COMM_RANK(PENCIL, RANK, IERR)
-      CALL MPI_COMM_SIZE(PENCIL, NTASKS, IERR)
-
-      ! THESE ARRAYS WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL
-      ALLOCATE(LX(0:NTASKS-1), LZ(0:NTASKS-1))
+      ! THIS ARRAY WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL ALONG X
+      ALLOCATE(LX(0:NTASKS-1))
 
       ! NUMBER OF POINTS ALONG X AND Y. THESE ARE INDENTICAL FOR ALL PROCESSES IN CURRENT PENCIL.
       NX = SIZE(SPECTRUM, 1)
       NY = SIZE(SPECTRUM, 2)
-
-      ! POINTS ALONG Z-AXIS VARY ACCORDING TO RANK
-      LZ(RANK) = SIZE(SPECTRUM, 3)
-
-      ! MAKE ALL PROCESSES IN THE COMMUNICATOR AWARE OF HOW MANY POINTS ALONG Z-AXIS EACH PROCESS HAS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, LZ, 1, MPI_INTEGER, PENCIL, IERR)
 
       ! TOTAL NUMBER OF POINTS ALONG Z-AXIS
       NZ = SUM(LZ)
@@ -775,7 +746,7 @@ MODULE SCARFLIB_FFT3
 #endif
 
       DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
-      DEALLOCATE(I0, I1, K0, K1)
+      DEALLOCATE(I0, I1, K0, K1, LX, LZ)
 
       ! RELEASE COMMUNICATOR
       CALL MPI_COMM_FREE(PENCIL, IERR)
@@ -798,50 +769,24 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP)                                            :: RANK, NTASKS, IERR         !< MPI STUFF
       INTEGER(IPP)                                            :: PENCIL
       INTEGER(IPP)                                            :: NX, NY, NZ                 !< TOTAL NUMBER OF POINTS FOR PENCIL ALONG EACH AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: COLOR                      !< ARRAY USED TO CREATE PENCIL COMMUNICATOR
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: I0, I1                     !< LOCAL I-INDEX FOR PROCESSES BELONGING TO PENCIL
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: J0, J1                     !< LOCAL J-INDEX FOR PROCESSES BELONGING TO PENCIL
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: LX, LY                     !< LOCAL NUMBER OF POINTS ALONG X AND Y AXIS
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: SENDCOUNTS, RECVCOUNTS     !< MPI STUFF
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: SDISPLS, RDISPLS           !< MPI STUFF
-      LOGICAL,                   DIMENSION(2)                 :: BOOL
       TYPE(C_PTR)                                             :: P1
 
       !-------------------------------------------------------------------------------------------------------------------------------
 
-      ALLOCATE(COLOR(0:WORLD_SIZE-1))
+      ! GROUP PROCESSES IN PENCILS ORIENTED ALONG Y-AXIS. "LY" CONTAINS NUMBER OF POINTS FOR EACH PROCESS IN "PENCIL" ALONG Y
+      CALL BUILD_PENCIL(1, PENCIL, RANK, NTASKS, LY)
 
-      ! GROUP PROCESSES SPANNING SAME X/Z-AXIS IN STENCILS ORIENTED ALONG Z-AXIS
-      DO I = 0, WORLD_SIZE - 1
-        COLOR(I) = 0
-        BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
-        BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
-        IF (ALL(BOOL .EQV. .TRUE.)) COLOR(I) = I + 1
-      ENDDO
-
-      COLOR(WORLD_RANK) = MAXVAL(COLOR, DIM = 1)
-
-      ! CREATE COMMUNICATOR SUBGROUP
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, PENCIL, IERR)
-
-      DEALLOCATE(COLOR)
-
-      ! PROCESS ID AND COMMUNICATOR SIZE
-      CALL MPI_COMM_RANK(PENCIL, RANK, IERR)
-      CALL MPI_COMM_SIZE(PENCIL, NTASKS, IERR)
-
-      ! THESE ARRAYS WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL
-      ALLOCATE(LX(0:NTASKS-1), LY(0:NTASKS-1))
+      ! THIS ARRAY WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL ALONG X
+      ALLOCATE(LX(0:NTASKS-1))
 
       ! NUMBER OF POINTS ALONG X AND Z. THESE ARE INDENTICAL FOR ALL PROCESSES IN CURRENT PENCIL.
       NX = SIZE(SPECTRUM, 1)
       NZ = SIZE(SPECTRUM, 3)
-
-      ! POINTS ALONG Y-AXIS VARY ACCORDING TO RANK
-      LY(RANK) = SIZE(SPECTRUM, 2)
-
-      ! MAKE ALL PROCESSES IN THE COMMUNICATOR AWARE OF HOW MANY POINTS ALONG Y-AXIS EACH PROCESS HAS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, LY, 1, MPI_INTEGER, PENCIL, IERR)
 
       ! TOTAL NUMBER OF POINTS ALONG Y-AXIS
       NY = SUM(LY)
@@ -972,7 +917,7 @@ MODULE SCARFLIB_FFT3
 #endif
 
       DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
-      DEALLOCATE(I0, I1, J0, J1)
+      DEALLOCATE(I0, I1, J0, J1, LX, LY)
 
       ! RELEASE COMMUNICATOR
       CALL MPI_COMM_FREE(PENCIL, IERR)
@@ -997,7 +942,6 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP)                                               :: IMAX, P_IMAX
       INTEGER(IPP)                                               :: NX, NY, NZ                     !< TOTAL NUMBER OF POINTS FOR PENCIL ALONG EACH AXIS
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: OFFSET
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: COLOR                          !< ARRAY USED TO CREATE PENCIL COMMUNICATOR
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: I0, I1                         !< LOCAL I-INDEX FOR PROCESSES BELONGING TO PENCIL
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: J0, J1                         !< LOCAL J-INDEX FOR PROCESSES BELONGING TO PENCIL
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: LX, LY                         !< LOCAL NUMBER OF POINTS ALONG X AND Y AXIS
@@ -1005,7 +949,6 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SDISPLS, RDISPLS               !< MPI STUFF
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: R_SENDCOUNTS, R_RECVCOUNTS     !< MPI STUFF
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: R_SDISPLS, R_RDISPLS           !< MPI STUFF
-      LOGICAL,                   DIMENSION(2)                    :: BOOL
       REAL(FPP),    ALLOCATABLE, DIMENSION(:)                    :: R_SENDBUF, RECVBUF
       TYPE(C_PTR)                                                :: P1
 
@@ -1014,48 +957,22 @@ MODULE SCARFLIB_FFT3
       ! INDEX OF NYQUIST FREQUENCY ALONG X-AXIS
       NYQUIST = NPTS(1) / 2 + 1
 
+      ! GROUP PROCESSES IN PENCILS ORIENTED ALONG X-AXIS. "LX" CONTAINS NUMBER OF POINTS FOR EACH PROCESS IN "PENCIL" ALONG X
+      CALL BUILD_PENCIL(0, PENCIL, RANK, NTASKS, LX)
+
       ! PARAMETER USED TO DETERMINE ELEMENTS TO BE SENT/RECEIVED
-      !OFFSET = GS(1, WORLD_RANK) - 1
-
-      ALLOCATE(COLOR(0:WORLD_SIZE-1))
-
-      ! GROUP PROCESSES SPANNING SAME Y/Z-AXIS IN STENCILS ORIENTED ALONG X-AXIS
-      DO I = 0, WORLD_SIZE - 1
-        COLOR(I) = 0
-        BOOL(1) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
-        BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
-        IF (ALL(BOOL .EQV. .TRUE.)) COLOR(I) = I + 1
-      ENDDO
-
-      COLOR(WORLD_RANK) = MAXVAL(COLOR, DIM = 1)
-
-      ! CREATE COMMUNICATOR SUBGROUP
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, PENCIL, IERR)
-
-      DEALLOCATE(COLOR)
-
-      ! PROCESS ID AND COMMUNICATOR SIZE
-      CALL MPI_COMM_RANK(PENCIL, RANK, IERR)
-      CALL MPI_COMM_SIZE(PENCIL, NTASKS, IERR)
-
       ALLOCATE(OFFSET(0:NTASKS-1))
 
       OFFSET(RANK) = GS(1, WORLD_RANK) - 1
 
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, OFFSET, 1, MPI_INTEGER, PENCIL, IERR)
 
-      ! THESE ARRAYS WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL
-      ALLOCATE(LX(0:NTASKS-1), LY(0:NTASKS-1))
+      ! THIS ARRAY WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL ALONG Y
+      ALLOCATE(LY(0:NTASKS-1))
 
       ! NUMBER OF POINTS ALONG Y AND Z. THESE ARE INDENTICAL FOR ALL PROCESSES IN CURRENT PENCIL.
       NY = SIZE(SPECTRUM, 2)
       NZ = SIZE(SPECTRUM, 3)
-
-      ! POINTS ALONG X-AXIS VARY ACCORDING TO RANK
-      LX(RANK) = SIZE(SPECTRUM, 1)
-
-      ! MAKE ALL PROCESSES IN THE COMMUNICATOR AWARE OF HOW MANY POINTS ALONG X-AXIS EACH PROCESS HAS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, LX, 1, MPI_INTEGER, PENCIL, IERR)
 
       ! TOTAL NUMBER OF POINTS ALONG X-AXIS
       NX = SUM(LX)
@@ -1210,12 +1127,74 @@ MODULE SCARFLIB_FFT3
 
       DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
       DEALLOCATE(R_SENDBUF, R_SDISPLS, R_RDISPLS, R_SENDCOUNTS, R_RECVCOUNTS)
-      DEALLOCATE(I0, I1, J0, J1, OFFSET)
+      DEALLOCATE(I0, I1, J0, J1, LX, LY, OFFSET)
 
       ! RELEASE COMMUNICATOR
       CALL MPI_COMM_FREE(PENCIL, IERR)
 
     END SUBROUTINE TRANSFORM_ALONG_X
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE BUILD_PENCIL(DIR, NEWCOMM, RANK, NTASKS, N)
+
+      ! GROUP PROCESSORS IN PENCILS ORIENTED ALONG A SPECIFIC DIRECTION.
+
+      INTEGER(IPP),                                        INTENT(IN)  :: DIR                    !< STENCIL DIRECTION (0=X, 1=Y, 2=Z)
+      INTEGER(IPP),                                        INTENT(OUT) :: NEWCOMM                !< HANDLE TO NEW COMMUNICATOR
+      INTEGER(IPP),                                        INTENT(OUT) :: RANK                   !< RANK OF CALLING PROCESS IN NEW COMMUNICATOR
+      INTEGER(IPP),                                        INTENT(OUT) :: NTASKS                 !< NUMBER OF PROCESSES IN NEW COMMUNICATOR
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:),             INTENT(OUT) :: N                      !< NUMBER OF POINTS PER PROCESS IN PENCIL DIRECTION
+      INTEGER(IPP)                                                     :: I, IERR
+      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COLOR
+      LOGICAL,                   DIMENSION(2)                          :: BOOL
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! GROUP PROCESSES IN STENCILS
+      DO I = 0, WORLD_SIZE - 1
+
+        COLOR(I) = 0
+
+        ! STENCIL ALONG X-AXIS
+        IF (DIR .EQ. 0) THEN
+          BOOL(1) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
+          BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
+        ! STENCIL ALONG Y-AXIS
+        ELSEIF (DIR .EQ. 1) THEN
+          BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
+          BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
+        ! STENCIL ALONG Z-AXIS
+        ELSEIF (DIR .EQ. 2) THEN
+          BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
+          BOOL(2) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
+        ENDIF
+
+        IF (ALL(BOOL .EQV. .TRUE.)) COLOR(I) = I + 1
+
+      ENDDO
+
+      ! PROCESS BELONGING TO THE SAME STENCIL HAVE SAME COLOR
+      COLOR(WORLD_RANK) = MAXVAL(COLOR, DIM = 1)
+
+      ! CREATE COMMUNICATOR SUBGROUP
+      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, NEWCOMM, IERR)
+
+      ! PROCESS ID AND COMMUNICATOR SIZE
+      CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
+      CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
+
+      ALLOCATE(N(0:NTASKS - 1))
+
+      ! NUMBER OF POINTS ALONG DIRECTION "DIR" FOR CALLING PROCESS
+      N(RANK) = GE(DIR + 1, WORLD_RANK) - GS(DIR + 1, WORLD_RANK) + 1
+
+      ! MAKE WHOLE COMMUNICATOR AWARE OF POINTS FOR EACH PROCESS
+      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, N, 1, MPI_INTEGER, NEWCOMM, IERR)
+
+    END SUBROUTINE BUILD_PENCIL
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -1829,11 +1808,12 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXCHANGE_HALO(BUFFER)
+    SUBROUTINE EXCHANGE_HALO(CARTOPO, BUFFER)
 
       ! EXCHANGE HALO BETWEEN NEIGHBORING PROCESSES. THE HALO IS REPRESENTED BY THE FIRST COLUMN/ROW (ALONG X/Y, RESPECTIVELY) OF
       ! "BUFFER"
 
+      INTEGER(IPP),                   INTENT(IN)    :: CARTOPO                         !< HANDLE TO CARTESIAN TOPOLOGY
       REAL(FPP),    DIMENSION(:,:,:), INTENT(INOUT) :: BUFFER                          !< RANDOM FIELD
       INTEGER(IPP)                                  :: I
       INTEGER(IPP)                                  :: NX, NY, NZ                       !< POINTS ALONG X-/Y-DIRECTION
@@ -2009,7 +1989,7 @@ MODULE SCARFLIB_FFT3
 
       NITER = HUGE(1)
 
-      ! FACTORISE TOTAL NUMBER OF PROCESSES
+      ! FACTORISE NUMBER OF AVAILABLE PROCESSES
       CALL FACTORIZATION(WORLD_SIZE, FACT_3D)
 
       N3 = SIZE(FACT_3D)
@@ -2122,17 +2102,14 @@ MODULE SCARFLIB_FFT3
 
     SUBROUTINE TEST_CONFIG(DIMS, NITER)
 
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: DIMS
-      INTEGER(IPP),               INTENT(OUT) :: NITER
-      INTEGER(IPP)                            :: IERR, I
-      INTEGER(IPP),               DIMENSION(3) :: LS, LE
-      INTEGER(IPP),               PARAMETER   :: NDIMS = 3
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1) :: COMPLETED, ISBUSY
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:) :: BUFFER
-      LOGICAL,                    PARAMETER   :: REORDER = .TRUE.
-      LOGICAL,      DIMENSION(3), PARAMETER   :: ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
-
-
+      INTEGER(IPP),              DIMENSION(3),             INTENT(IN)  :: DIMS
+      INTEGER(IPP),                                        INTENT(OUT) :: NITER
+      INTEGER(IPP)                                                     :: I                            !< COUNTER
+      INTEGER(IPP)                                                     :: IERR, CARTOPO
+      INTEGER(IPP),              DIMENSION(3)                          :: LS, LE
+      INTEGER(IPP),              DIMENSION(3)                          :: COORDS
+      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COMPLETED, ISBUSY
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                          :: BUFFER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2152,7 +2129,6 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
-
       ! INITIALISE LIST WITH PROCESSES HAVING THEIR POINTS ASSIGNED
       COMPLETED(:) = 0
 
@@ -2163,8 +2139,6 @@ MODULE SCARFLIB_FFT3
 
         ! RESET "BUSY PROCESS" FLAG
         ISBUSY(:) = 0
-
-        !COMM = MPI_COMM_NULL
 
         ! CREATE AS MANY COMMUNICATORS AS POSSIBLE
         DO I = 0, WORLD_SIZE - 1
@@ -2177,10 +2151,6 @@ MODULE SCARFLIB_FFT3
             ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
             IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
 
-              ! CREATE COMMUNICATOR. ONLY PROCESSES BELONGING TO CURRENT COMMUNICATOR HAVE THEIR "BUDDIES", "COMM", "RANK" AND "NTASKS"
-              ! ATTRIBUTES CHANGED
-              !CALL MAKE_COMMUNICATOR(BUFFER, BUDDIES, COMM, RANK, NTASKS)
-
               ! SET PROCESSES BELONGING TO NEW COMMUNICATOR AS BUSY
               ISBUSY(BUFFER) = 1
 
@@ -2189,6 +2159,8 @@ MODULE SCARFLIB_FFT3
 
             ENDIF
 
+            DEALLOCATE(BUFFER)
+
           ENDIF
 
         ENDDO
@@ -2196,8 +2168,6 @@ MODULE SCARFLIB_FFT3
         NITER = NITER + 1
 
       ENDDO
-
-
 
     END SUBROUTINE TEST_CONFIG
 

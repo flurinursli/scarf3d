@@ -200,7 +200,7 @@ PROGRAM DRIVER
   ! WRITE A MODEL SLICE TO DISK
   CALL IO_WRITE_SLICE(2, 100, V3, 'fft_slice.bin')
 
-  CALL IO_WRITE_ONE(V3, 'fft_whole.bin')
+  !CALL IO_WRITE_ONE(V3, 'fft_whole.bin')
 
 
   DO I = 0, NTASKS - 1
