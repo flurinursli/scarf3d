@@ -188,7 +188,8 @@ MODULE SCARFLIB_FFT3
       CALL WATCH_START(TICTOC)
 
       ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
-      CALL BEST_CONFIG(DIMS, ITER)
+      !CALL BEST_CONFIG(DIMS, ITER)
+      CALL BEST_CONFIG(DIMS)
 
       CALL WATCH_STOP(TICTOC)
 
@@ -273,7 +274,8 @@ MODULE SCARFLIB_FFT3
       CALL EXCHANGE_HALO(CARTOPO, DELTA)
 
       ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
-      DO K = 1, ITER
+      !DO K = 1, ITER
+      DO WHILE (ANY(COMPLETED .EQ. 0))
 
         ! RESET "BUSY PROCESS" FLAG
         ISBUSY(:) = 0
@@ -1268,11 +1270,14 @@ MODULE SCARFLIB_FFT3
 
           CALL RANDOM_NUMBER(HARVEST)
 
-          DO I = 1, NPTS(1)
+          IF ( BOOL(2) .AND. BOOL(3) ) THEN
 
-            BOOL(1) = (I .GE. LS(1)) .AND. (I .LE. LE(1))
+          !DO I = 1, NPTS(1)
+          DO I = LS(1), LE(1)
 
-            IF (ALL(BOOL .EQV. .TRUE.)) THEN
+            !BOOL(1) = (I .GE. LS(1)) .AND. (I .LE. LE(1))
+
+            !IF (ALL(BOOL .EQV. .TRUE.)) THEN
 
               ! RADIAL WAVENUMBER
               !KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
@@ -1294,9 +1299,12 @@ MODULE SCARFLIB_FFT3
               ! COMBINE AMPLITUDE AND RANDOM PHASE
               SPEC(I, J, K) = CMPLX(COS(HARVEST(I)) * AMP, SIN(HARVEST(I)) * AMP, FPP)
 
-            ENDIF
+            !ENDIF
 
           ENDDO
+
+          ENDIF
+
         ENDDO
       ENDDO
 
@@ -1971,147 +1979,26 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! SUBROUTINE BEST_CONFIG(DIMS, NITER)
-    !
-    !   ! COMPUTE BEST GRID OF PROCESSES
-    !
-    !   INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: DIMS
-    !   INTEGER(IPP),               INTENT(OUT) :: NITER
-    !
-    !   INTEGER(IPP)                            :: I, J, K
-    !   INTEGER(IPP)                            :: N, N2, N3, NI, NJ
-    !   INTEGER(IPP)                            :: A, B
-    !   INTEGER(IPP),              DIMENSION(3) :: NP, DUM
-    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:) :: FACT_3D, FACT_2D
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   NITER = HUGE(1)
-    !
-    !   ! FACTORISE NUMBER OF AVAILABLE PROCESSES
-    !   CALL FACTORIZATION(WORLD_SIZE, FACT_3D)
-    !
-    !   N3 = SIZE(FACT_3D)
-    !
-    !   NI = N3 / 2
-    !
-    !   IF (MOD(N3, 2) .NE. 0) NI = NI + 1
-    !
-    !   ! LOOP OVER FACTORISED PROCESSES
-    !   DO I = 1, NI
-    !
-    !     A = FACT_3D(I)
-    !     B = FACT_3D(N3 - I + 1)
-    !
-    !     ! FACTORISE FIRST TERM ("A")
-    !     CALL FACTORIZATION(A, FACT_2D)
-    !
-    !     N2 = SIZE(FACT_2D)
-    !
-    !     NJ = N2 / 2
-    !
-    !     IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
-    !
-    !     ! LOOP OVER ALL FACTORS FOR "A"
-    !     DO J = 1, NJ
-    !
-    !       NP = [FACT_2D(J), FACT_2D(N2 - J + 1), B]
-    !
-    !       DO K = 0, 2
-    !
-    !         NP = CSHIFT(NP, 1)
-    !
-    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-    !         CALL TEST_CONFIG(NP, N)
-    !
-    !         IF (N .LT. NITER) THEN
-    !           DIMS  = NP
-    !           NITER = N
-    !         ENDIF
-    !
-    !         ! SWAP SECOND AND THIRD ELEMENT
-    !         DUM = [NP(1), NP(3), NP(2)]
-    !
-    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-    !         CALL TEST_CONFIG(DUM, N)
-    !
-    !         IF (N .LT. NITER) THEN
-    !           DIMS  = DUM
-    !           NITER = N
-    !         ENDIF
-    !
-    !       ENDDO
-    !
-    !     ENDDO
-    !
-    !     DEALLOCATE(FACT_2D)
-    !
-    !     ! FACTORISE SECOND TERM ("B")
-    !     CALL FACTORIZATION(B, FACT_2D)
-    !
-    !     N2 = SIZE(FACT_2D)
-    !
-    !     NJ = N2 / 2
-    !
-    !     IF (MOD(N2, 2) .NE. 0) NJ = NJ + 1
-    !
-    !     ! LOOP OVER ALL FACTORS FOR "B"
-    !     DO J = 1, NJ
-    !
-    !       NP = [A, FACT_2D(J), FACT_2D(N2 - J + 1)]
-    !
-    !       DO K = 0, 2
-    !
-    !         NP = CSHIFT(NP, K)
-    !
-    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-    !         CALL TEST_CONFIG(NP, N)
-    !
-    !         IF (N .LT. NITER) THEN
-    !           DIMS  = NP
-    !           NITER = N
-    !         ENDIF
-    !
-    !         ! SWAP SECOND AND THIRD ELEMENT
-    !         DUM = [NP(1), NP(3), NP(2)]
-    !
-    !         ! THIS SUBROUTINE RETURNS THE NUMBER OF DO WHILE ITERATIONS
-    !         CALL TEST_CONFIG(DUM, N)
-    !
-    !         IF (N .LT. NITER) THEN
-    !           DIMS  = DUM
-    !           NITER = N
-    !         ENDIF
-    !
-    !       ENDDO
-    !
-    !     ENDDO
-    !
-    !     DEALLOCATE(FACT_2D)
-    !
-    !   ENDDO
-    !
-    !   DEALLOCATE(FACT_3D)
-    !
-    ! END SUBROUTINE
-
-    SUBROUTINE BEST_CONFIG(DIMS, NITER)
+    SUBROUTINE BEST_CONFIG(DIMS)
 
       ! COMPUTE BEST GRID OF PROCESSES
 
       INTEGER(IPP),              DIMENSION(3), INTENT(OUT) :: DIMS
-      INTEGER(IPP),                            INTENT(OUT) :: NITER
+      !INTEGER(IPP),                            INTENT(OUT) :: NITER
 
       INTEGER(IPP)                                         :: I, J, K, L, C
-      INTEGER(IPP)                                         :: N, N2, N3
+      INTEGER(IPP)                                         :: N2, N3 !, N
       INTEGER(IPP)                                         :: A, B
       INTEGER(IPP),              DIMENSION(3)              :: V1, V2
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: LIST
 
+      REAL(FPP) :: N, NITER
+
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      NITER = HUGE(1)
+      !NITER = HUGE(1)
+      NITER = HUGE(1._FPP)
 
       C = 0
 
@@ -2120,7 +2007,7 @@ MODULE SCARFLIB_FFT3
 
       N3 = SIZE(FACT3, 2)
 
-      ALLOCATE(LIST(3, N3 * 2))
+      ALLOCATE(LIST(3, N3 * 5))
 
       ! LOOP OVER FACTORISED PROCESSES
       DO L = 1, N3
@@ -2185,7 +2072,8 @@ MODULE SCARFLIB_FFT3
 
       DEALLOCATE(FACT3, FACT2, LIST)
 
-      !---------------------------------------------------------------------------------------------------
+      !-----------------------------------------------------------------------------------------------------------------------------
+      !-----------------------------------------------------------------------------------------------------------------------------
 
       CONTAINS
 
@@ -2196,7 +2084,7 @@ MODULE SCARFLIB_FFT3
         INTEGER(IPP), DIMENSION(:,:), INTENT(IN) :: LIST
         INTEGER(IPP)                             :: I
 
-        !---------------------------------------------------------------------------------------------------------------------------------------
+        !---------------------------------------------------------------------------------------------------------------------------
 
         DO I = 1, IMAX
           MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))
@@ -2205,16 +2093,96 @@ MODULE SCARFLIB_FFT3
 
       END FUNCTION MATCH
 
-    END SUBROUTINE
+    END SUBROUTINE BEST_CONFIG
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE TEST_CONFIG(DIMS, NITER)
+    ! SUBROUTINE TEST_CONFIG(DIMS, NITER)
+    !
+    !   INTEGER(IPP),              DIMENSION(3),             INTENT(IN)  :: DIMS
+    !   INTEGER(IPP),                                        INTENT(OUT) :: NITER
+    !   INTEGER(IPP)                                                     :: I                            !< COUNTER
+    !   INTEGER(IPP)                                                     :: IERR, CARTOPO
+    !   INTEGER(IPP),              DIMENSION(3)                          :: LS, LE
+    !   INTEGER(IPP),              DIMENSION(3)                          :: COORDS
+    !   INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COMPLETED, ISBUSY
+    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                          :: BUFFER
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   ! CREATE TOPOLOGY
+    !   CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
+    !
+    !   ! DO I = 0, WORLD_SIZE - 1
+    !   !   CALL MPI_CART_COORDS(CARTOPO, I, NDIMS, COORDS, IERR)
+    !   !   CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
+    !   !   GS(:, I) = LS
+    !   !   GE(:, I) = LE
+    !   ! ENDDO
+    !
+    !   ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
+    !   CALL MPI_CART_COORDS(CARTOPO, WORLD_RANK, NDIMS, COORDS, IERR)
+    !
+    !   ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
+    !   CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
+    !
+    !   GS(:, WORLD_RANK) = LS
+    !   GE(:, WORLD_RANK) = LE
+    !
+    !   ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
+    !   CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+    !   CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+    !
+    !   ! INITIALISE LIST WITH PROCESSES HAVING THEIR POINTS ASSIGNED
+    !   COMPLETED(:) = 0
+    !
+    !   NITER = 0
+    !
+    !   ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
+    !   DO WHILE(ANY(COMPLETED .EQ. 0))
+    !
+    !     ! RESET "BUSY PROCESS" FLAG
+    !     ISBUSY(:) = 0
+    !
+    !     ! CREATE AS MANY COMMUNICATORS AS POSSIBLE
+    !     DO I = 0, WORLD_SIZE - 1
+    !
+    !       IF (COMPLETED(I) .EQ. 0) THEN
+    !
+    !         ! PRODUCE A TENTATIVE LIST OF PROCESSES THAT MAY JOIN THE NEW COMMUNICATOR
+    !         CALL FIND_BUDDIES(I, BUFFER)
+    !
+    !         ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
+    !         IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
+    !
+    !           ! SET PROCESSES BELONGING TO NEW COMMUNICATOR AS BUSY
+    !           ISBUSY(BUFFER) = 1
+    !
+    !           ! SET I-TH PROCESS AS COMPLETED
+    !           COMPLETED(I) = 1
+    !
+    !         ENDIF
+    !
+    !         DEALLOCATE(BUFFER)
+    !
+    !       ENDIF
+    !
+    !     ENDDO
+    !
+    !     NITER = NITER + 1
+    !
+    !   ENDDO
+    !
+    !   CALL MPI_COMM_FREE(CARTOPO, IERR)
+    !
+    ! END SUBROUTINE TEST_CONFIG
+
+    SUBROUTINE TEST_CONFIG(DIMS, MEASURE)
 
       INTEGER(IPP),              DIMENSION(3),             INTENT(IN)  :: DIMS
-      INTEGER(IPP),                                        INTENT(OUT) :: NITER
+      REAL(FPP),                                           INTENT(OUT) :: MEASURE
       INTEGER(IPP)                                                     :: I                            !< COUNTER
       INTEGER(IPP)                                                     :: IERR, CARTOPO
       INTEGER(IPP),              DIMENSION(3)                          :: LS, LE
@@ -2222,118 +2190,21 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COMPLETED, ISBUSY
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                          :: BUFFER
 
+      REAL(FPP), DIMENSION(3) :: SIDE
+
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! CREATE TOPOLOGY
-      CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
+      SIDE = REAL(NPTS, FPP) / REAL(DIMS, FPP)
 
-      ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
-      CALL MPI_CART_COORDS(CARTOPO, WORLD_RANK, NDIMS, COORDS, IERR)
+      MEASURE = ABS(SIDE(1) - SIDE(2)) + ABS(SIDE(1) - SIDE(3)) + ABS(SIDE(2) - SIDE(3))
 
-      ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
-      CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
-
-      GS(:, WORLD_RANK) = LS
-      GE(:, WORLD_RANK) = LE
-
-      ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      ! INITIALISE LIST WITH PROCESSES HAVING THEIR POINTS ASSIGNED
-      COMPLETED(:) = 0
-
-      NITER = 0
-
-      ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
-      DO WHILE(ANY(COMPLETED .EQ. 0))
-
-        ! RESET "BUSY PROCESS" FLAG
-        ISBUSY(:) = 0
-
-        ! CREATE AS MANY COMMUNICATORS AS POSSIBLE
-        DO I = 0, WORLD_SIZE - 1
-
-          IF (COMPLETED(I) .EQ. 0) THEN
-
-            ! PRODUCE A TENTATIVE LIST OF PROCESSES THAT MAY JOIN THE NEW COMMUNICATOR
-            CALL FIND_BUDDIES(I, BUFFER)
-
-            ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
-            IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
-
-              ! SET PROCESSES BELONGING TO NEW COMMUNICATOR AS BUSY
-              ISBUSY(BUFFER) = 1
-
-              ! SET I-TH PROCESS AS COMPLETED
-              COMPLETED(I) = 1
-
-            ENDIF
-
-            DEALLOCATE(BUFFER)
-
-          ENDIF
-
-        ENDDO
-
-        NITER = NITER + 1
-
-      ENDDO
 
     END SUBROUTINE TEST_CONFIG
+
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    ! SUBROUTINE FACTORIZATION(N, FACTORS)
-    !
-    !   ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
-    !
-    !   INTEGER(IPP),                            INTENT(IN)  :: N
-    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: FACTORS
-    !   INTEGER(IPP)                                         :: I, C, S
-    !   INTEGER(IPP)                                         :: X
-    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)              :: BUFFER
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   ! MAX POSSIBLE FACTOR
-    !   S = FLOOR(SQRT(REAL(N, FPP)))
-    !
-    !   ALLOCATE(BUFFER(S * 2))
-    !
-    !   BUFFER(:) = 0
-    !
-    !   ! TEST FACTORS
-    !   DO I = 1, S
-    !
-    !     X = N / I
-    !
-    !     IF (MOD(N, I) .EQ. 0) THEN
-    !       BUFFER(I)           = I                          !< ADD FACTOR ...
-    !       BUFFER(2*S - I + 1) = X                          !< ... AND ITS COMPANION
-    !     ENDIF
-    !
-    !   ENDDO
-    !
-    !   ! ACTUAL FACTORS FOUND
-    !   I = COUNT(BUFFER .NE. 0)
-    !
-    !   ALLOCATE(FACTORS(I))
-    !
-    !   ! COPY FACTORS TO OUTPUT ARRAY
-    !   C = 0
-    !   DO I = 1, 2 * S
-    !     IF (BUFFER(I) .NE. 0) THEN
-    !       C = C + 1
-    !       FACTORS(C) = BUFFER(I)
-    !     ENDIF
-    !   ENDDO
-    !
-    !   DEALLOCATE(BUFFER)
-    !
-    ! END SUBROUTINE FACTORIZATION
 
     SUBROUTINE FACTORIZATION(N, FACTORS)
 
