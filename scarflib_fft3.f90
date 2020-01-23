@@ -20,6 +20,25 @@ MODULE SCARFLIB_FFT3
   ! PROCEDURE POINTERS
   PROCEDURE(VK_PSDF), POINTER :: FUN
 
+  INTERFACE
+
+    FUNCTION PRNG(SEED, LS, LE, NPTS) BIND(C, NAME="prng")
+      USE, INTRINSIC :: ISO_C_BINDING
+      IMPLICIT NONE
+      INTEGER(C_INT),                           VALUE :: SEED
+      INTEGER(C_INT),  DIMENSION(3), INTENT(IN)       :: LS, LE
+      INTEGER(C_INT),  DIMENSION(3), INTENT(IN)       :: NPTS
+      TYPE(C_PTR)                                     :: PRNG
+    END FUNCTION PRNG
+
+    SUBROUTINE FREE_MEM(PTR) BIND(C, NAME="free_mem")
+      USE, INTRINSIC :: ISO_C_BINDING
+      IMPLICIT NONE
+      TYPE(C_PTR), VALUE, INTENT(IN) :: PTR
+    END SUBROUTINE FREE_MEM
+
+  END INTERFACE
+
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! CARTESIAN GRID MUST BE 3-DIMENSIONAL
@@ -1219,12 +1238,16 @@ MODULE SCARFLIB_FFT3
       LOGICAL,          DIMENSION(3)                                                :: BOOL
       REAL(FPP)                                                                     :: BUTTER, NUM, AMP      !< USED TO COMPUTE SPECTRUM
       REAL(FPP)                                                                     :: KNYQ, KC, KR          !< USED TO COMPUTE SPECTRUM
+      !REAL(FPP)                                                                     :: R
       REAL(REAL64)                                                                  :: TICTOC                !< USED FOR TIMING
       REAL(FPP),        DIMENSION(3)                                                :: DK                    !< RESOLUTION IN WAVENUMBER DOMAIN
-      REAL(FPP),        DIMENSION(NPTS(1))                                          :: HARVEST               !< RANDOM VALUES
+      !REAL(FPP),        DIMENSION(NPTS(1))                                          :: HARVEST               !< RANDOM VALUES
       REAL(FPP),        DIMENSION(NPTS(1))                                          :: KX                    !< WAVENUMBER VECTOR (X)
       REAL(FPP),        DIMENSION(NPTS(2))                                          :: KY                    !< WAVENUMBER VECTOR (Y)
       REAL(FPP),        DIMENSION(NPTS(3))                                          :: KZ                    !< WAVENUMBER VECTOR (Z)
+      REAL(C_FPP),      DIMENSION(:),                                   POINTER     :: R
+      REAL(C_FPP),      DIMENSION(:,:,:),                               POINTER     :: HARVEST
+      TYPE(C_PTR)                                                                   :: CPTR
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -1253,60 +1276,50 @@ MODULE SCARFLIB_FFT3
         FUN => GS_PSDF
       ENDIF
 
-      ! INITIALISE RANDOM GENERATOR
-      CALL SET_STREAM(SEED)
-
       ! START TIMER
       CALL WATCH_START(TICTOC)
 
+      ! EACH PROCESS GENERATE ITS SET OF RANDOM NUMBERS
+      CPTR = PRNG(SEED, LS, LE, NPTS)
+
+      CALL C_F_POINTER(CPTR, R, [(LE(1) - LS(1) + 1) * (LE(2) - LS(2) + 1) * (LE(3) - LS(3) + 1)])
+
+      HARVEST(LS(1):LE(1), LS(2):LE(2), LS(3):LE(3)) => R
+
       ! COMPUTE SPECTRUM
-      DO K = 1, NPTS(3)
+      DO K = LS(3), LE(3)
 
-        BOOL(3) = (K .GE. LS(3)) .AND. (K .LE. LE(3))
+        DO J = LS(2), LE(2)
 
-        DO J = 1, NPTS(2)
-
-          BOOL(2) = (J .GE. LS(2)) .AND. (J .LE. LE(2))
-
-          CALL RANDOM_NUMBER(HARVEST)
-
-          IF ( BOOL(2) .AND. BOOL(3) ) THEN
-
-          !DO I = 1, NPTS(1)
           DO I = LS(1), LE(1)
 
-            !BOOL(1) = (I .GE. LS(1)) .AND. (I .LE. LE(1))
+            ! RADIAL WAVENUMBER
+            !KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
 
-            !IF (ALL(BOOL .EQV. .TRUE.)) THEN
+            ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
+            !BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
 
-              ! RADIAL WAVENUMBER
-              !KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
+            ! NOW "KR" IS THE PRODUCT "K * CL"
+            KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2
 
-              ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
-              !BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
+            ! COMPLETE POWER SPECTRAL DENSITY AND GO TO AMPLITUDE SPECTRUM
+            AMP = SQRT(NUM / FUN(KR, HURST))
 
-              ! NOW "KR" IS THE PRODUCT "K * CL"
-              KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2
+            ! APPLY FILTER
+            !AMP = AMP * BUTTER
 
-              ! COMPLETE POWER SPECTRAL DENSITY AND GO TO AMPLITUDE SPECTRUM
-              AMP = SQRT(NUM / FUN(KR, HURST))
+            !R = HARVEST(I - LS(1) + 1, J - LS(2) + 1, K - LS(3) + 1) * 2._FPP * PI
+            HARVEST(I, J, K) = HARVEST(I, J, K) * 2._FPP * PI
 
-              ! APPLY FILTER
-              !AMP = AMP * BUTTER
-
-              HARVEST(I) = HARVEST(I) * 2._FPP * PI
-
-              ! COMBINE AMPLITUDE AND RANDOM PHASE
-              SPEC(I, J, K) = CMPLX(COS(HARVEST(I)) * AMP, SIN(HARVEST(I)) * AMP, FPP)
-
-            !ENDIF
+            ! COMBINE AMPLITUDE AND RANDOM PHASE
+            SPEC(I, J, K) = CMPLX(COS(HARVEST(I, J, K)) * AMP, SIN(HARVEST(I, J, K)) * AMP, FPP)
 
           ENDDO
-
-          ENDIF
-
         ENDDO
       ENDDO
+
+      NULLIFY(R, HARVEST)
+      CALL FREE_MEM(CPTR)
 
       CALL WATCH_STOP(TICTOC)
 
@@ -1321,6 +1334,127 @@ MODULE SCARFLIB_FFT3
       TIME(2) = TICTOC
 
     END SUBROUTINE COMPUTE_SPECTRUM
+
+    ! SUBROUTINE COMPUTE_SPECTRUM(LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, TIME)
+    !
+    !   ! COMPUTE THE SPECTRUM OF A RANDOM FIELD CHARACTERISED BY A SPECIFIC AUTOCORRELATION FUNCTION, CORRELATION LENGTH, STANDARD DEVIATION,
+    !   ! AND HURST EXPONENT (NOT USED FOR GAUSSIAN FIELDS). BASED ON THE FOURIER INTEGRAL METHOD OF PARDO-IGUZQUIZA AND CHICA-OLMO.
+    !
+    !   INTEGER(IPP),     DIMENSION(3),                                   INTENT(IN)  :: LS, LE                !< GLOBAL INDICES
+    !   REAL(FPP),                                                        INTENT(IN)  :: DH                    !< GRID-STEP
+    !   CHARACTER(LEN=*),                                                 INTENT(IN)  :: ACF                   !< AUTOCORRELATION FUNCTION
+    !   REAL(FPP),        DIMENSION(3),                                   INTENT(IN)  :: CL                    !< CORRELATION LENGTH (CAN BE ANISOTROPIC)
+    !   REAL(FPP),                                                        INTENT(IN)  :: SIGMA                 !< STANDARD DEVIATION (SIGMA%/100)
+    !   REAL(FPP),                                                        INTENT(IN)  :: HURST                 !< HURST EXPONENT
+    !   INTEGER(IPP),                                                     INTENT(IN)  :: SEED                  !< INITIAL SEED NUMBER
+    !   COMPLEX(FPP),     DIMENSION(LS(1):LE(1),LS(2):LE(2),LS(3):LE(3)), INTENT(OUT) :: SPEC                  !< SPECTRUM
+    !   REAL(FPP),        DIMENSION(2),                                   INTENT(OUT) :: TIME                  !< ELAPSED TIME
+    !   INTEGER(IPP)                                                                  :: I, J, K               !< INDICES
+    !   LOGICAL,          DIMENSION(3)                                                :: BOOL
+    !   REAL(FPP)                                                                     :: BUTTER, NUM, AMP      !< USED TO COMPUTE SPECTRUM
+    !   REAL(FPP)                                                                     :: KNYQ, KC, KR          !< USED TO COMPUTE SPECTRUM
+    !   REAL(REAL64)                                                                  :: TICTOC                !< USED FOR TIMING
+    !   REAL(FPP),        DIMENSION(3)                                                :: DK                    !< RESOLUTION IN WAVENUMBER DOMAIN
+    !   REAL(FPP),        DIMENSION(NPTS(1))                                          :: HARVEST               !< RANDOM VALUES
+    !   REAL(FPP),        DIMENSION(NPTS(1))                                          :: KX                    !< WAVENUMBER VECTOR (X)
+    !   REAL(FPP),        DIMENSION(NPTS(2))                                          :: KY                    !< WAVENUMBER VECTOR (Y)
+    !   REAL(FPP),        DIMENSION(NPTS(3))                                          :: KZ                    !< WAVENUMBER VECTOR (Z)
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   ! RESOLUTION IN WAVENUMBER DOMAIN ALONG EACH DIRECTION
+    !   DO I = 1, 3
+    !     DK(I) = 2._FPP * PI / (REAL(NPTS(I), FPP) * DH)
+    !   ENDDO
+    !
+    !   ! NYQUIST WAVENUMBER
+    !   KNYQ = PI / DH
+    !
+    !   ! CORNER WAVENUMBER FOR SPECTRUM TAPERING TO AVOID ALIASING IS HALF NYQUIST WAVENUMBER
+    !   KC = KNYQ / 2._FPP
+    !
+    !   ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
+    !   KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]
+    !   KY = [[(J * DK(2), J = 0, NPTS(2)/2)], [(J * DK(2), J = NPTS(2)/2-1, 1, -1)]]
+    !   KZ = [[(K * DK(3), K = 0, NPTS(3)/2)], [(K * DK(3), K = NPTS(3)/2-1, 1, -1)]]
+    !
+    !   ! COMPUTE PART OF POWER SPECTRAL DENSITY OUTSIDE LOOP
+    !   IF (ACF .EQ. 'VK') THEN
+    !     NUM = 8._FPP * SQRT(PI**3) * GAMMA(HURST + 1.5_FPP) * SIGMA**2 * PRODUCT(CL) / GAMMA(HURST)
+    !     FUN => VK_PSDF
+    !   ELSEIF (ACF .EQ. 'GAUSS') THEN
+    !     NUM = SIGMA**2 * PRODUCT(CL) * SQRT(PI**3)
+    !     FUN => GS_PSDF
+    !   ENDIF
+    !
+    !   ! INITIALISE RANDOM GENERATOR
+    !   CALL SET_STREAM(SEED)
+    !
+    !   ! START TIMER
+    !   CALL WATCH_START(TICTOC)
+    !
+    !   ! COMPUTE SPECTRUM
+    !   DO K = 1, NPTS(3)
+    !
+    !     BOOL(3) = (K .GE. LS(3)) .AND. (K .LE. LE(3))
+    !
+    !     DO J = 1, NPTS(2)
+    !
+    !       BOOL(2) = (J .GE. LS(2)) .AND. (J .LE. LE(2))
+    !
+    !       CALL RANDOM_NUMBER(HARVEST)
+    !
+    !       IF ( BOOL(2) .AND. BOOL(3) ) THEN
+    !
+    !       !DO I = 1, NPTS(1)
+    !       DO I = LS(1), LE(1)
+    !
+    !         !BOOL(1) = (I .GE. LS(1)) .AND. (I .LE. LE(1))
+    !
+    !         !IF (ALL(BOOL .EQV. .TRUE.)) THEN
+    !
+    !           ! RADIAL WAVENUMBER
+    !           !KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
+    !
+    !           ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
+    !           !BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
+    !
+    !           ! NOW "KR" IS THE PRODUCT "K * CL"
+    !           KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2
+    !
+    !           ! COMPLETE POWER SPECTRAL DENSITY AND GO TO AMPLITUDE SPECTRUM
+    !           AMP = SQRT(NUM / FUN(KR, HURST))
+    !
+    !           ! APPLY FILTER
+    !           !AMP = AMP * BUTTER
+    !
+    !           HARVEST(I) = HARVEST(I) * 2._FPP * PI
+    !
+    !           ! COMBINE AMPLITUDE AND RANDOM PHASE
+    !           SPEC(I, J, K) = CMPLX(COS(HARVEST(I)) * AMP, SIN(HARVEST(I)) * AMP, FPP)
+    !
+    !         !ENDIF
+    !
+    !       ENDDO
+    !
+    !       ENDIF
+    !
+    !     ENDDO
+    !   ENDDO
+    !
+    !   CALL WATCH_STOP(TICTOC)
+    !
+    !   TIME(1) = TICTOC
+    !
+    !   CALL WATCH_START(TICTOC)
+    !
+    !   CALL ENFORCE_SYMMETRY(LS, LE, SPEC)
+    !
+    !   CALL WATCH_STOP(TICTOC)
+    !
+    !   TIME(2) = TICTOC
+    !
+    ! END SUBROUTINE COMPUTE_SPECTRUM
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
