@@ -120,6 +120,9 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),        ALLOCATABLE, DIMENSION(:)                  :: VAR, MU              !< STATISTICS: VARIANCE AND AVERAGE
       REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: DELTA                !< RANDOM PERTURBATIONS ON CARTESIAN GRID
 
+      INTEGER(IPP)                                                 :: FACTOR
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: SENDCOUNTS, RECVCOUNTS
+
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! GET RANK NUMBER
@@ -282,104 +285,21 @@ MODULE SCARFLIB_FFT3
 
       DEALLOCATE(SPEC)
 
-      ALLOCATE(COMPLETED(0:WORLD_SIZE - 1), ISBUSY(0:WORLD_SIZE - 1))
-
-      ! INITIALISE LIST WITH PROCESSES HAVING THEIR POINTS ASSIGNED
-      COMPLETED(:) = 0
 
       CALL WATCH_START(TICTOC)
 
       ! EXCHANGE HALO
       CALL EXCHANGE_HALO(CARTOPO, DELTA)
 
-      ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
-      !DO K = 1, ITER
-      DO WHILE (ANY(COMPLETED .EQ. 0))
+      ALLOCATE(SENDCOUNTS(0:WORLD_SIZE - 1), RECVCOUNTS(0:WORLD_SIZE - 1))
 
-        ! RESET "BUSY PROCESS" FLAG
-        ISBUSY(:) = 0
+      CALL POINTS_DISTRIBUTION(X, Y, Z, SENDCOUNTS, RECVCOUNTS)
 
-        COMM = MPI_COMM_NULL
-
-        ! CREATE AS MANY COMMUNICATORS AS POSSIBLE
-        DO I = 0, WORLD_SIZE - 1
-
-          IF (COMPLETED(I) .EQ. 0) THEN
-
-            ! PRODUCE A TENTATIVE LIST OF PROCESSES THAT MAY JOIN THE NEW COMMUNICATOR
-            CALL FIND_BUDDIES(I, BUFFER)
-
-            !IF (WORLD_RANK == 0) PRINT*, 'BUDDIES FOR RANK: ', I, ', ', BUFFER, ' -- ALL FREE?', ALL(ISBUSY(BUFFER) == 0)
-
-            ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
-            IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
-
-              ! CREATE COMMUNICATOR. ONLY PROCESSES BELONGING TO CURRENT COMMUNICATOR HAVE THEIR "BUDDIES", "COMM", "RANK" AND "NTASKS"
-              ! ATTRIBUTES CHANGED
-              CALL MAKE_COMMUNICATOR(BUFFER, BUDDIES, COMM, RANK, NTASKS)
-
-              ! SET PROCESSES BELONGING TO NEW COMMUNICATOR AS BUSY
-              ISBUSY(BUFFER) = 1
-
-              ! SET I-TH PROCESS AS COMPLETED
-              COMPLETED(I) = 1
-
-            ENDIF
-
-            DEALLOCATE(BUFFER)
-
-          ENDIF
-
-        ENDDO
-
-        ! HERE BELOW, INSIDE EACH COMMUNICATOR, MASTER PROCESS SENDS ITS POINTS TO SLAVES AND EVERYONE TRIES TO INTERPOLATE. POINTS
-        ! ARE DIVIDED IN N-BLOCKS TO AVOID TOPPING MAX MEMORY (GIVEN BY SIZE(SPEC)*2 + SIZE(DELTA)).
+      FACTOR = AUTO_TUNING(M, SENDCOUNTS, RECVCOUNTS)
 
 
-        ! LIST COMMUNICATORS (DEBUGGING)
-        ! DO I = 0, WORLD_SIZE - 1
-        !   IF (I .EQ. WORLD_RANK) PRINT*, 'COM ', WORLD_RANK, ' -- ', BUDDIES, ' -- ', RANK, ' COMM==NULL?', COMM == MPI_COMM_NULL
-        !   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-        ! ENDDO
 
 
-        ! ONLY PROCESSES ASSOCIATED TO A COMMUNICATOR CAN EXECUTE INSTRUCTIONS BELOW, OTHERWISE ALREADY COMPUTED POINTS MAY GET
-        ! ERRONEOUSLY COMPUTED ONCE AGAIN
-        IF (COMM .NE. MPI_COMM_NULL) THEN
-
-          ! THE MAX NUMBER OF INPUT POINTS THAT CAN BE BROADCASTED AT THE SAME TIME IS GIVEN BY SIZE(SPEC)*2 / 4
-          N = (GE(1, BUDDIES(1)) - GS(1, BUDDIES(1)) + 1) * (GE(2, BUDDIES(1)) - GS(2, BUDDIES(1)) + 1) *    &
-              (GE(3, BUDDIES(1)) - GS(3, BUDDIES(1)) + 1) / 2
-
-          ! DIVIDE THE NUMBER OF INPUT POINTS IN "N" BLOCKS
-          N = NPOINTS(BUDDIES(1)) / N + 1
-
-          ALLOCATE(I0(N), I1(N))
-
-          CALL MPI_SPLIT_TASK(NPOINTS(BUDDIES(1)), N, I0, I1)
-
-          ! DO I = 0, WORLD_SIZE - 1
-          !   IF (I .EQ. WORLD_RANK) PRINT*, 'BLOCKS ', WORLD_RANK, ' -- ', N, ' -- ', I0, ' -- ', I1
-          !   CALL MPI_BARRIER(COMM, IERR)
-          ! ENDDO
-
-          ! LOOP OVER BLOCKS
-          DO I = 1, N
-            CALL SHARE_AND_INTERPOLATE(COMM, RANK, NTASKS, I0(I), I1(I), DH, DELTA, X, Y, Z, FIELD)
-          ENDDO
-
-          DEALLOCATE(BUDDIES, I0, I1)
-
-          CALL MPI_COMM_FREE(COMM, IERR)
-
-        ENDIF
-
-        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-
-        !IF (WORLD_RANK == 0) PRINT*, '******'
-
-      ENDDO
-      ! END "WHILE" LOOP
 
       CALL WATCH_STOP(TICTOC)
 
@@ -420,6 +340,88 @@ MODULE SCARFLIB_FFT3
       CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
     END SUBROUTINE SCARF3D_FFT
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE POINTS_DISTRIBUTION(X, Y, Z, SENDCOUNTS, RECVCOUNTS)
+
+      REAL(FPP),    DIMENSION(:),              INTENT(IN)  :: X, Y, Z
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(OUT) :: SENDCOUNTS
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(OUT) :: RECVCOUNTS
+      INTEGER(IPP)                                         :: I, J, N, NP
+      LOGICAL                                              :: BOOL
+      REAL(FPP)                                            :: X0, X1, Y0, Y1, Z0, Z1
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      NP = SIZE(X)
+
+      ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST SEND TO THE OTHER PROCESSES
+      DO I = 0, WORLD_SIZE - 1
+
+        X0 = (GS(1, I) - 2) * DH - OFF_AXIS(1)
+        X1 = (GE(1, I) - 1) * DH - OFF_AXIS(1)
+
+        Y0 = (GS(2, I) - 2) * DH - OFF_AXIS(2)
+        Y1 = (GE(2, I) - 1) * DH - OFF_AXIS(2)
+
+        Z0 = (GS(3, I) - 2) * DH - OFF_AXIS(3)
+        Z1 = (GE(3, I) - 1) * DH - OFF_AXIS(3)
+
+        N = 0
+
+        DO J = 1, NP
+
+          BOOL = (X(J) .GE. X0) .AND. (X(J) .LT. X1) .AND.   &
+                 (Y(J) .GE. Y0) .AND. (Y(J) .LT. Y1) .AND.   &
+                 (Z(J) .GE. Z0) .AND. (Z(J) .LT. Z1)
+
+          IF (BOOL .EQV. .TRUE.) N = N + 1
+
+        ENDDO
+
+        SENDCOUNTS(I) = N
+
+      ENDDO
+
+      ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST RECEIVE FROM OTHER PROCESSES
+      CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+
+    END SUBROUTINE POINTS_DISTRIBUTION
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    FUNCTION AUTO_TUNING(M, SENDCOUNTS, RECVCOUNTS)
+
+      INTEGER(IPP), DIMENSION(3),              INTENT(IN) :: M
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(IN) :: SENDCOUNTS, RECVCOUNTS
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! TOTAL POINTS TO BE RECEIVED
+      N = SUM(RECVCOUNTS)
+
+      ! MAX NUMBER OF POINTS THAT CAN BE RECEIVED AT ONCE
+      NMAX = NINT(REAL(PRODUCT(M), FPP) / 2._FPP)
+
+      ! MINIMUM NUMBER OF MESSAGING/INTERPOLATION ITERATIONS
+      ITER = CEILING(REAL(N, FPP) / REAL(NMAX, FPP))
+
+
+      ! NUMBER OF POINTS TO BE SENT TO I-TH PROCESS
+      N = NINT(SENDCOUNTS(I) / ITER)
+
+
+
+
+
+
+
+    END FUNCTION AUTO_TUNING
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
