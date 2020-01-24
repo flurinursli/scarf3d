@@ -345,14 +345,20 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE POINTS_DISTRIBUTION(X, Y, Z, SENDCOUNTS, RECVCOUNTS)
+    SUBROUTINE SHARE_AND_INTERPOLATE(M, DH, DELTA, X, Y, Z, FIELD)
 
-      REAL(FPP),    DIMENSION(:),              INTENT(IN)  :: X, Y, Z
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(OUT) :: SENDCOUNTS
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(OUT) :: RECVCOUNTS
-      INTEGER(IPP)                                         :: I, J, N, NP
-      LOGICAL                                              :: BOOL
-      REAL(FPP)                                            :: X0, X1, Y0, Y1, Z0, Z1
+      INTEGER(IPP), DIMENSION(3),         INTENT(IN)    :: M
+      REAL(FPP),                          INTENT(IN)    :: DH                             !< FFT GRID-STEP
+      REAL(FPP),    DIMENSION(:,:,:),     INTENT(IN)    :: DELTA                          !< RANDOM PERTURBATIONS ON FFT GRID
+      REAL(FPP),    DIMENSION(:),         INTENT(IN)    :: X, Y, Z                        !< POINTS LOCATION
+      REAL(FPP),    DIMENSION(:),         INTENT(INOUT) :: FIELD
+
+
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1)           :: SENDCOUNTS, RECVCOUNTS
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1)           :: NMAX
+      INTEGER(IPP)                                  :: I, J, N, NP
+      LOGICAL                                       :: BOOL
+      REAL(FPP)                                     :: X0, X1, Y0, Y1, Z0, Z1
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -382,46 +388,101 @@ MODULE SCARFLIB_FFT3
 
         ENDDO
 
-        SENDCOUNTS(I) = N
+        SENDCOUNTS(I + 1) = N
 
       ENDDO
 
       ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST RECEIVE FROM OTHER PROCESSES
       CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
-    END SUBROUTINE POINTS_DISTRIBUTION
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    FUNCTION AUTO_TUNING(M, SENDCOUNTS, RECVCOUNTS)
-
-      INTEGER(IPP), DIMENSION(3),              INTENT(IN) :: M
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(IN) :: SENDCOUNTS, RECVCOUNTS
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
       ! TOTAL POINTS TO BE RECEIVED
       N = SUM(RECVCOUNTS)
 
-      ! MAX NUMBER OF POINTS THAT CAN BE RECEIVED AT ONCE
-      NMAX = NINT(REAL(PRODUCT(M), FPP) / 2._FPP)
+      ! TOTAL NUMBER OF POINTS (SENT + RECEIVED) THAT PROCESS CAN HANDLE AT THE SAME TIME
+      NMAX(WORLD_RANK) = NINT(2._FPP * REAL(PRODUCT(M), FPP) / REAL(N + NP, FPP))
+
+      ! SHARE INFO
+      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NMAX, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
       ! MINIMUM NUMBER OF MESSAGING/INTERPOLATION ITERATIONS
-      ITER = CEILING(REAL(N, FPP) / REAL(NMAX, FPP))
+      ITER =  CEILING(REAL(PRODUCT(M), FPP) / REAL(NMAX, FPP))
 
 
-      ! NUMBER OF POINTS TO BE SENT TO I-TH PROCESS
-      N = NINT(SENDCOUNTS(I) / ITER)
+      CALL INTERPOLATE(XR1, YR1, ZR1, DELTA, VS1)
+
+      ! SEND RESULTS BACK
+      CALL MPI_IALLTOALLV(VS1, RECVCOUNTS1, RDISPLS1, REAL_TYPE, VR1, SENDCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
+
+
+      CALL COPY_TO(1)
+
+      ! FORWARD SEND/RECEIVE
+      CALL MPI_IALLTOALLV(VS1, RECVCOUNTS1, RDISPLS1, REAL_TYPE, VR1, SENDCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
+
+      DO L = 1, ITER
+
+        DO I = 0, WORLD_SIZE - 1
+
+          X0 = (GS(1, I) - 2) * DH - OFF_AXIS(1)
+          X1 = (GE(1, I) - 1) * DH - OFF_AXIS(1)
+
+          Y0 = (GS(2, I) - 2) * DH - OFF_AXIS(2)
+          Y1 = (GE(2, I) - 1) * DH - OFF_AXIS(2)
+
+          Z0 = (GS(3, I) - 2) * DH - OFF_AXIS(3)
+          Z1 = (GE(3, I) - 1) * DH - OFF_AXIS(3)
+
+          N = 0
+
+          DO J = 1, NP
+
+            BOOL = (X(J) .GE. X0) .AND. (X(J) .LT. X1) .AND.   &
+                   (Y(J) .GE. Y0) .AND. (Y(J) .LT. Y1) .AND.   &
+                   (Z(J) .GE. Z0) .AND. (Z(J) .LT. Z1)
+
+            IF (BOOL .EQV. .TRUE.) THEN
+
+              N = N + 1
+
+              IF (RECVCOUNTS(WORLD_RANK))
+
+
+          ENDDO
+
+          RECVCOUNTS(WORLD_RANK) = N
+
+        ENDDO
+
+        CALL COPY_TO(2)
+
+        CALL WAIT(REQ1)
+
+        ! INTERPOLATE
+        CALL INTERPOLATE(XR1, YR1, ZR1, DELTA, VS1)
+
+        ! FORWARD SEND/RECEIVE
+        CALL MPI_IALLTOALLV(XS2, SENDCOUNTS2, SDISPLS2, REAL_TYPE, XR2, RECVCOUNTS2, RDISPLS2, REAL_TYPE, MPI_COMM_WORLD, REQ2, IERR)
 
 
 
+        ! BACKWARD SEND/RECEIVE
+        CALL MPI_IALLTOALLV(VS1, RECVCOUNTS1, RDISPLS1, REAL_TYPE, VR1, SENDCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
+
+        CALL WAIT(REQ2)
+
+        ! INTERPOLATE
+        CALL INTERPOLATE(XR2, YR2, ZR2, DELTA, VS2)
+
+        CALL WAIT(REQ1)
+
+        CALL COPY_BACK(X1)
+
+      ENDDO
 
 
+    END SUBROUTINE SHARE_AND_INTERPOLATE
 
 
-    END FUNCTION AUTO_TUNING
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
