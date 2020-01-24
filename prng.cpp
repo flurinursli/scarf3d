@@ -43,7 +43,7 @@ float* prng(int seed, int *ls, int *le, int *npts)
   int c = -1;
   int s;
 
-  std::cout << "input " << seed << ' ' << ls[0] << ' ' << le[0] << std::endl;
+  //std::cout << "input " << seed << ' ' << ls[0] << ' ' << le[0] << std::endl;
 
   for (int k = ls[2]; k <= le[2]; ++k){
 
