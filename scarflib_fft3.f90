@@ -363,6 +363,106 @@ MODULE SCARFLIB_FFT3
 
       NP = SIZE(X)
 
+      ! FIND BEST NUMBER OF POINTS TO BE SENT/RECEIVED
+      NBLOCKS = 20
+
+      ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
+
+      CALL MPI_SPLIT_TASK(NP, NBLOCKS, P0, P1)
+
+      CALL ORDER_POINTS(P0(1), P1(1), X, Y, Z, SXYZ1, SCOUNTS1, SDISPLS1)
+
+      ! NUMBER OF POINTS THAT CALLING PROCESS MUST RECEIVE FROM OTHER PROCESSES
+      CALL MPI_ALLTOALL(SCOUNTS1, 1, MPI_INTEGER, RCOUNTS1, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      CALL MPI_ALLTOALL(SDISPLS1, 1, MPI_INTEGER, RDISPLS1, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+
+      ! FORWARD SEND/RECEIVE - 1
+      CALL MPI_IALLTOALLV(SXYZ1, SCOUNTS1, SDISPLS1, REAL_TYPE, RXYZ1, RCOUNTS1, RDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
+
+      DO P = 2, NBLOCKS - 1
+
+        ! NEW SET OF POINTS - 2
+        CALL ORDER_POINTS(P0(P), P1(P), X, Y, Z, SXYZ2, MAP2, SCOUNTS2, SDISPLS2)
+
+        CALL MPI_ALLTOALL(SCOUNTS2, 1, MPI_INTEGER, RCOUNTS2, 1, MPI_INTEGER, MPI_COMM_WORLD, REQ21, IERR)
+        CALL MPI_ALLTOALL(SDISPLS2, 1, MPI_INTEGER, RDISPLS2, 1, MPI_INTEGER, MPI_COMM_WORLD, REQ22, IERR)
+
+        ! WAIT FOR FORWARD SEND/RECEIVE - 1
+        CALL MPI_WAIT(REQ1, STATUS, IERR)
+
+        ! 1
+        CALL INTERPOLATE(RXYZ1, DELTA, SV1)
+
+        ! BACKWARD SEND/RECEIVE - 1
+        CALL MPI_IALLTOALLV(SV1, RCOUNTS1, RDISPLS1, REAL_TYPE, RV1, SCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
+
+        ! WAIT FOR FORWARD SEND/RECEIVE - 1
+        CALL MPI_WAIT(REQ21, STATUS, IERR)
+        CALL MPI_WAIT(REQ22, STATUS, IERR)
+
+        ! FORWARD SEND/RECEIVE - 2
+        CALL MPI_IALLTOALLV(SXYZ2, SCOUNTS2, SDISPLS2, REAL_TYPE, RXYZ2, RCOUNTS2, RDISPLS2, REAL_TYPE, MPI_COMM_WORLD, REQ2, IERR)
+
+        ! WAIT FOR BACKWARD SEND/RECEIVE - 1
+        CALL MPI_WAIT(REQ1, STATUS, IERR)
+
+        ! COPY BACK OLD SET OF POINTS - 1
+        CALL COPY_BACK(RV1, MAP1, FIELD)
+
+        ! WAIT FOR FORWARD SEND/RECEIVE - 2
+        CALL MPI_WAIT(REQ2, STATUS, IERR)
+
+        ! 2
+        CALL INTERPOLATE(RXYZ2, DELTA, SV2)
+
+        ! BACKWARD SEND/RECEIVE - 2
+        CALL MPI_IALLTOALLV(SV2, RCOUNTS2, RDISPLS2, REAL_TYPE, RV2, SCOUNTS2, SDISPLS2, REAL_TYPE, MPI_COMM_WORLD, REQ2, IERR)
+
+        ! NEW SET OF POINTS - 1
+        CALL ORDER_POINTS(P0(P), P1(P), X, Y, Z, SXYZ1, MAP1, SCOUNTS1, SDISPLS1)
+
+        CALL MPI_IALLTOALL(SCOUNTS1, 1, MPI_INTEGER, RCOUNTS1, 1, MPI_INTEGER, MPI_COMM_WORLD, REQ11, IERR)
+        CALL MPI_IALLTOALL(SDISPLS1, 1, MPI_INTEGER, RDISPLS1, 1, MPI_INTEGER, MPI_COMM_WORLD, REQ12, IERR)
+
+        CALL WAIT(REQ2, STATUS, IERR)
+
+        ! COPY BACK OLD SET OF POINTS - 2
+        CALL COPY_BACK(RV2, MAP2, FIELD)
+
+        CALL WAIT(REQ11, STATUS, IERR)
+        CALL WAIT(REQ12, STATUS, IERR)
+
+        ! FORWARD SEND/RECEIVE - 1
+        CALL MPI_IALLTOALLV(SXYZ1, SCOUNTS1, SDISPLS1, REAL_TYPE, RXYZ1, RCOUNTS1, RDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
+
+      ENDDO
+
+      CALL MPI_WAIT(REQ1, STATUS, IERR)
+
+      CALL INTERPOLATE(RXYZ, DELTA, SV)
+
+      ! BACKWARD SEND/RECEIVE
+      CALL MPI_ALLTOALLV(SV, RCOUNTS, RDISPLS, REAL_TYPE, RV, SCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
+
+      CALL COPY_BACK(RV, MAP, FIELD)
+
+    END SUBROUTINE SHARE_AND_INTERPOLATE
+
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE ORDER_POINTS(P0, P1, X, Y, Z, XYZ, MAP, SENDCOUNTS, SDISPLS)
+
+      INTEGER(IPP),                            INTENT(IN)  :: P0, P1
+      REAL(FPP),    DIMENSION(:),              INTENT(IN)  :: X, Y, Z
+      REAL(FPP),    DIMENSION(3,P1-P0+1),      INTENT(OUT) :: XYZ
+      INTEGER(IPP), DIMENSION(P1-P0+1),        INTENT(OUT) :: MAP
+      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(OUT) :: SENDCOUNTS, SDISPLS
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
       ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST SEND TO THE OTHER PROCESSES
       DO I = 0, WORLD_SIZE - 1
 
@@ -377,13 +477,16 @@ MODULE SCARFLIB_FFT3
 
         N = 0
 
-        DO J = 1, NP
+        DO J = P0, P1
 
           BOOL = (X(J) .GE. X0) .AND. (X(J) .LT. X1) .AND.   &
                  (Y(J) .GE. Y0) .AND. (Y(J) .LT. Y1) .AND.   &
                  (Z(J) .GE. Z0) .AND. (Z(J) .LT. Z1)
 
-          IF (BOOL .EQV. .TRUE.) N = N + 1
+          IF (BOOL .EQV. .TRUE.) THEN
+            N      = N + 1
+            MAP(J) = I
+          ENDIF
 
         ENDDO
 
@@ -391,194 +494,117 @@ MODULE SCARFLIB_FFT3
 
       ENDDO
 
-      ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST RECEIVE FROM OTHER PROCESSES
-      CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      ! TOTAL POINTS TO BE RECEIVED
-      N = SUM(RECVCOUNTS)
-
-      ! IN ORDER TO STAY BELOW THE MEMORY PEAK (GIVEN  BY "2*SIZE(SPECTRUM) + SIZE(DELTA)"),
-      ! TOTAL NUMBER OF POINTS (RECEIVED "N" + SENT "NP") FOR CALLING PROCESS IF WE WOULD USE JUST ONE MESSAGE/INTERPOLATION PATTERN.
-      ! HOWEVER, TO STAY BELOW THE MEMORY PEAK, CALLING PROCESS CANNOT HANDLE MORE THAN "2*SIZE(SPECTRUM)". WE NOW COMPUTE THE RATIO
-      ! BETWEEN THESE TWO QUANTITIES.
-
-
-      N_MAX(WORLD_RANK) = NINT(2._FPP * REAL(PRODUCT(M), FPP) / REAL(N + NP, FPP))
-
-      ! SHARE INFO FOR ALL PROCESSES
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, N_MAX, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      ! MINIMUM NUMBER OF MESSAGING/INTERPOLATION ITERATIONS
-      ITER =  CEILING(REAL(PRODUCT(M), FPP) / REAL(NMAX, FPP))
-
-
-
-      CALL MPI_IALLTOALLV(VS1, RECVCOUNTS1, RDISPLS1, REAL_TYPE, VR1, SENDCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
-
-      ! "ITER" MUST BE EVEN
-      DO L = 1, ITER
-
-        DO I = 0, WORLD_SIZE - 1
-
-          X0 = (GS(1, I) - 2) * DH - OFF_AXIS(1)
-          X1 = (GE(1, I) - 1) * DH - OFF_AXIS(1)
-
-          Y0 = (GS(2, I) - 2) * DH - OFF_AXIS(2)
-          Y1 = (GE(2, I) - 1) * DH - OFF_AXIS(2)
-
-          Z0 = (GS(3, I) - 2) * DH - OFF_AXIS(3)
-          Z1 = (GE(3, I) - 1) * DH - OFF_AXIS(3)
-
-          N = 0
-
-          DO J = 1, NP
-
-            BOOL = (X(J) .GE. X0) .AND. (X(J) .LT. X1) .AND.   &
-                   (Y(J) .GE. Y0) .AND. (Y(J) .LT. Y1) .AND.   &
-                   (Z(J) .GE. Z0) .AND. (Z(J) .LT. Z1)
-
-            IF (BOOL .EQV. .TRUE.) THEN
-
-              N = N + 1
-
-              IF (RECVCOUNTS(WORLD_RANK))
-
-            ENDIF
-
-          ENDDO
-
-          RECVCOUNTS(WORLD_RANK) = N
-
-        ENDDO
-
-        CALL COPY_TO(1)
-
-        ! FORWARD SEND/RECEIVE
-        CALL MPI_IALLTOALLV(XR1, RECVCOUNTS1, RDISPLS1, REAL_TYPE, VR1, SENDCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, REQ1, IERR)
-
-        CALL COPY_TO(2)
-
-        ! FORWARD SEND/RECEIVE
-        CALL MPI_IALLTOALLV(XR2, SENDCOUNTS2, SDISPLS2, REAL_TYPE, XR2, RECVCOUNTS2, RDISPLS2, REAL_TYPE, MPI_COMM_WORLD, REQ2, IERR)
-
-        CALL WAIT(REQ1)
-
-        ! INTERPOLATE
-        CALL INTERPOLATE(XR1, YR1, ZR1, DELTA, VS1)
-
-        ! BACKWARD SEND/RECEIVE
-        CALL MPI_IALLTOALLV(VS1)
-
-        CALL WAIT(REQ2)
-
-        ! INTERPOLATE
-        CALL INTERPOLATE(XR2, YR2, ZR2, DELTA, VS2)
-
-        ! BACKWARD SEND/RECEIVE
-        CALL MPI_IALLTOALLV(VS2)
-
-        CALL COPY_BACK(X1)
-
-        CALL COPY_BACK(X2)
-
-      ENDDO
-
-
-    END SUBROUTINE SHARE_AND_INTERPOLATE
-
-
+    END SUBROUTINE ORDER_POINTS
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SHARE_AND_INTERPOLATE(COMM, RANK, NTASKS, I0, I1, DH, DELTA, X, Y, Z, FIELD)
+    SUBROUTINE COPY_BACK(BUFFER, MAP, FIELD)
 
-      ! SHARE A SUBSET OF INPUT POINTS BELONGING TO MASTER PROCESS WITH SLAVE PROCESSES, INTERPOLATE FROM FFT GRID ONTO POINTS LOCATION,
-      ! SEND EVERYTHING BACK TO MASTER WHICH WILL COPY ONLY THOSE POINTS THAT WERE INTERPOLATED.
-
-      INTEGER(IPP),                       INTENT(IN)    :: COMM                           !< COMMUNICATOR
-      INTEGER(IPP),                       INTENT(IN)    :: RANK                           !< RANK OF CALLING PROCESS IN COMMUNICATOR
-      INTEGER(IPP),                       INTENT(IN)    :: NTASKS                         !< SIZE OF COMMUNICATOR
-      INTEGER(IPP),                       INTENT(IN)    :: I0, I1                         !< FIRST/LAST POINT INDEX
-      REAL(FPP),                          INTENT(IN)    :: DH                             !< FFT GRID-STEP
-      REAL(FPP),    DIMENSION(:,:,:),     INTENT(IN)    :: DELTA                          !< RANDOM PERTURBATIONS ON FFT GRID
-      REAL(FPP),    DIMENSION(:),         INTENT(IN)    :: X, Y, Z                        !< POINTS LOCATION
-      REAL(FPP),    DIMENSION(:),         INTENT(INOUT) :: FIELD                          !< INTERPOLATED RANDOM FIELD
-      INTEGER(IPP)                                      :: I, N                           !< COUNTERS
-      INTEGER(IPP)                                      :: IERR                           !< MPI STUFF
-      INTEGER(IPP), DIMENSION(0:NTASKS-1)               :: RECVCOUNTS, DISPLS             !< MPI STUFF
-      REAL(FPP),    DIMENSION(I0:I1)                    :: XP, YP, ZP, VP                 !< TEMPORARY ARRAYS
+      REAL(FPP),    DIMENSION(:), INTENT(IN)    :: BUFFER
+      INTEGER(IPP), DIMENSION(:), INTENT(IN)    :: MAP
+      REAL(FPP),    DIMENSION(:), INTENT(INOUT) :: FIELD
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      N = I1 - I0 + 1
-
-      ! COPY INPUT DATA INTO TEMPORARY ARRAYS OVERWRITTEN DURING BCASTING ("IF" IS MEANT ONLY TO AVOID THE POSSIBILITY THAT SLAVES
-      ! HAVE MANY LESS INPUT POINTS THAN MASTER PROCESS)
-      IF (RANK .EQ. 0) THEN
-        DO I = I0, I1
-          XP(I) = X(I)
-          YP(I) = Y(I)
-          ZP(I) = Z(I)
-        ENDDO
-      ENDIF
-
-      ! BROADCAST DATA TO SLAVES
-      CALL MPI_BCAST(XP, N, REAL_TYPE, 0, COMM, IERR)
-      CALL MPI_BCAST(YP, N, REAL_TYPE, 0, COMM, IERR)
-      CALL MPI_BCAST(ZP, N, REAL_TYPE, 0, COMM, IERR)
-
-      ! MARK ALL POINTS WITH A VERY LARGE NUMBER. POINTS NOT INTERPOLATED WILL BEAR THIS VALUE.
-      VP = BIG
-
-      CALL INTERPOLATE(DH, XP, YP, ZP, DELTA, VP)
-
-      ! SET INITIAL VALUE FOR COUNTER
-      N = I0 - 1
-
-      ! RE-USE TEMPORARY ARRAYS BUT RENAME VARIABLES FOR CLARITY, KEEP ORIGINAL BOUNDS
-      ASSOCIATE( VAL => XP, POS => YP )
-
-      ! MANUAL PACKING OF INTERPOLATED POINTS ONLY
-      DO I = I0, I1
-        IF (VP(I) .NE. BIG) THEN
-          N      = N + 1
-          VAL(N) = VP(I)
-          POS(N) = REAL(I, FPP)
-        ENDIF
+      DO I = 1, SIZE(BUFFER)
+        FIELD(MAP(I)) = BUFFER(I)
       ENDDO
 
-      ! GET EFFECTIVE NUMBER OF INTERPOLATED POINTS
-      N = N - I0 + 1
+    END SUBROUTINE COPY_BACK
 
-      ! STORE NUMBER OF INTERPOLATED VALUES FOR EACH PROCESS
-      RECVCOUNTS(RANK) = N
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-      ! MAKE ALL PROCESSES AWARE
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, RECVCOUNTS, 1, MPI_INTEGER, COMM, IERR)
-
-      ! SET DISPLACEMENTS
-      DISPLS(0) = 0
-
-      DO I = 1, NTASKS - 1
-        DISPLS(I) = DISPLS(I - 1) + RECVCOUNTS(I - 1)
-      ENDDO
-
-      ! COLLECT INTERPOLATED VALUES AND INDICES
-      CALL MPI_GATHERV(POS, N, REAL_TYPE, POS, RECVCOUNTS, DISPLS, REAL_TYPE, 0, COMM, IERR)
-      CALL MPI_GATHERV(VAL, N, REAL_TYPE, VAL, RECVCOUNTS, DISPLS, REAL_TYPE, 0, COMM, IERR)
-
-      ! ONLY MASTER PROCESS COPY INTERPOLATED VALUES (AT THEIR RIGHT LOCATION)
-      IF (RANK .EQ. 0) THEN
-        DO I = I0, I1
-          FIELD(NINT(POS(I))) = VAL(I)
-        ENDDO
-      ENDIF
-
-      END ASSOCIATE
-
-    END SUBROUTINE SHARE_AND_INTERPOLATE
+    ! SUBROUTINE SHARE_AND_INTERPOLATE(COMM, RANK, NTASKS, I0, I1, DH, DELTA, X, Y, Z, FIELD)
+    !
+    !   ! SHARE A SUBSET OF INPUT POINTS BELONGING TO MASTER PROCESS WITH SLAVE PROCESSES, INTERPOLATE FROM FFT GRID ONTO POINTS LOCATION,
+    !   ! SEND EVERYTHING BACK TO MASTER WHICH WILL COPY ONLY THOSE POINTS THAT WERE INTERPOLATED.
+    !
+    !   INTEGER(IPP),                       INTENT(IN)    :: COMM                           !< COMMUNICATOR
+    !   INTEGER(IPP),                       INTENT(IN)    :: RANK                           !< RANK OF CALLING PROCESS IN COMMUNICATOR
+    !   INTEGER(IPP),                       INTENT(IN)    :: NTASKS                         !< SIZE OF COMMUNICATOR
+    !   INTEGER(IPP),                       INTENT(IN)    :: I0, I1                         !< FIRST/LAST POINT INDEX
+    !   REAL(FPP),                          INTENT(IN)    :: DH                             !< FFT GRID-STEP
+    !   REAL(FPP),    DIMENSION(:,:,:),     INTENT(IN)    :: DELTA                          !< RANDOM PERTURBATIONS ON FFT GRID
+    !   REAL(FPP),    DIMENSION(:),         INTENT(IN)    :: X, Y, Z                        !< POINTS LOCATION
+    !   REAL(FPP),    DIMENSION(:),         INTENT(INOUT) :: FIELD                          !< INTERPOLATED RANDOM FIELD
+    !   INTEGER(IPP)                                      :: I, N                           !< COUNTERS
+    !   INTEGER(IPP)                                      :: IERR                           !< MPI STUFF
+    !   INTEGER(IPP), DIMENSION(0:NTASKS-1)               :: RECVCOUNTS, DISPLS             !< MPI STUFF
+    !   REAL(FPP),    DIMENSION(I0:I1)                    :: XP, YP, ZP, VP                 !< TEMPORARY ARRAYS
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   N = I1 - I0 + 1
+    !
+    !   ! COPY INPUT DATA INTO TEMPORARY ARRAYS OVERWRITTEN DURING BCASTING ("IF" IS MEANT ONLY TO AVOID THE POSSIBILITY THAT SLAVES
+    !   ! HAVE MANY LESS INPUT POINTS THAN MASTER PROCESS)
+    !   IF (RANK .EQ. 0) THEN
+    !     DO I = I0, I1
+    !       XP(I) = X(I)
+    !       YP(I) = Y(I)
+    !       ZP(I) = Z(I)
+    !     ENDDO
+    !   ENDIF
+    !
+    !   ! BROADCAST DATA TO SLAVES
+    !   CALL MPI_BCAST(XP, N, REAL_TYPE, 0, COMM, IERR)
+    !   CALL MPI_BCAST(YP, N, REAL_TYPE, 0, COMM, IERR)
+    !   CALL MPI_BCAST(ZP, N, REAL_TYPE, 0, COMM, IERR)
+    !
+    !   ! MARK ALL POINTS WITH A VERY LARGE NUMBER. POINTS NOT INTERPOLATED WILL BEAR THIS VALUE.
+    !   VP = BIG
+    !
+    !   CALL INTERPOLATE(DH, XP, YP, ZP, DELTA, VP)
+    !
+    !   ! SET INITIAL VALUE FOR COUNTER
+    !   N = I0 - 1
+    !
+    !   ! RE-USE TEMPORARY ARRAYS BUT RENAME VARIABLES FOR CLARITY, KEEP ORIGINAL BOUNDS
+    !   ASSOCIATE( VAL => XP, POS => YP )
+    !
+    !   ! MANUAL PACKING OF INTERPOLATED POINTS ONLY
+    !   DO I = I0, I1
+    !     IF (VP(I) .NE. BIG) THEN
+    !       N      = N + 1
+    !       VAL(N) = VP(I)
+    !       POS(N) = REAL(I, FPP)
+    !     ENDIF
+    !   ENDDO
+    !
+    !   ! GET EFFECTIVE NUMBER OF INTERPOLATED POINTS
+    !   N = N - I0 + 1
+    !
+    !   ! STORE NUMBER OF INTERPOLATED VALUES FOR EACH PROCESS
+    !   RECVCOUNTS(RANK) = N
+    !
+    !   ! MAKE ALL PROCESSES AWARE
+    !   CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, RECVCOUNTS, 1, MPI_INTEGER, COMM, IERR)
+    !
+    !   ! SET DISPLACEMENTS
+    !   DISPLS(0) = 0
+    !
+    !   DO I = 1, NTASKS - 1
+    !     DISPLS(I) = DISPLS(I - 1) + RECVCOUNTS(I - 1)
+    !   ENDDO
+    !
+    !   ! COLLECT INTERPOLATED VALUES AND INDICES
+    !   CALL MPI_GATHERV(POS, N, REAL_TYPE, POS, RECVCOUNTS, DISPLS, REAL_TYPE, 0, COMM, IERR)
+    !   CALL MPI_GATHERV(VAL, N, REAL_TYPE, VAL, RECVCOUNTS, DISPLS, REAL_TYPE, 0, COMM, IERR)
+    !
+    !   ! ONLY MASTER PROCESS COPY INTERPOLATED VALUES (AT THEIR RIGHT LOCATION)
+    !   IF (RANK .EQ. 0) THEN
+    !     DO I = I0, I1
+    !       FIELD(NINT(POS(I))) = VAL(I)
+    !     ENDDO
+    !   ENDIF
+    !
+    !   END ASSOCIATE
+    !
+    ! END SUBROUTINE SHARE_AND_INTERPOLATE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
