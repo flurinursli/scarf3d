@@ -353,11 +353,13 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),    DIMENSION(:),         INTENT(INOUT) :: FIELD
 
 
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1)           :: SENDCOUNTS, RECVCOUNTS
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1)           :: NMAX
-      INTEGER(IPP)                                  :: I, J, N, NP
-      LOGICAL                                       :: BOOL
-      REAL(FPP)                                     :: X0, X1, Y0, Y1, Z0, Z1
+      INTEGER(IPP)                                         :: I, P, N
+      INTEGER(IPP)                                         :: NP, BLOCKWIDTH, NBLOCKS
+      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1) :: SCOUNTS, RCOUNTS
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)              :: P0, P1, MAP
+      REAL(FPP),                 DIMENSION(6)              :: INFO
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:)              :: SV, RV
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)            :: SXYZ, RXYZ
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -384,10 +386,15 @@ MODULE SCARFLIB_FFT3
       P0(I) = P1(I - 1) + 1
       P1(I) = NP
 
+
       DO P = 1, NBLOCKS
 
+        N = P1(P) - P0(P) + 1
+
+        ALLOCATE(SXYZ(3, N))
+
         CALL WATCH_START(TICTOC)
-        CALL ORDER_POINTS(P0(1), P1(1), X, Y, Z, SXYZ, SCOUNTS, MAP)
+        CALL ORDER_POINTS(P0(P), P1(P), DH, X, Y, Z, SXYZ, SCOUNTS, MAP)
         CALL WATCH_STOP(TICTOC); INFO(1) = INFO(1) + TICTOC
 
         CALL WATCH_START(TICTOC)
@@ -521,13 +528,17 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE ORDER_POINTS(P0, P1, X, Y, Z, XYZ, MAP, SENDCOUNTS, SDISPLS)
+    SUBROUTINE ORDER_POINTS(P0, P1, DH, X, Y, Z, XYZ, SENDCOUNTS, MAP)
 
-      INTEGER(IPP),                            INTENT(IN)  :: P0, P1
-      REAL(FPP),    DIMENSION(:),              INTENT(IN)  :: X, Y, Z
-      REAL(FPP),    DIMENSION(3,P1-P0+1),      INTENT(OUT) :: XYZ
-      INTEGER(IPP), DIMENSION(P1-P0+1),        INTENT(OUT) :: MAP
-      INTEGER(IPP), DIMENSION(0:WORLD_SIZE-1), INTENT(OUT) :: SENDCOUNTS, SDISPLS
+      INTEGER(IPP),                 INTENT(IN)  :: P0, P1
+      REAL(FPP),                    INTENT(IN)  :: DH
+      REAL(FPP),    DIMENSION(:),   INTENT(IN)  :: X, Y, Z
+      REAL(FPP),    DIMENSION(:,:), INTENT(OUT) :: XYZ
+      INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: SENDCOUNTS
+      INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: MAP
+
+      INTEGER(IPP)                              :: I, J, N
+      LOGICAL                                   :: BOOL
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -552,13 +563,14 @@ MODULE SCARFLIB_FFT3
                  (Z(J) .GE. Z0) .AND. (Z(J) .LT. Z1)
 
           IF (BOOL .EQV. .TRUE.) THEN
-            N      = N + 1
-            MAP(J) = I
+            N         = N + 1
+            XYZ(:, N) = []
+            MAP(N)    = I
           ENDIF
 
         ENDDO
 
-        SENDCOUNTS(I) = N
+        SENDCOUNTS(I + 1) = N
 
       ENDDO
 
