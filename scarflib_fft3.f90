@@ -291,22 +291,14 @@ MODULE SCARFLIB_FFT3
       ! EXCHANGE HALO
       CALL EXCHANGE_HALO(CARTOPO, DELTA)
 
-      ALLOCATE(SENDCOUNTS(0:WORLD_SIZE - 1), RECVCOUNTS(0:WORLD_SIZE - 1))
-
-      CALL POINTS_DISTRIBUTION(X, Y, Z, SENDCOUNTS, RECVCOUNTS)
-
-      FACTOR = AUTO_TUNING(M, SENDCOUNTS, RECVCOUNTS)
-
-
-
-
+      CALL SHARE_AND_INTERPOLATE(DH, DELTA, X, Y, Z, FIELD)
 
       CALL WATCH_STOP(TICTOC)
 
       INFO(6) = TICTOC
 
       ! RELEASE MEMORY
-      DEALLOCATE(COMPLETED, ISBUSY)
+      !DEALLOCATE(COMPLETED, ISBUSY)
       DEALLOCATE(DELTA)
       DEALLOCATE(GS, GE)
 
@@ -350,14 +342,16 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),                          INTENT(IN)    :: DH                             !< FFT GRID-STEP
       REAL(FPP),    DIMENSION(:,:,:),     INTENT(IN)    :: DELTA                          !< RANDOM PERTURBATIONS ON FFT GRID
       REAL(FPP),    DIMENSION(:),         INTENT(IN)    :: X, Y, Z                        !< POINTS LOCATION
-      REAL(FPP),    DIMENSION(:),         INTENT(INOUT) :: FIELD
+      REAL(FPP),    DIMENSION(:),         INTENT(OUT)   :: FIELD
 
 
       INTEGER(IPP)                                         :: I, P, N
+      INTEGER(IPP)                                         :: TRIPLET_TYPE, IERR
       INTEGER(IPP)                                         :: NP, BLOCKWIDTH, NBLOCKS
-      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1) :: SCOUNTS, RCOUNTS
+      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1) :: SCOUNTS, RCOUNTS, SDISPLS, RDISPLS
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:)              :: P0, P1, MAP
       REAL(FPP),                 DIMENSION(6)              :: INFO
+      REAL(REAL64)                                         :: TIC, TICTOC
       REAL(FPP),    ALLOCATABLE, DIMENSION(:)              :: SV, RV
       REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)            :: SXYZ, RXYZ
 
@@ -370,7 +364,9 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
 
       ! FIND BEST NUMBER OF POINTS TO BE SENT/RECEIVED
-      BLOCKWIDTH = 32 * 1
+      BLOCKWIDTH = 32 * 64
+
+      IF (BLOCKWIDTH .GT. NP) BLOCKWIDTH = NP
 
       NBLOCKS = NP / BLOCKWIDTH
 
@@ -386,49 +382,64 @@ MODULE SCARFLIB_FFT3
       P0(I) = P1(I - 1) + 1
       P1(I) = NP
 
+      NP = SIZE(X)
+
+      DO I = 1, NBLOCKS
+        IF (P0(I) .GT. NP) P0(I) = 1
+        IF (P1(I) .GT. NP) P1(I) = 0
+      ENDDO
+
+      CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIPLET_TYPE, IERR)
+      CALL MPI_TYPE_COMMIT(TRIPLET_TYPE, IERR)
+
+      CALL WATCH_START(TIC)
 
       DO P = 1, NBLOCKS
 
         N = P1(P) - P0(P) + 1
 
-        ALLOCATE(SXYZ(3, N))
+        PRINT*, 'INDICES ', WORLD_RANK, ' ', P, P0(P), P1(P), ' ', SIZE(X), ' ' , N
+
+        ALLOCATE(SXYZ(3, N), MAP(N), RV(N))
 
         CALL WATCH_START(TICTOC)
         CALL ORDER_POINTS(P0(P), P1(P), DH, X, Y, Z, SXYZ, SCOUNTS, MAP)
         CALL WATCH_STOP(TICTOC); INFO(1) = INFO(1) + TICTOC
 
+        PRINT*, 'ORD ', WORLD_RANK, ' ', P,  MINVAL(SXYZ), MAXVAL(SXYZ), ' X ', SCOUNTS, ' - ', SHAPE(SXYZ)
+
         CALL WATCH_START(TICTOC)
         CALL MPI_ALLTOALL(SCOUNTS, 1, MPI_INTEGER, RCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
         CALL WATCH_STOP(TICTOC); INFO(2) = INFO(2) + TICTOC
 
-        RDISPLS(1) = 0
+        RDISPLS(0) = 0
+        SDISPLS(0) = 0
 
         DO I = 1, WORLD_SIZE - 1
           RDISPLS(I) = RDISPLS(I - 1) + RCOUNTS(I - 1)
+          SDISPLS(I) = SDISPLS(I - 1) + SCOUNTS(I - 1)
         ENDDO
 
         N = SUM(RCOUNTS)
 
-        ALLOCATE(RXYZ(3, N))
+        ALLOCATE(RXYZ(3, N), SV(N))
 
         CALL WATCH_START(TICTOC)
-        CALL MPI_ALLTOALLV(SXYZ, SCOUNTS, SDISPLS, REAL_TYPE, RXYZ, RCOUNTS, RDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
+        CALL MPI_ALLTOALLV(SXYZ, SCOUNTS, SDISPLS, TRIPLET_TYPE, RXYZ, RCOUNTS, RDISPLS, TRIPLET_TYPE, MPI_COMM_WORLD, IERR)
         CALL WATCH_STOP(TICTOC); INFO(3) = INFO(3) + TICTOC
 
-        ALLOCATE(SV(N))
+        PRINT*, 'BEF ', WORLD_RANK, ' ', P,  MINVAL(RXYZ), MAXVAL(RXYZ), ' X ', SCOUNTS, ' X ', RCOUNTS, ' - ', SHAPE(RXYZ)
 
         CALL WATCH_START(TICTOC)
         CALL INTERPOLATE(RXYZ, DELTA, SV)
         CALL WATCH_STOP(TICTOC); INFO(4) = INFO(4) + TICTOC
-
-        ALLOCATE(RV(SIZE(MAP)))
 
         CALL WATCH_START(TICTOC)
         CALL MPI_ALLTOALLV(SV, RCOUNTS, RDISPLS, REAL_TYPE, RV, SCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
         CALL WATCH_STOP(TICTOC); INFO(5) = INFO(5) + TICTOC
 
         CALL WATCH_START(TICTOC)
-        DO I = 1, SIZE(MAP)
+        DO I = 1, SIZE(RV)
           FIELD(MAP(I)) = RV(I)
         ENDDO
         CALL WATCH_STOP(TICTOC); INFO(6) = INFO(6) + TICTOC
@@ -436,6 +447,22 @@ MODULE SCARFLIB_FFT3
         DEALLOCATE(RXYZ, SV, RV, SXYZ, MAP)
 
       ENDDO
+
+      CALL WATCH_STOP(TIC)
+
+      DEALLOCATE(P0, P1)
+
+      CALL MPI_TYPE_FREE(TRIPLET_TYPE, IERR)
+
+      IF (WORLD_RANK == 0) THEN
+        PRINT*, 'ORDER POINTS: ', INFO(1)
+        PRINT*, 'SCOUNTS -> RCOUNTS: ', INFO(2)
+        PRINT*, 'FORWARD DATA: ', INFO(3)
+        PRINT*, 'INTERP: ', INFO(4)
+        PRINT*, 'BACKWARD DATA: ', INFO(5)
+        PRINT*, 'COPY BACK: ', INFO(6)
+        PRINT*, 'OVERALL: ', REAL(TIC, REAL32)
+      ENDIF
 
       ! GET FIRST BATCH OF POINTS
       ! CALL ORDER_POINTS(P0(1), P1(1), X, Y, Z, SXYZ1, SCOUNTS1, SDISPLS1)
@@ -510,16 +537,16 @@ MODULE SCARFLIB_FFT3
       ! ENDDO
 
       ! WAIT FOR NON-BLOCKING FORWARD, FIRST BATCH
-      CALL MPI_WAIT(REQ1, STATUS, IERR)
-
-      ! INTERPOLATE FIRST BATCH
-      CALL INTERPOLATE(RXYZ1, DELTA, SV1)
-
-      ! BLOCKING BACKWARD, FIRST BATCH
-      CALL MPI_ALLTOALLV(SV, RCOUNTS, RDISPLS, REAL_TYPE, RV, SCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
-
-      ! COPY BACK FIRST BATCH
-      CALL COPY_BACK(RV, MAP, FIELD)
+      ! CALL MPI_WAIT(REQ1, STATUS, IERR)
+      !
+      ! ! INTERPOLATE FIRST BATCH
+      ! CALL INTERPOLATE(RXYZ1, DELTA, SV1)
+      !
+      ! ! BLOCKING BACKWARD, FIRST BATCH
+      ! CALL MPI_ALLTOALLV(SV, RCOUNTS, RDISPLS, REAL_TYPE, RV, SCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
+      !
+      ! ! COPY BACK FIRST BATCH
+      ! CALL COPY_BACK(RV, MAP, FIELD)
 
     END SUBROUTINE SHARE_AND_INTERPOLATE
 
@@ -537,40 +564,46 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: SENDCOUNTS
       INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: MAP
 
-      INTEGER(IPP)                              :: I, J, N
+      INTEGER(IPP)                              :: L, P, N
+      INTEGER(IPP), DIMENSION(3)                :: CONST, M
       LOGICAL                                   :: BOOL
+      REAL(FPP)                                 :: I, J, K
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST SEND TO THE OTHER PROCESSES
-      DO I = 0, WORLD_SIZE - 1
+      DO L = 0, WORLD_SIZE - 1
 
-        X0 = (GS(1, I) - 2) * DH - OFF_AXIS(1)
-        X1 = (GE(1, I) - 1) * DH - OFF_AXIS(1)
-
-        Y0 = (GS(2, I) - 2) * DH - OFF_AXIS(2)
-        Y1 = (GE(2, I) - 1) * DH - OFF_AXIS(2)
-
-        Z0 = (GS(3, I) - 2) * DH - OFF_AXIS(3)
-        Z1 = (GE(3, I) - 1) * DH - OFF_AXIS(3)
+        DO P = 1, 3
+          CONST(P) = GS(P, L)
+          M(P)     = GE(P, L) - GS(P, L) + 2
+        ENDDO
 
         N = 0
 
-        DO J = P0, P1
+        DO P = P0, P1
 
-          BOOL = (X(J) .GE. X0) .AND. (X(J) .LT. X1) .AND.   &
-                 (Y(J) .GE. Y0) .AND. (Y(J) .LT. Y1) .AND.   &
-                 (Z(J) .GE. Z0) .AND. (Z(J) .LT. Z1)
+          I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
+          J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
+          K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
+
+IF (WORLD_RANK == 1) THEN
+  IF ( (I .LT. 0) .OR. (J .LT. 0) .OR. (K .LT. 0) ) PRINT*, N, I, J, K, X(P), Y(P), Z(P), ' X ', OFF_AXIS, ' X ', CONST
+ENDIF
+
+          ! SHOULD I USE FLOOR(I, J, K) FOR COMPARISON BELOW???
+
+          BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
 
           IF (BOOL .EQV. .TRUE.) THEN
             N         = N + 1
-            XYZ(:, N) = []
-            MAP(N)    = I
+            XYZ(:, N) = [I, J, K]
+            MAP(N)    = P
           ENDIF
 
         ENDDO
 
-        SENDCOUNTS(I + 1) = N
+        SENDCOUNTS(L + 1) = N
 
       ENDDO
 
@@ -580,19 +613,7 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE COPY_BACK(BUFFER, MAP, FIELD)
 
-      REAL(FPP),    DIMENSION(:), INTENT(IN)    :: BUFFER
-      INTEGER(IPP), DIMENSION(:), INTENT(IN)    :: MAP
-      REAL(FPP),    DIMENSION(:), INTENT(INOUT) :: FIELD
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      DO I = 1, SIZE(BUFFER)
-        FIELD(MAP(I)) = BUFFER(I)
-      ENDDO
-
-    END SUBROUTINE COPY_BACK
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -2188,14 +2209,13 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INTERPOLATE(DH, X, Y, Z, DELTA, FIELD)
+    SUBROUTINE INTERPOLATE(XYZ, DELTA, V)
 
       !
 
-      REAL(FPP),                      INTENT(IN)  :: DH                               !< GRID-STEP
-      REAL(FPP),    DIMENSION(:),     INTENT(IN)  :: X, Y, Z                          !< POINTS LOCATION
+      REAL(FPP),    DIMENSION(:,:),   INTENT(IN)  :: XYZ                          !< POINTS LOCATION
       REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)  :: DELTA                            !< RANDOM FIELD
-      REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: FIELD                            !< INTERPOLATED VALUES
+      REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: V                            !< INTERPOLATED VALUES
       INTEGER(IPP)                                :: P                                !< COUNTERS
       INTEGER(IPP)                                :: IS, JS, KS, I0, J0, K0           !< INDICES
       INTEGER(IPP), DIMENSION(3)                  :: N
@@ -2207,30 +2227,34 @@ MODULE SCARFLIB_FFT3
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      IS = GS(1, WORLD_RANK)
-      JS = GS(2, WORLD_RANK)
-      KS = GS(3, WORLD_RANK)
-
-      N(1) = SIZE(DELTA, 1)
-      N(2) = SIZE(DELTA, 2)
-      N(3) = SIZE(DELTA, 3)
+      ! IS = GS(1, WORLD_RANK)
+      ! JS = GS(2, WORLD_RANK)
+      ! KS = GS(3, WORLD_RANK)
+      !
+      ! N(1) = SIZE(DELTA, 1)
+      ! N(2) = SIZE(DELTA, 2)
+      ! N(3) = SIZE(DELTA, 3)
 
       ! LOOP OVER POINTS
-      DO P = 1, SIZE(X)
+      DO P = 1, SIZE(XYZ, 2)
 
-        I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - IS
-        J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - JS
-        K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - KS
+        ! I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - IS
+        ! J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - JS
+        ! K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - KS
+
+        I = XYZ(1, P)
+        J = XYZ(2, P)
+        K = XYZ(3, P)
 
         I0 = FLOOR(I)
         J0 = FLOOR(J)
         K0 = FLOOR(K)
 
-        BOOL(1) = (I0 .LT. 1) .OR. (I0 .GE. N(1))
-        BOOL(2) = (J0 .LT. 1) .OR. (J0 .GE. N(2))
-        BOOL(3) = (K0 .LT. 1) .OR. (K0 .GE. N(3))
-
-        IF (ANY(BOOL .EQV. .TRUE.)) CYCLE
+        ! BOOL(1) = (I0 .LT. 1) .OR. (I0 .GE. N(1))
+        ! BOOL(2) = (J0 .LT. 1) .OR. (J0 .GE. N(2))
+        ! BOOL(3) = (K0 .LT. 1) .OR. (K0 .GE. N(3))
+        !
+        ! IF (ANY(BOOL .EQV. .TRUE.)) CYCLE
 
         F(:, 1) = DELTA(I0:I0 + 1, J0, K0)
         F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0)
@@ -2253,7 +2277,7 @@ MODULE SCARFLIB_FFT3
         PZ = K - K0
 
         ! LINEAR INTERPOLATED BETWEEN LEVEL 1 AND 2
-        FIELD(P) = A * (1._FPP - PZ) + B * PZ
+        V(P) = A * (1._FPP - PZ) + B * PZ
 
       ENDDO
 
