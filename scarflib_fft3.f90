@@ -47,6 +47,12 @@ MODULE SCARFLIB_FFT3
   ! MIN/MAX INDEX OF INPUT POINTS WHEN PROJECTED ONTO COMPUTATIONAL GRID
   INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)           :: PS, PE
 
+  ! RETURN 1 IF I-TH PROCESS HAS POINTS FALLING INSIDE CUBOID OF CALLING PROCESS
+  INTEGER(IPP), ALLOCATABLE, DIMENSION(:)             :: POINTS_WORLD2RANK
+
+  ! RETURN 1 IF CALLING PROCESS HAS POINTS FALLING INSIDE CUBOID OF I-TH PROCESS
+  INTEGER(IPP), ALLOCATABLE, DIMENSION(:)             :: POINTS_RANK2WORLD
+
   ! ALLOW GRID RE-ORDERING
   LOGICAL,                                  PARAMETER :: REORDER = .TRUE.
 
@@ -112,6 +118,7 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NPOINTS
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: BUDDIES, BUFFER
       INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: I0, I1
+      LOGICAL,                       DIMENSION(3)                  :: BOOL
       REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
       REAL(REAL64)                                                 :: TICTOC               !< TIMING
       REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
@@ -242,6 +249,27 @@ MODULE SCARFLIB_FFT3
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
+
+      ALLOCATE(POINTS_WORLD2RANK(0:WORLD_SIZE - 1))
+
+      POINTS_WORLD2RANK = 0
+
+      ! DETERMINE IF PROCESS "I" HAS AT LEAST ONE POINT FALLING INSIDE CUBOID OF CALLING PROCESS
+      DO I = 0, WORLD_SIZE - 1
+        DO J = 1, 3
+          BOOL(J) = (PS(J, I) .LT. GE(J, WORLD_RANK)) .AND. (PS(J, I) .GE. (GS(J, WORLD_RANK) - 1)) .OR.    &
+                    (PE(J, I) .LT. GE(J, WORLD_RANK)) .AND. (PE(J, I) .GE. (GS(J, WORLD_RANK) - 1)) .OR.    &
+                    (PE(J, I) .GE. GE(J, WORLD_RANK)) .AND. (PS(J, I) .LT. (GS(J, WORLD_RANK) - 1))
+        ENDDO
+        IF (ALL(BOOL .EQV. .TRUE.)) POINTS_WORLD2RANK(I) = 1
+      ENDDO
+
+      POINTS_RANK2WORLD = POINTS_WORLD2RANK
+
+      ! DETERMINE IF CALLING PROCESS HAS AT LEAST ONE POINT FALLING INSIDE CUBOID OF "I-TH" PROCESS
+      CALL MPI_ALLTOALL(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, POINTS_RANK2WORLD, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+
+
       ! NUMBER OF POINTS FOR CALLING PROCESS
       DO I = 1, 3
         M(I) = LE(I) - LS(I) + 1
@@ -358,182 +386,187 @@ MODULE SCARFLIB_FFT3
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      FIELD = 0._FPP
-
-      INFO = 0._FPP
-
-      NP = SIZE(X)
-
-      ! MAXIMUM NUMBER OF POINTS
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
-
-      ! FIND BEST NUMBER OF POINTS TO BE SENT/RECEIVED
-      !BLOCKWIDTH = NP / 100
-
-      !CALL SET_BLOCKS(NP, BLOCKWIDTH, P0, P1)
-
-      ! WE CANNOT PROCESS MORE THAN THE MAXIMUM NUMBER OF POINTS
-      !IF (BLOCKWIDTH .GT. NP) BLOCKWIDTH = NP
-
-      ! RESULTING PROCESSING BLOCKS
-      !NBLOCKS = NP / BLOCKWIDTH
-
-      NBLOCKS = 50
-
-      BLOCKWIDTH = NP / NBLOCKS + 1
-
-
-      ! ADD ONE MORE BLOCK IF "NP" NOT MULTIPLE OF "BLOCKWIDTH"
-      !IF (MOD(NP, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
-
-      ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
-
-      ! DEFINE FIRST/LAST INDEX FOR EACH BLOCK
-      DO I = 1, NBLOCKS
-        P0(I) = (I - 1) * BLOCKWIDTH + 1
-        P1(I) = I * BLOCKWIDTH
-      ENDDO
-
-      NP = SIZE(X)
-
-      ! LIMIT POINTS INDICES TO MAXIMUM NUMBER OF POINTS AVAILABLE TO CALLING PROCESS
-      DO I = 1, NBLOCKS
-        IF ( (P0(I) .LE. NP) .AND. (P1(I) .GT. NP) ) P1(I) = NP
-        IF ( (P0(I) .GT. NP) .AND. (P1(I) .GT. NP) ) P1(I) = P0(I) - 1
-      ENDDO
-
-      CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIP, IERR)
-      CALL MPI_TYPE_COMMIT(TRIP, IERR)
-
-      CALL WATCH_START(TIC)
-
-
-      N1 = P1(1) - P0(1) + 1
-
-      ALLOCATE(SXYZ1(3, N1), MAP1(N1), RV1(N1))
-
-      CALL ORDER_POINTS(P0(1), P1(1), DH, X, Y, Z, SXYZ1, SCOUNTS1, MAP1)
-      CALL MPI_ALLTOALL(SCOUNTS1, 1, MPI_INTEGER, RCOUNTS1, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      DO P = 2, NBLOCKS - 1, 2
-
-        RDISPLS1(0) = 0
-        SDISPLS1(0) = 0
-
-        DO I = 1, WORLD_SIZE - 1
-          RDISPLS1(I) = RDISPLS1(I - 1) + RCOUNTS1(I - 1)
-          SDISPLS1(I) = SDISPLS1(I - 1) + SCOUNTS1(I - 1)
-        ENDDO
-
-        N1 = SUM(RCOUNTS1)
-
-        ALLOCATE(RXYZ1(3, N1), SV1(N1))
-
-        CALL MPI_IALLTOALLV(SXYZ1, SCOUNTS1, SDISPLS1, TRIP, RXYZ1, RCOUNTS1, RDISPLS1, TRIP, MPI_COMM_WORLD, REQ1, IERR)
-
-
-
-        N2 = P1(P) - P0(P) + 1
-
-        ALLOCATE(SXYZ2(3, N2), MAP2(N2), RV2(N2))
-
-        CALL ORDER_POINTS(P0(P), P1(P), DH, X, Y, Z, SXYZ2, SCOUNTS2, MAP2)
-        CALL MPI_ALLTOALL(SCOUNTS2, 1, MPI_INTEGER, RCOUNTS2, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-        RDISPLS2(0) = 0
-        SDISPLS2(0) = 0
-
-        DO I = 1, WORLD_SIZE - 1
-          RDISPLS2(I) = RDISPLS2(I - 1) + RCOUNTS2(I - 1)
-          SDISPLS2(I) = SDISPLS2(I - 1) + SCOUNTS2(I - 1)
-        ENDDO
-
-        N2 = SUM(RCOUNTS2)
-
-        ALLOCATE(RXYZ2(3, N2), SV2(N2))
-
-        CALL MPI_IALLTOALLV(SXYZ2, SCOUNTS2, SDISPLS2, TRIP, RXYZ2, RCOUNTS2, RDISPLS2, TRIP, MPI_COMM_WORLD, REQ2, IERR)
-
-
-        CALL MPI_WAIT(REQ1, MPI_STATUS_IGNORE, IERR)
-
-        CALL INTERPOLATE(RXYZ1, DELTA, SV1)
-        CALL MPI_ALLTOALLV(SV1, RCOUNTS1, RDISPLS1, REAL_TYPE, RV1, SCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-        DO I = 1, SIZE(RV1)
-          FIELD(MAP1(I)) = RV1(I)
-        ENDDO
-
-        DEALLOCATE(RXYZ1, SV1, RV1, SXYZ1, MAP1)
-
-        N1 = P1(P + 1) - P0(P + 1) + 1
-
-        ALLOCATE(SXYZ1(3, N1), MAP1(N1), RV1(N1))
-
-        CALL ORDER_POINTS(P0(P + 1), P1(P + 1), DH, X, Y, Z, SXYZ1, SCOUNTS1, MAP1)
-        CALL MPI_ALLTOALL(SCOUNTS1, 1, MPI_INTEGER, RCOUNTS1, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-
-        CALL MPI_WAIT(REQ2, MPI_STATUS_IGNORE, IERR)
-
-        CALL INTERPOLATE(RXYZ2, DELTA, SV2)
-        CALL MPI_ALLTOALLV(SV2, RCOUNTS2, RDISPLS2, REAL_TYPE, RV2, SCOUNTS2, SDISPLS2, REAL_TYPE, MPI_COMM_WORLD, IERR)
-        DO I = 1, SIZE(RV2)
-          FIELD(MAP2(I)) = RV2(I)
-        ENDDO
-
-        DEALLOCATE(RXYZ2, SV2, RV2, SXYZ2, MAP2)
-
-      ENDDO
-
-      RDISPLS1(0) = 0
-      SDISPLS1(0) = 0
-
-      DO I = 1, WORLD_SIZE - 1
-        RDISPLS1(I) = RDISPLS1(I - 1) + RCOUNTS1(I - 1)
-        SDISPLS1(I) = SDISPLS1(I - 1) + SCOUNTS1(I - 1)
-      ENDDO
-
-      N1 = SUM(RCOUNTS1)
-
-      ALLOCATE(RXYZ1(3, N1), SV1(N1))
-
-      CALL MPI_ALLTOALLV(SXYZ1, SCOUNTS1, SDISPLS1, TRIP, RXYZ1, RCOUNTS1, RDISPLS1, TRIP, MPI_COMM_WORLD, IERR)
-
-      RDISPLS1(0) = 0
-      SDISPLS1(0) = 0
-
-      DO I = 1, WORLD_SIZE - 1
-        RDISPLS1(I) = RDISPLS1(I - 1) + RCOUNTS1(I - 1)
-        SDISPLS1(I) = SDISPLS1(I - 1) + SCOUNTS1(I - 1)
-      ENDDO
-
-      CALL INTERPOLATE(RXYZ1, DELTA, SV1)
-
-      CALL MPI_ALLTOALLV(SV1, RCOUNTS1, RDISPLS1, REAL_TYPE, RV1, SCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-
-      DO I = 1, SIZE(RV1)
-        FIELD(MAP1(I)) = RV1(I)
-      ENDDO
-
-      DEALLOCATE(RXYZ1, SV1, RV1, SXYZ1, MAP1)
-
-      CALL WATCH_STOP(TIC)
-
-      DEALLOCATE(P0, P1)
-
-      CALL MPI_TYPE_FREE(TRIP, IERR)
-
-      IF (WORLD_RANK == 0) THEN
-        PRINT*, 'ORDER POINTS: ', INFO(1) / NBLOCKS
-        PRINT*, 'SCOUNTS -> RCOUNTS: ', INFO(2) / NBLOCKS
-        PRINT*, 'FORWARD DATA: ', INFO(3) / NBLOCKS
-        PRINT*, 'INTERP: ', INFO(4) / NBLOCKS
-        PRINT*, 'BACKWARD DATA: ', INFO(5) / NBLOCKS
-        PRINT*, 'COPY BACK: ', INFO(6) / NBLOCKS
-        PRINT*, 'OVERALL: ', REAL(TIC, REAL32), NBLOCKS
-        PRINT*, '**'
-      ENDIF
-
+      CALL AUTO_TUNE(DH, DELTA, X, Y, Z, P0, P1)
+
+      CALL AUTO_TUNE2(DH, DELTA, X, Y, Z, P0, P1)
+
+
+      ! FIELD = 0._FPP
+      !
+      ! INFO = 0._FPP
+      !
+      ! NP = SIZE(X)
+      !
+      ! ! MAXIMUM NUMBER OF POINTS
+      ! CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+      !
+      ! ! FIND BEST NUMBER OF POINTS TO BE SENT/RECEIVED
+      ! !BLOCKWIDTH = NP / 100
+      !
+      ! !CALL SET_BLOCKS(NP, BLOCKWIDTH, P0, P1)
+      !
+      ! ! WE CANNOT PROCESS MORE THAN THE MAXIMUM NUMBER OF POINTS
+      ! !IF (BLOCKWIDTH .GT. NP) BLOCKWIDTH = NP
+      !
+      ! ! RESULTING PROCESSING BLOCKS
+      ! !NBLOCKS = NP / BLOCKWIDTH
+      !
+      ! NBLOCKS = 50
+      !
+      ! BLOCKWIDTH = NP / NBLOCKS + 1
+      !
+      !
+      ! ! ADD ONE MORE BLOCK IF "NP" NOT MULTIPLE OF "BLOCKWIDTH"
+      ! !IF (MOD(NP, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
+      !
+      ! ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
+      !
+      ! ! DEFINE FIRST/LAST INDEX FOR EACH BLOCK
+      ! DO I = 1, NBLOCKS
+      !   P0(I) = (I - 1) * BLOCKWIDTH + 1
+      !   P1(I) = I * BLOCKWIDTH
+      ! ENDDO
+      !
+      ! NP = SIZE(X)
+      !
+      ! ! LIMIT POINTS INDICES TO MAXIMUM NUMBER OF POINTS AVAILABLE TO CALLING PROCESS
+      ! DO I = 1, NBLOCKS
+      !   IF ( (P0(I) .LE. NP) .AND. (P1(I) .GT. NP) ) P1(I) = NP
+      !   IF ( (P0(I) .GT. NP) .AND. (P1(I) .GT. NP) ) P1(I) = P0(I) - 1
+      ! ENDDO
+      !
+      ! CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIP, IERR)
+      ! CALL MPI_TYPE_COMMIT(TRIP, IERR)
+      !
+      ! CALL WATCH_START(TIC)
+      !
+      !
+      ! N1 = P1(1) - P0(1) + 1
+      !
+      ! ALLOCATE(SXYZ1(3, N1), MAP1(N1), RV1(N1))
+      !
+      ! CALL ORDER_POINTS(P0(1), P1(1), DH, X, Y, Z, SXYZ1, SCOUNTS1, MAP1)
+      ! CALL MPI_ALLTOALL(SCOUNTS1, 1, MPI_INTEGER, RCOUNTS1, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      !
+      ! DO P = 2, NBLOCKS - 1, 2
+      !
+      !   RDISPLS1(0) = 0
+      !   SDISPLS1(0) = 0
+      !
+      !   DO I = 1, WORLD_SIZE - 1
+      !     RDISPLS1(I) = RDISPLS1(I - 1) + RCOUNTS1(I - 1)
+      !     SDISPLS1(I) = SDISPLS1(I - 1) + SCOUNTS1(I - 1)
+      !   ENDDO
+      !
+      !   N1 = SUM(RCOUNTS1)
+      !
+      !   ALLOCATE(RXYZ1(3, N1), SV1(N1))
+      !
+      !   CALL MPI_IALLTOALLV(SXYZ1, SCOUNTS1, SDISPLS1, TRIP, RXYZ1, RCOUNTS1, RDISPLS1, TRIP, MPI_COMM_WORLD, REQ1, IERR)
+      !
+      !
+      !
+      !   N2 = P1(P) - P0(P) + 1
+      !
+      !   ALLOCATE(SXYZ2(3, N2), MAP2(N2), RV2(N2))
+      !
+      !   CALL ORDER_POINTS(P0(P), P1(P), DH, X, Y, Z, SXYZ2, SCOUNTS2, MAP2)
+      !   CALL MPI_ALLTOALL(SCOUNTS2, 1, MPI_INTEGER, RCOUNTS2, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      !
+      !   RDISPLS2(0) = 0
+      !   SDISPLS2(0) = 0
+      !
+      !   DO I = 1, WORLD_SIZE - 1
+      !     RDISPLS2(I) = RDISPLS2(I - 1) + RCOUNTS2(I - 1)
+      !     SDISPLS2(I) = SDISPLS2(I - 1) + SCOUNTS2(I - 1)
+      !   ENDDO
+      !
+      !   N2 = SUM(RCOUNTS2)
+      !
+      !   ALLOCATE(RXYZ2(3, N2), SV2(N2))
+      !
+      !   CALL MPI_IALLTOALLV(SXYZ2, SCOUNTS2, SDISPLS2, TRIP, RXYZ2, RCOUNTS2, RDISPLS2, TRIP, MPI_COMM_WORLD, REQ2, IERR)
+      !
+      !
+      !   CALL MPI_WAIT(REQ1, MPI_STATUS_IGNORE, IERR)
+      !
+      !   CALL INTERPOLATE(RXYZ1, DELTA, SV1)
+      !   CALL MPI_ALLTOALLV(SV1, RCOUNTS1, RDISPLS1, REAL_TYPE, RV1, SCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, IERR)
+      !   DO I = 1, SIZE(RV1)
+      !     FIELD(MAP1(I)) = RV1(I)
+      !   ENDDO
+      !
+      !   DEALLOCATE(RXYZ1, SV1, RV1, SXYZ1, MAP1)
+      !
+      !   N1 = P1(P + 1) - P0(P + 1) + 1
+      !
+      !   ALLOCATE(SXYZ1(3, N1), MAP1(N1), RV1(N1))
+      !
+      !   CALL ORDER_POINTS(P0(P + 1), P1(P + 1), DH, X, Y, Z, SXYZ1, SCOUNTS1, MAP1)
+      !   CALL MPI_ALLTOALL(SCOUNTS1, 1, MPI_INTEGER, RCOUNTS1, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      !
+      !
+      !   CALL MPI_WAIT(REQ2, MPI_STATUS_IGNORE, IERR)
+      !
+      !   CALL INTERPOLATE(RXYZ2, DELTA, SV2)
+      !   CALL MPI_ALLTOALLV(SV2, RCOUNTS2, RDISPLS2, REAL_TYPE, RV2, SCOUNTS2, SDISPLS2, REAL_TYPE, MPI_COMM_WORLD, IERR)
+      !   DO I = 1, SIZE(RV2)
+      !     FIELD(MAP2(I)) = RV2(I)
+      !   ENDDO
+      !
+      !   DEALLOCATE(RXYZ2, SV2, RV2, SXYZ2, MAP2)
+      !
+      ! ENDDO
+      !
+      ! RDISPLS1(0) = 0
+      ! SDISPLS1(0) = 0
+      !
+      ! DO I = 1, WORLD_SIZE - 1
+      !   RDISPLS1(I) = RDISPLS1(I - 1) + RCOUNTS1(I - 1)
+      !   SDISPLS1(I) = SDISPLS1(I - 1) + SCOUNTS1(I - 1)
+      ! ENDDO
+      !
+      ! N1 = SUM(RCOUNTS1)
+      !
+      ! ALLOCATE(RXYZ1(3, N1), SV1(N1))
+      !
+      ! CALL MPI_ALLTOALLV(SXYZ1, SCOUNTS1, SDISPLS1, TRIP, RXYZ1, RCOUNTS1, RDISPLS1, TRIP, MPI_COMM_WORLD, IERR)
+      !
+      ! RDISPLS1(0) = 0
+      ! SDISPLS1(0) = 0
+      !
+      ! DO I = 1, WORLD_SIZE - 1
+      !   RDISPLS1(I) = RDISPLS1(I - 1) + RCOUNTS1(I - 1)
+      !   SDISPLS1(I) = SDISPLS1(I - 1) + SCOUNTS1(I - 1)
+      ! ENDDO
+      !
+      ! CALL INTERPOLATE(RXYZ1, DELTA, SV1)
+      !
+      ! CALL MPI_ALLTOALLV(SV1, RCOUNTS1, RDISPLS1, REAL_TYPE, RV1, SCOUNTS1, SDISPLS1, REAL_TYPE, MPI_COMM_WORLD, IERR)
+      !
+      ! DO I = 1, SIZE(RV1)
+      !   FIELD(MAP1(I)) = RV1(I)
+      ! ENDDO
+      !
+      ! DEALLOCATE(RXYZ1, SV1, RV1, SXYZ1, MAP1)
+      !
+      ! CALL WATCH_STOP(TIC)
+      !
+      ! DEALLOCATE(P0, P1)
+      !
+      ! CALL MPI_TYPE_FREE(TRIP, IERR)
+      !
+      ! IF (WORLD_RANK == 0) THEN
+      !   PRINT*, 'ORDER POINTS: ', INFO(1) / NBLOCKS
+      !   PRINT*, 'SCOUNTS -> RCOUNTS: ', INFO(2) / NBLOCKS
+      !   PRINT*, 'FORWARD DATA: ', INFO(3) / NBLOCKS
+      !   PRINT*, 'INTERP: ', INFO(4) / NBLOCKS
+      !   PRINT*, 'BACKWARD DATA: ', INFO(5) / NBLOCKS
+      !   PRINT*, 'COPY BACK: ', INFO(6) / NBLOCKS
+      !   PRINT*, 'OVERALL: ', REAL(TIC, REAL32), NBLOCKS
+      !   PRINT*, '**'
+      ! ENDIF
+      !
 
 
 
@@ -543,6 +576,58 @@ MODULE SCARFLIB_FFT3
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    ! SUBROUTINE ORDER_POINTS(P0, P1, DH, X, Y, Z, XYZ, SENDCOUNTS, MAP)
+    !
+    !   INTEGER(IPP),                 INTENT(IN)  :: P0, P1
+    !   REAL(FPP),                    INTENT(IN)  :: DH
+    !   REAL(FPP),    DIMENSION(:),   INTENT(IN)  :: X, Y, Z
+    !   REAL(FPP),    DIMENSION(:,:), INTENT(OUT) :: XYZ
+    !   INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: SENDCOUNTS
+    !   INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: MAP
+    !
+    !   INTEGER(IPP)                              :: L, P, N, C
+    !   INTEGER(IPP), DIMENSION(3)                :: CONST, M
+    !   LOGICAL                                   :: BOOL
+    !   REAL(FPP)                                 :: I, J, K
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   C = 0
+    !
+    !   ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST SEND TO THE OTHER PROCESSES
+    !   DO L = 0, WORLD_SIZE - 1
+    !
+    !     DO P = 1, 3
+    !       CONST(P) = GS(P, L)
+    !       M(P)     = GE(P, L) - GS(P, L) + 2
+    !     ENDDO
+    !
+    !     N = C
+    !
+    !     DO P = P0, P1
+    !
+    !       I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
+    !       J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
+    !       K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
+    !
+    !       ! SHOULD I USE FLOOR(I, J, K) FOR COMPARISON BELOW???
+    !
+    !       BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
+    !
+    !       IF (BOOL .EQV. .TRUE.) THEN
+    !         C         = C + 1
+    !         XYZ(:, C) = [I, J, K]
+    !         MAP(C)    = P
+    !       ENDIF
+    !
+    !     ENDDO
+    !
+    !     SENDCOUNTS(L + 1) = C - N
+    !
+    !   ENDDO
+    !
+    ! END SUBROUTINE ORDER_POINTS
 
     SUBROUTINE ORDER_POINTS(P0, P1, DH, X, Y, Z, XYZ, SENDCOUNTS, MAP)
 
@@ -560,10 +645,15 @@ MODULE SCARFLIB_FFT3
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
+      SENDCOUNTS = 0
+
       C = 0
 
-      ! FIND NUMBER OF POINTS THAT CALLING PROCESS MUST SEND TO THE OTHER PROCESSES
+      ! LOOP OVER PROCESSES
       DO L = 0, WORLD_SIZE - 1
+
+        ! SKIP IF CALLING PROCESS HAS NO POINTS FALLING INSIDE CUBOID OF "L-TH" PROCESS
+        IF (POINTS_RANK2WORLD(L) .EQ. 0) CYCLE
 
         DO P = 1, 3
           CONST(P) = GS(P, L)
@@ -577,8 +667,6 @@ MODULE SCARFLIB_FFT3
           I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
           J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
           K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
-
-          ! SHOULD I USE FLOOR(I, J, K) FOR COMPARISON BELOW???
 
           BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
 
@@ -600,63 +688,87 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE AUTO_TUNE(M, X, P0, P1)
+    SUBROUTINE AUTO_TUNE(DH, DELTA, X, Y, Z, P0, P1)
 
 
-      INTEGER(IPP),                            INTENT(IN)  :: M
-      REAL(FPP),                 DIMENSION(:), INTENT(IN)  :: X
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:), INTENT(OUT) :: P0, P1
+      REAL(FPP),                                   INTENT(IN)  :: DH
+      REAL(FPP),                 DIMENSION(:,:,:), INTENT(IN)  :: DELTA
+      REAL(FPP),                 DIMENSION(:),     INTENT(IN)  :: X, Y, Z
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: P0, P1
+
+      INTEGER(IPP)                                             :: I, J, K
+      INTEGER(IPP)                                             :: M, N, NP
+      INTEGER(IPP)                                             :: MAXWIDTH, BLOCKWIDTH, NBLOCKS
+      INTEGER(IPP)                                             :: IERR
+      REAL(REAL64)                                             :: TICTOC
+      REAL(FPP),                 DIMENSION(5)                  :: TIMER
+      REAL(FPP),                 DIMENSION(SIZE(X))            :: DUM
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)                :: BUFFER
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:,:)              :: XYZ
 
       !-----------------------------------------------------------------------------------------------------------------------------
+
+      M = HUGE(1)
+
+      ! MINIMUM COMPUTATIONAL DOMAIN SIZE
+      DO I = 0, WORLD_SIZE - 1
+        M = MIN(M, (GE(1, I) - GS(1, I) + 1) * (GE(2, I) - GS(2, I) + 1) * (GE(3, I) - GS(3, I) + 1))
+      ENDDO
+
+      ! MAX NUMBER OF POINTS THAT CAN BE INTERPOLATED AT ONCE
+      MAXWIDTH = (M * 2) / (4 * WORLD_SIZE)
 
       NP = SIZE(X)
 
       ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
 
-      I0 = PRODUCT(M) * 2 / (3 + 1)
+      DO K = 1, 100, 10
 
+        ! "BLOCKWIDTH" WILL VARY BETWEEN 1/10 AND 1/100 OF "MAXWIDTH"
+        BLOCKWIDTH = MAXWIDTH / K
 
-      DO I = 10000, 100000, 10000
+        ! NUMBER OF BLOCKS REQUIRED TO COVER ALL POINTS
+        NBLOCKS = NP / BLOCKWIDTH
 
-        NBLOCKS = I
-
-        BLOCKWIDTH = NP / NBLOCKS
-
-        IF (MOD(NP, BLOCKS) .NE. 0) NBLOCKS = NBLOCKS + 1
-
+        ! ADD ONE BLOCK MORE IF "NP" IS NOT MULTIPLE OF "BLOCKWIDTH"
+        IF (MOD(NP, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
 
         ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
 
-        ! DEFINE FIRST/LAST INDEX FOR EACH BLOCK
+        ! DEFINE FIRST/LAST POINT INDEX FOR EACH BLOCK
         DO I = 1, NBLOCKS
           P0(I) = (I - 1) * BLOCKWIDTH + 1
           P1(I) = I * BLOCKWIDTH
         ENDDO
 
-        NP = SIZE(X)
+        ! MAKE SURE THAT INDICES DO NOT EXCEED ACTUAL NUMBER OF POINTS IN CALLING PROCESS
+        N = SIZE(X)
 
         ! LIMIT POINTS INDICES TO MAXIMUM NUMBER OF POINTS AVAILABLE TO CALLING PROCESS
-        DO P = 1, NBLOCKS
-          IF ( (P0(P) .LE. NP) .AND. (P1(P) .GT. NP) ) P1(P) = NP
-          IF ( (P0(P) .GT. NP) .AND. (P1(P) .GT. NP) ) P1(P) = P0(P) - 1
+        DO I = 1, NBLOCKS
+          IF ( (P0(I) .LE. N) .AND. (P1(I) .GT. N) ) P1(I) = N
+          IF ( (P0(I) .GT. N) .AND. (P1(I) .GT. N) ) P1(I) = P0(I) - 1
         ENDDO
 
         ALLOCATE(XYZ(3, BLOCKWIDTH, 0:WORLD_SIZE - 1))
         ALLOCATE(BUFFER(BLOCKWIDTH, 0:WORLD_SIZE - 1))
 
+        ! "INTERPOLATE2" WORKS WELL IF UNDEFINED POINTS ARE MARKED AS ZERO
+        XYZ(:, :, :) = 0._FPP
+
         ! MONITOR COLLECTING DATA
         CALL WATCH_START(TICTOC)
-        DO P = P0(1), P1(1)
-          XYZ(1, P, WORLD_RANK) = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
-          XYZ(2, P, WORLD_RANK) = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
-          XYZ(3, P, WORLD_RANK) = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
+        DO I = P0(1), P1(1)
+          XYZ(1, I, WORLD_RANK) = (X(I) - OFF_AXIS(1)) / DH + 3._FPP
+          XYZ(2, I, WORLD_RANK) = (Y(I) - OFF_AXIS(2)) / DH + 3._FPP
+          XYZ(3, I, WORLD_RANK) = (Z(I) - OFF_AXIS(3)) / DH + 3._FPP
         ENDDO
         CALL WATCH_STOP(TICTOC)
 
         TIMER(1) = TICTOC
 
-        ! MONITOR DATA SEND/RECV
+        ! MONITOR DATA SEND/RECV (EACH PROCESS RECEIVES "3*BLOCKWIDTH" POINTS)
         CALL WATCH_START(TICTOC)
         CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, XYZ, BLOCKWIDTH*3, REAL_TYPE, MPI_COMM_WORLD, IERR)
         CALL WATCH_STOP(TICTOC)
@@ -677,24 +789,194 @@ MODULE SCARFLIB_FFT3
         TIMER(4) = TICTOC
 
         CALL WATCH_START(TICTOC)
-        DO P = P0(1), P1(1)
-          FIELD(P) = BUFFER(P, WORLD_RANK)
+        DO I = P0(1), P1(1)
+          DUM(I) = BUFFER(I, WORLD_RANK)
         ENDDO
         CALL WATCH_STOP(TICTOC)
 
         TIMER(5) = TICTOC
 
+        DEALLOCATE(XYZ, BUFFER)
+        DEALLOCATE(P0, P1)
+
         IF (WORLD_RANK == 0) THEN
+          PRINT*, 'LOOP: ', K, BLOCKWIDTH, NBLOCKS
           PRINT*, 'COLLECT DATA: ', TIMER(1)
           PRINT*, 'FORWARD DATA: ', TIMER(2)
           PRINT*, 'INTERPOLATE: ', TIMER(3)
           PRINT*, 'BACKWARD DATA: ', TIMER(4)
           PRINT*, 'COPY DATA: ', TIMER(5)
+          PRINT*, 'ESTIMATE: ', SUM(TIMER) * NBLOCKS
+          PRINT*, '***'
         ENDIF
 
       ENDDO
 
     END SUBROUTINE AUTO_TUNE
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE AUTO_TUNE2(DH, DELTA, X, Y, Z, P0, P1)
+
+
+      REAL(FPP),                                   INTENT(IN)  :: DH
+      REAL(FPP),                 DIMENSION(:,:,:), INTENT(IN)  :: DELTA
+      REAL(FPP),                 DIMENSION(:),     INTENT(IN)  :: X, Y, Z
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: P0, P1
+
+      INTEGER(IPP)                                             :: I, J, K
+      INTEGER(IPP)                                             :: M, N, NP, NB
+      INTEGER(IPP)                                             :: MAXWIDTH, BLOCKWIDTH, NBLOCKS
+      INTEGER(IPP)                                             :: IERR, TRIP
+      INTEGER(IPP),              DIMENSION(WORLD_SIZE)         :: SENDCOUNTS, RECVCOUNTS, SDISPLS, RDISPLS
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                  :: MAP
+      REAL(REAL64)                                             :: TICTOC
+      REAL(FPP),                 DIMENSION(6)                  :: TIMER
+      REAL(FPP),                 DIMENSION(SIZE(X))            :: DUM
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:)                  :: RV, SV
+      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)                :: SXYZ, RXYZ
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      IF (WORLD_RANK == 0) PRINT*, ' ** AUTO-TUNE 2 ** '
+
+      M = HUGE(1)
+
+      ! MINIMUM COMPUTATIONAL DOMAIN SIZE
+      DO I = 0, WORLD_SIZE - 1
+        M = MIN(M, (GE(1, I) - GS(1, I) + 1) * (GE(2, I) - GS(2, I) + 1) * (GE(3, I) - GS(3, I) + 1))
+      ENDDO
+
+      ! NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS
+      NB = COUNT(POINTS_WORLD2RANK .EQ. 1)
+
+      ! MAXIMUM NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS (CONSERVATIVE ESTIMATE)
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NB, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+      NP = SIZE(X)
+
+      ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+      ! MAX NUMBER OF POINTS THAT CAN BE HANDLED AT ONCE
+      MAXWIDTH = (M * 2) / (5 + 4 * NB)
+
+      !IF (WORLD_RANK == 0) PRINT*, 'AUTO TUNE ', NB, NP, M, MAXWIDTH, ' ', size(x)
+
+      CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIP, IERR)
+      CALL MPI_TYPE_COMMIT(TRIP, IERR)
+
+      DO K = 1, 100, 10
+
+        ! "BLOCKWIDTH" WILL VARY BETWEEN 1/10 AND 1/100 OF "MAXWIDTH"
+        BLOCKWIDTH = MAXWIDTH / K
+
+        ! NUMBER OF BLOCKS REQUIRED TO COVER ALL POINTS
+        NBLOCKS = NP / BLOCKWIDTH
+
+        ! ADD ONE BLOCK MORE IF "NP" IS NOT MULTIPLE OF "BLOCKWIDTH"
+        IF (MOD(NP, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
+
+        ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
+
+        ! DEFINE FIRST/LAST POINT INDEX FOR EACH BLOCK
+        DO I = 1, NBLOCKS
+          P0(I) = (I - 1) * BLOCKWIDTH + 1
+          P1(I) = I * BLOCKWIDTH
+        ENDDO
+
+        ! MAKE SURE THAT INDICES DO NOT EXCEED ACTUAL NUMBER OF POINTS IN CALLING PROCESS
+        N = SIZE(X)
+
+        ! LIMIT POINTS INDICES TO MAXIMUM NUMBER OF POINTS AVAILABLE TO CALLING PROCESS
+        DO I = 1, NBLOCKS
+          IF ( (P0(I) .LE. N) .AND. (P1(I) .GT. N) ) P1(I) = N
+          IF ( (P0(I) .GT. N) .AND. (P1(I) .GT. N) ) P1(I) = P0(I) - 1
+        ENDDO
+
+        ! THE STRATEGY IS TO ALLOCATE ONLY ONCE THESE ARRAY, EVEN IF THEY MAY RESULT LARGER THAN NECESSARY
+        ALLOCATE(SXYZ(3, BLOCKWIDTH), MAP(BLOCKWIDTH), RV(BLOCKWIDTH))
+        ALLOCATE(RXYZ(3, BLOCKWIDTH * NB), SV(BLOCKWIDTH * NB))
+
+        ! MONITOR COLLECTING DATA
+        CALL WATCH_START(TICTOC)
+        CALL ORDER_POINTS(P0(1), P1(1), DH, X, Y, Z, SXYZ, SENDCOUNTS, MAP)
+        !CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+        CALL WATCH_STOP(TICTOC)
+
+        TIMER(1) = TICTOC
+
+        ! MONITOR SENDCOUNTS/RECVCOUNTS
+        CALL WATCH_START(TICTOC)
+        CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+        CALL WATCH_STOP(TICTOC)
+
+        TIMER(2) = TICTOC
+
+        ! SET DISPLACEMENTS
+        RDISPLS(1) = 0
+        SDISPLS(1) = 0
+
+        DO I = 2, WORLD_SIZE
+          RDISPLS(I) = RDISPLS(I - 1) + RECVCOUNTS(I - 1)
+          SDISPLS(I) = SDISPLS(I - 1) + SENDCOUNTS(I - 1)
+        ENDDO
+
+        ! MONITOR DATA FORWARDING
+        CALL WATCH_START(TICTOC)
+        !CALL MPI_ALLTOALLV(SXYZ, SENDCOUNTS*3, SDISPLS*3, REAL_TYPE, RXYZ, RECVCOUNTS*3, RDISPLS*3, REAL_TYPE, MPI_COMM_WORLD, IERR)
+        CALL MPI_ALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, IERR)
+        CALL WATCH_STOP(TICTOC)
+
+        TIMER(3 - 0) = TICTOC
+
+        ! NUMBER OF POINTS RECEIVED: NEED TO INTEPOLATE ONLY THESE, NOT WHOLE "RXYZ" VECTOR
+        N = SUM(RECVCOUNTS)
+
+        ! MONITOR INTERPOLATION
+        CALL WATCH_START(TICTOC)
+        CALL INTERPOLATE(N, RXYZ, DELTA, SV)
+        CALL WATCH_STOP(TICTOC)
+
+        TIMER(4 - 0) = TICTOC
+
+        ! MONITOR DATA BACKWARDING
+        CALL WATCH_START(TICTOC)
+        CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
+        CALL WATCH_STOP(TICTOC)
+
+        TIMER(5 - 0) = TICTOC
+
+        CALL WATCH_START(TICTOC)
+        DO I = 1, BLOCKWIDTH
+          DUM(MAP(I)) = RV(I)
+        ENDDO
+        CALL WATCH_STOP(TICTOC)
+
+        TIMER(6 - 0) = TICTOC
+
+        DEALLOCATE(SXYZ, RXYZ, MAP, RV, SV)
+        DEALLOCATE(P0, P1)
+
+        IF (WORLD_RANK == 0) THEN
+          PRINT*, 'LOOP: ', K, BLOCKWIDTH, NBLOCKS, ' N ', SUM(SENDCOUNTS), SUM(RECVCOUNTS)
+          PRINT*, 'COLLECT DATA: ', TIMER(1)
+          PRINT*, 'SENDC/RECVC: ', TIMER(2), TIMER(1)+TIMER(2)
+          PRINT*, 'FORWARD DATA: ', TIMER(3)
+          PRINT*, 'INTERPOLATE: ', TIMER(4)
+          PRINT*, 'BACKWARD DATA: ', TIMER(5)
+          PRINT*, 'COPY DATA: ', TIMER(6)
+          PRINT*, 'ESTIMATE: ', SUM(TIMER) * NBLOCKS
+          PRINT*, '***'
+        ENDIF
+
+      ENDDO
+
+      CALL MPI_TYPE_FREE(TRIP, IERR)
+
+    END SUBROUTINE AUTO_TUNE2
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -2290,10 +2572,11 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INTERPOLATE(XYZ, DELTA, V)
+    SUBROUTINE INTERPOLATE(PMAX, XYZ, DELTA, V)
 
       !
 
+      INTEGER(IPP),                   INTENT(IN)  :: PMAX
       REAL(FPP),    DIMENSION(:,:),   INTENT(IN)  :: XYZ                          !< POINTS LOCATION
       REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)  :: DELTA                            !< RANDOM FIELD
       REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: V                            !< INTERPOLATED VALUES
@@ -2317,7 +2600,7 @@ MODULE SCARFLIB_FFT3
       ! N(3) = SIZE(DELTA, 3)
 
       ! LOOP OVER POINTS
-      DO P = 1, SIZE(XYZ, 2)
+      DO P = 1, PMAX
 
         ! I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - IS
         ! J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - JS
@@ -2393,21 +2676,23 @@ MODULE SCARFLIB_FFT3
       N(2) = SIZE(DELTA, 2)
       N(3) = SIZE(DELTA, 3)
 
-      DO L = 0, WORLD_SIZE - 1
+      IS = GS(1, WORLD_RANK)
+      JS = GS(2, WORLD_RANK)
+      KS = GS(3, WORLD_RANK)
 
-        ! CONTINUE ONLY IF PROCESS "L" HAS ANY POINT FALLING INSIDE CUBOID OF CALLING PROCESS
-        IF (IS_INSIDE(L) .EQV. .FALSE.) CYCLE
+      V(:,:) = 0._FPP
+
+      DO L = 1, WORLD_SIZE
+
+        ! SKIP IF PROCESS "L" DOES NOT HAVE ANY POINT FALLING INSIDE CUBOID OF CALLING PROCESS
+        IF (POINTS_WORLD2RANK(L - 1) .EQ. 0) CYCLE
 
         ! LOOP OVER POINTS
         DO P = 1, NP
 
-          ! I = (XYZ(1, P, L) - OFF_AXIS(1)) / DH + 3._FPP - IS
-          ! J = (XYZ(2, P, L) - OFF_AXIS(2)) / DH + 3._FPP - JS
-          ! K = (XYZ(3, P, L) - OFF_AXIS(3)) / DH + 3._FPP - KS
-
-          I = XYZ(1, P, L)
-          J = XYZ(2, P, L)
-          K = XYZ(3, P, L)
+          I = XYZ(1, P, L) - IS
+          J = XYZ(2, P, L) - JS
+          K = XYZ(3, P, L) - KS
 
           BOOL(1) = (I .LT. 1.) .OR. (I .GE. N(1))
           BOOL(2) = (J .LT. 1.) .OR. (J .GE. N(2))
@@ -2505,6 +2790,8 @@ MODULE SCARFLIB_FFT3
       N3 = SIZE(FACT3, 2)
 
       ALLOCATE(LIST(3, N3 * 5))
+
+      LIST = 0
 
       ! LOOP OVER FACTORISED PROCESSES
       DO L = 1, N3
