@@ -357,21 +357,30 @@ MODULE SCARFLIB_COMMON
       ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM. CALCULATIONS ARE ALWAYS IN DOUBLE
       ! PRECISION.
 
-      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
-      INTEGER(IPP)                          :: I
-      REAL(REAL64)                          :: MU, S1, S2, X, V
+      REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
+      INTEGER(IPP)                              :: I, J, K
+      INTEGER(IPP)                              :: NX, NY, NZ
+      REAL(REAL64)                              :: MU, S1, S2, X, V
 
       !-----------------------------------------------------------------------------------------------------------------------------
+
+      NX = SIZE(R, 1)
+      NY = SIZE(R, 2)
+      NZ = SIZE(R, 3)
 
       MU = MEAN(R)
 
       S1 = 0._REAL64
       S2 = 0._REAL64
 
-      DO I = 1, SIZE(R)
-        X = REAL(R(I), REAL64) - MU
-        S1 = S1 + X
-        S2 = S2 + X**2
+      DO K = 1, NZ
+        DO J = 1, NY
+          DO I = 1, NX
+            X = REAL(R(I, J, K), REAL64) - MU
+            S1 = S1 + X
+            S2 = S2 + X**2
+          ENDDO
+        ENDDO
       ENDDO
 
       S1 = (S1**2) / REAL(SIZE(R), REAL64)
@@ -390,18 +399,27 @@ MODULE SCARFLIB_COMMON
 
       ! COMPUTE MEAN OF DATASET "R" AVOIDING FLOATING POINT INACCURACIES. CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
 
-      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
-      INTEGER(IPP)                          :: I
-      REAL(REAL64)                          :: V, C
+      REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
+      INTEGER(IPP)                              :: I, J, K
+      INTEGER(IPP)                              :: NX, NY, NZ
+      REAL(REAL64)                              :: V, C
 
       !-------------------------------------------------------------------------------------------------------------------------------
+
+      NX = SIZE(R, 1)
+      NY = SIZE(R, 2)
+      NZ = SIZE(R, 3)
 
       V = 0._REAL64
       C = 1._REAL64
 
-      DO I = 1, SIZE(R)
-        V = V + (REAL(R(I), REAL64) - V) / C
-        C = C + 1._REAL64
+      DO K = 1, NZ
+        DO J = 1, NY
+          DO I = 1, NX
+            V = V + (REAL(R(I, J, K), REAL64) - V) / C
+            C = C + 1._REAL64
+          ENDDO
+        ENDDO
       ENDDO
 
       ! RETURN MEAN AT DESIRED PRECISION

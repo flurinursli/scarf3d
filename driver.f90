@@ -18,7 +18,7 @@ PROGRAM DRIVER
   CHARACTER(:), ALLOCATABLE                            :: ACF
   INTEGER(IPP)                                         :: I, J, K
   INTEGER(IPP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IPP)                                         :: SEED, MUTE, TAPERING
+  INTEGER(IPP)                                         :: SEED, MUTE, TAPERING, RESCALE
   INTEGER(IPP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
   INTEGER(IPP),              DIMENSION(3,2)            :: POI
   LOGICAL                                              :: REORDER
@@ -47,7 +47,7 @@ PROGRAM DRIVER
   ! INPUT SECTION
 
   ! NUMBER OF POINTS FOR WHOLE MODEL
-  !N = [2000, 3200, 1200]
+  !N = [2000*2, 3200*2, 1200*2]
   N = [400, 200, 400]
 
   ! GRID STEP
@@ -78,6 +78,9 @@ PROGRAM DRIVER
   ! RADIUS FOR TAPERING (AT POI + MUTE)
   TAPERING = 0
 
+  ! RESCALE TO DESIRED (CONTINUOUS) IGMA
+  RESCALE = 0
+
   ! END INPUT SECTION
   !-----------------------------------------------------------------------
 
@@ -94,7 +97,7 @@ PROGRAM DRIVER
   NDIMS = 3
 
   ! NUMBER OF PROCESSES ALONG EACH DIRECTION
-  !DIMS  = [10, 16, 6]
+  !DIMS  = [10*2, 16*2, 6*2]
   DIMS = [4, 1, 1]
 
   ! ALLOW REORDERING
@@ -187,7 +190,7 @@ PROGRAM DRIVER
   CALL WATCH_START(TICTOC)
 
   !CALL SCARF3D_STRUCTURED(FS, FE, DH, ACF, CL, SIGMA, HURST, SEED`, POI, 0, 0, VP, TOC)
-  CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, V1, INFO)
+  CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, RESCALE, V1, INFO)
 
   CALL WATCH_STOP(TICTOC)
 
@@ -228,12 +231,13 @@ PROGRAM DRIVER
   IF (RANK .EQ. 0) THEN
     PRINT*, 'DOMAIN TOO SMALL?',   NINT(INFO(1))
     PRINT*, 'DH TOO LARGE?',       NINT(INFO(2))
-    PRINT*, 'TIMING SPECTRUM: ',   REAL(INFO(3), KIND=REAL32)
-    PRINT*, 'TIMING SYMMETRY: ',   REAL(INFO(4), KIND=REAL32)
-    PRINT*, 'TIMING IFFT: ',       REAL(INFO(5), KIND=REAL32)
-    PRINT*, 'TIMING INTERP: ',     REAL(INFO(6), KIND=REAL32)
-    PRINT*, 'STAND. DEV.: ',       REAL(INFO(7), KIND=REAL32)
-    PRINT*, 'MEAN: ',              REAL(INFO(8), KIND=REAL32)
+    PRINT*, 'STAND. DEV.: ',       REAL(INFO(3), KIND=REAL32)
+    PRINT*, 'MEAN: ',              REAL(INFO(4), KIND=REAL32)
+    PRINT*, 'TIMING SPECTRUM: ',   REAL(INFO(5), KIND=REAL32)
+    PRINT*, 'TIMING SYMMETRY: ',   REAL(INFO(6), KIND=REAL32)
+    PRINT*, 'TIMING IFFT: ',       REAL(INFO(7), KIND=REAL32)
+    PRINT*, 'TIMING INTERP: ',     REAL(INFO(8), KIND=REAL32)
+
   ENDIF
 
   NULLIFY(V3, X3, Y3, Z3)
