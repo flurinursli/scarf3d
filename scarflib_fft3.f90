@@ -2469,7 +2469,7 @@ MODULE SCARFLIB_FFT3
 
             DX = ((I - 1) * DH + OFF_AXIS(3) - POI(1))**2                             !< DISTANCE ALONG X FROM "POI"
 
-            D = SQRT(DX + DY + DZ)                                                    !< TOTAL DISTANCE 
+            D = SQRT(DX + DY + DZ)                                                    !< TOTAL DISTANCE
 
             ! MUTE IF DISTANCE NODE-POI IS BELOW "DM"
             IF (D .LE. DM) THEN
