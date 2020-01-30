@@ -46,9 +46,9 @@ MODULE SCARFLIB_SPECTRAL
     REAL(FPP),                                       INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
     REAL(FPP),                                       INTENT(IN)  :: HURST                !< HURST EXPONENT
     INTEGER(IPP),                                    INTENT(IN)  :: SEED                 !< SEED NUMBER
-    INTEGER(IPP),                  DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-    INTEGER(IPP),                                    INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-    INTEGER(IPP),                                    INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
+    REAL(FPP),                     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
+    REAL(FPP),                                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
+    REAL(FPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
     REAL(FPP),                     DIMENSION(:),     INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
     REAL(FPP),                     DIMENSION(1),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
 

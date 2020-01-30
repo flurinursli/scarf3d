@@ -95,9 +95,9 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),                                       INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
       REAL(FPP),                                       INTENT(IN)  :: HURST                !< HURST EXPONENT
       INTEGER(IPP),                                    INTENT(IN)  :: SEED                 !< SEED NUMBER
-      INTEGER(IPP),                  DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-      INTEGER(IPP),                                    INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-      INTEGER(IPP),                                    INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
+      REAL(FPP),                     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
+      REAL(FPP),                                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
+      REAL(IPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
       INTEGER(IPP),                                    INTENT(IN)  :: RESCALE              !< RESCALE RANDOM FIELD TO DESIRED SIGMA
       REAL(FPP),                     DIMENSION(:),     INTENT(OUT) :: FIELD                !< RANDOM FIELD AT X,Y,Z LOCATION
       REAL(FPP),                     DIMENSION(8),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
@@ -302,6 +302,11 @@ MODULE SCARFLIB_FFT3
       ENDIF
 
       DEALLOCATE(VAR, MU, NPOINTS)
+
+      ! APPLY TAPER/MUTE
+      DO I = 1, SIZE(POI, 2)
+        CALL TAPERING(DH, LS, LE, BUFFER, POI(:, I), MUTE, TAPER)
+      ENDDO
 
       ! COPY RANDOM FIELD TO ARRAY WITH HALO
       ALLOCATE(DELTA(0:M(1), 0:M(2), 0:M(3)))
@@ -2423,6 +2428,68 @@ MODULE SCARFLIB_FFT3
       DEALLOCATE(BUFFER)
 
     END SUBROUTINE FACTORIZATION
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE TAPERING (DH, FS, FE, BUFFER, POI, MUTE, TAPER)
+
+      ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
+      ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
+
+      REAL(FPP),                                                      INTENT(IN)    :: DH
+      INTEGER(IPP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE                !< START/END INDICES ALONG EACH DIRECTION
+      REAL(FPP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: BUFFER                     !< RANDOM FIELD
+      REAL(FPP),    DIMENSION(3),                                     INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (NODES)
+      REAL(FPP),                                                      INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
+      INTEGER(IPP)                                                                  :: I, J, K               !< COUNTERS
+      REAL(FPP)                                                                     :: D, DS, DM, DT         !< VARIOUS DISTANCES
+      REAL(FPP)                                                                     :: DX, DY, DZ            !< NODE-POI DISTANCE
+      REAL(FPP)                                                                     :: T                     !< TAPER PARAMETER
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! TOTAL RADIUS OF VOLUME TAPERED/MUTED
+      DS = MUTE + TAPER
+
+      ! SQUARE RADII FOR TAPERING AND MUTING
+      DM = MUTE
+      DT = TAPER
+
+      DO K = FS(3), FE(3)
+
+        DZ = ((K - 1) * DH + OFF_AXIS(3) - POI(3))**2                                 !< DISTANCE ALONG Z FROM "POI"
+
+        DO J = FS(2), FE(2)
+
+          DY = ((J - 1) * DH + OFF_AXIS(2) - POI(2))**2                               !< DISTANCE ALONG Y FROM "POI"
+
+          DO I = FS(1), FE(1)
+
+            DX = ((I - 1) * DH + OFF_AXIS(3) - POI(1))**2                             !< DISTANCE ALONG X FROM "POI"
+
+            D = SQRT(DX + DY + DZ)                                                    !< TOTAL DISTANCE 
+
+            ! MUTE IF DISTANCE NODE-POI IS BELOW "DM"
+            IF (D .LE. DM) THEN
+
+              BUFFER(I, J, K) = 0._FPP
+
+            ! TAPER IF DISTANCE NODE-POI IS BETWEEN "DM" AND "DS"
+            ELSEIF ( (D .GT. DM) .AND. (D .LE. DS) ) THEN
+
+              T = (D - DM) / DT                                                       !< TAPER PARAMETER
+
+              BUFFER(I, J, K) = BUFFER(I, J, K) * (0.5_FPP - 0.5_FPP * COS(T * PI))
+
+            ENDIF
+
+          ENDDO
+        ENDDO
+      ENDDO
+
+    END SUBROUTINE TAPERING
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

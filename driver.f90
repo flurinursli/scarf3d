@@ -18,15 +18,16 @@ PROGRAM DRIVER
   CHARACTER(:), ALLOCATABLE                            :: ACF
   INTEGER(IPP)                                         :: I, J, K
   INTEGER(IPP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IPP)                                         :: SEED, MUTE, TAPERING, RESCALE
+  INTEGER(IPP)                                         :: SEED, RESCALE
   INTEGER(IPP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
-  INTEGER(IPP),              DIMENSION(3,2)            :: POI
   LOGICAL                                              :: REORDER
   LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
-  REAL(FPP)                                            :: DH, SIGMA, HURST
+  REAL(FPP)                                            :: DH, DR, SIGMA, HURST
+  REAL(FPP)                                            :: MUTE, TAPERING
   REAL(REAL64)                                         :: TICTOC
   REAL(FPP),                 DIMENSION(3)              :: CL
   REAL(FPP),                 DIMENSION(8)              :: INFO
+  REAL(FPP),                 DIMENSION(3,2)            :: POI
   REAL(FPP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
   REAL(FPP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
 
@@ -50,8 +51,11 @@ PROGRAM DRIVER
   !N = [2000*2, 3200*2, 1200*2]
   N = [400, 200, 400]
 
-  ! GRID STEP
+  ! GRID STEP FOR FFT GRID
   DH = 100._FPP
+
+  ! GRID STEP FOR POINTS
+  DR = 100._FPP
 
   ! AUTOCORRELATION
   ACF = 'GAUSS'
@@ -69,16 +73,16 @@ PROGRAM DRIVER
   SEED = 1235
 
   ! SET POSITION OF POINT-OF-INTEREST (MUTING/TAPERING)
-  POI(:, 1) = [300, 250, 150]
-  POI(:, 2) = [400, 250, 150]
+  POI(:, 1) = [20000., 10000., 32000.]
+  POI(:, 2) = [30000., 5000., 32000.]
 
   ! RADIUS FOR MUTING (AT POI)
-  MUTE = 0
+  MUTE = 200.
 
   ! RADIUS FOR TAPERING (AT POI + MUTE)
-  TAPERING = 0
+  TAPERING = 5000.
 
-  ! RESCALE TO DESIRED (CONTINUOUS) IGMA
+  ! RESCALE TO DESIRED (CONTINUOUS) SIGMA
   RESCALE = 0
 
   ! END INPUT SECTION
@@ -139,9 +143,9 @@ PROGRAM DRIVER
   DO K = FS(3), FE(3)
     DO J = FS(2), FE(2)
       DO I = FS(1), FE(1)
-        X3(I, J, K) = (I - 0.5) * DH
-        Y3(I, J, K) = (J - 0.5) * DH
-        Z3(I, J, K) = (K - 0.5) * DH
+        X3(I, J, K) = (I - 0.5) * DR
+        Y3(I, J, K) = (J - 0.5) * DR
+        Z3(I, J, K) = (K - 0.5) * DR
       ENDDO
     ENDDO
   ENDDO
@@ -214,7 +218,7 @@ PROGRAM DRIVER
   ! WRITE A MODEL SLICE TO DISK
   CALL IO_WRITE_SLICE(2, 100, V3, 'fft_slice.bin')
 
-  !CALL IO_WRITE_ONE(V3, 'fft_whole.bin')
+  CALL IO_WRITE_ONE(V3, 'fft_whole.bin')
 
   CALL WATCH_STOP(TICTOC)
 
