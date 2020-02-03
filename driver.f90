@@ -18,7 +18,7 @@ PROGRAM DRIVER
   CHARACTER(:), ALLOCATABLE                            :: ACF
   INTEGER(IPP)                                         :: I, J, K
   INTEGER(IPP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IPP)                                         :: SEED, RESCALE
+  INTEGER(IPP)                                         :: SEED, RESCALE, PAD
   INTEGER(IPP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
   LOGICAL                                              :: REORDER
   LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
@@ -58,7 +58,7 @@ PROGRAM DRIVER
   DR = 100._FPP
 
   ! AUTOCORRELATION
-  ACF = 'GAUSS'
+  ACF = 'VK'
 
   ! CORRELATION LENGTH
   CL = [5000._FPP, 5000._FPP, 5000._FPP]
@@ -84,6 +84,9 @@ PROGRAM DRIVER
 
   ! RESCALE TO DESIRED (CONTINUOUS) SIGMA
   RESCALE = 0
+
+  ! EXPAND GRID TO HANDLE FFT PERIODICITY
+  PAD = 1
 
   ! END INPUT SECTION
   !-----------------------------------------------------------------------
@@ -194,7 +197,7 @@ PROGRAM DRIVER
   CALL WATCH_START(TICTOC)
 
   !CALL SCARF3D_STRUCTURED(FS, FE, DH, ACF, CL, SIGMA, HURST, SEED`, POI, 0, 0, VP, TOC)
-  CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, RESCALE, V1, INFO)
+  CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, RESCALE, PAD, V1, INFO)
 
   CALL WATCH_STOP(TICTOC)
 
