@@ -15,10 +15,9 @@ PROGRAM DRIVER
 
   IMPLICIT NONE
 
-  CHARACTER(:), ALLOCATABLE                            :: ACF
   INTEGER(IPP)                                         :: I, J, K
   INTEGER(IPP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IPP)                                         :: SEED, RESCALE, PAD
+  INTEGER(IPP)                                         :: SEED, RESCALE, PAD, ACF
   INTEGER(IPP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
   LOGICAL                                              :: REORDER
   LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
@@ -57,8 +56,8 @@ PROGRAM DRIVER
   ! GRID STEP FOR POINTS
   DR = 100._FPP
 
-  ! AUTOCORRELATION
-  ACF = 'VK'
+  ! AUTOCORRELATION (0=VON KARMAN/EXPONENTIAL, 1=GAUSSIAN)
+  ACF = 0
 
   ! CORRELATION LENGTH
   CL = [5000._FPP, 5000._FPP, 5000._FPP]
@@ -198,6 +197,7 @@ PROGRAM DRIVER
 
   !CALL SCARF3D_STRUCTURED(FS, FE, DH, ACF, CL, SIGMA, HURST, SEED`, POI, 0, 0, VP, TOC)
   CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, RESCALE, PAD, V1, INFO)
+  !CALL SCARF3D_FFT(DR, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPERING, RESCALE, PAD, V3, INFO)
 
   CALL WATCH_STOP(TICTOC)
 
