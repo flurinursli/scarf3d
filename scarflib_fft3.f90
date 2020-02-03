@@ -97,7 +97,7 @@ MODULE SCARFLIB_FFT3
       INTEGER(IPP),                                    INTENT(IN)  :: SEED                 !< SEED NUMBER
       REAL(FPP),                     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
       REAL(FPP),                                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-      REAL(IPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
+      REAL(FPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
       INTEGER(IPP),                                    INTENT(IN)  :: RESCALE              !< RESCALE RANDOM FIELD TO DESIRED SIGMA
       REAL(FPP),                     DIMENSION(:),     INTENT(OUT) :: FIELD                !< RANDOM FIELD AT X,Y,Z LOCATION
       REAL(FPP),                     DIMENSION(8),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
@@ -180,7 +180,8 @@ MODULE SCARFLIB_FFT3
       ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
       CALL BEST_CONFIG(DIMS)
 
-      !IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS
+      ! TEMPORARY MESSAGE
+      IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS
 
       call WATCH_START(TICTOC)
 
