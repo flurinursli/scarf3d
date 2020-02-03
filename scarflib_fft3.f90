@@ -166,7 +166,7 @@ MODULE SCARFLIB_FFT3
         IF (MOD(NPTS(I), 2) .NE. 0) NPTS(I) = NPTS(I) + 1
 
         ! ABSOLUTE POSITION OF FIRST POINT (IT COULD BE NEGATIVE)
-        !OFF_AXIS(I) = MIN_EXTENT(I) - OFFSET * DH
+        ! OFF_AXIS(I) = MIN_EXTENT(I) - OFFSET * DH
         OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET + 0.5_FPP) * DH
 
       ENDDO
@@ -2416,57 +2416,45 @@ MODULE SCARFLIB_FFT3
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! IS = GS(1, WORLD_RANK)
-      ! JS = GS(2, WORLD_RANK)
-      ! KS = GS(3, WORLD_RANK)
-      !
-      ! N(1) = SIZE(DELTA, 1)
-      ! N(2) = SIZE(DELTA, 2)
-      ! N(3) = SIZE(DELTA, 3)
-
       ! LOOP OVER POINTS
       DO P = 1, PMAX
-
-        ! I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - IS
-        ! J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - JS
-        ! K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - KS
 
         I = XYZ(1, P)
         J = XYZ(2, P)
         K = XYZ(3, P)
 
-        I0 = FLOOR(I)
-        J0 = FLOOR(J)
-        K0 = FLOOR(K)
-
-        ! BOOL(1) = (I0 .LT. 1) .OR. (I0 .GE. N(1))
-        ! BOOL(2) = (J0 .LT. 1) .OR. (J0 .GE. N(2))
-        ! BOOL(3) = (K0 .LT. 1) .OR. (K0 .GE. N(3))
+        ! I0 = FLOOR(I)
+        ! J0 = FLOOR(J)
+        ! K0 = FLOOR(K)
         !
-        ! IF (ANY(BOOL .EQV. .TRUE.)) CYCLE
+        ! F(:, 1) = DELTA(I0:I0 + 1, J0, K0)
+        ! F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0)
+        !
+        ! PX = I - I0
+        ! PY = J - J0
+        !
+        ! IPX = (1._FPP - PX)
+        ! IPY = (1._FPP - PY)
+        !
+        ! ! BILINEAR INTERPOLATION AT LEVEL 1
+        ! A = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
+        !
+        ! F(:, 1) = DELTA(I0:I0 + 1, J0, K0 + 1)
+        ! F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0 + 1)
+        !
+        ! ! BILINEAR INTERPOLATION AT LEVEL 2
+        ! B = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
+        !
+        ! PZ = K - K0
+        !
+        ! ! LINEAR INTERPOLATED BETWEEN LEVEL 1 AND 2
+        ! V(P) = A * (1._FPP - PZ) + B * PZ
 
-        F(:, 1) = DELTA(I0:I0 + 1, J0, K0)
-        F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0)
+        I0 = NINT(I)
+        J0 = NINT(J)
+        K0 = NINT(K)
 
-        PX = I - I0
-        PY = J - J0
-
-        IPX = (1._FPP - PX)
-        IPY = (1._FPP - PY)
-
-        ! BILINEAR INTERPOLATION AT LEVEL 1
-        A = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
-
-        F(:, 1) = DELTA(I0:I0 + 1, J0, K0 + 1)
-        F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0 + 1)
-
-        ! BILINEAR INTERPOLATION AT LEVEL 2
-        B = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
-
-        PZ = K - K0
-
-        ! LINEAR INTERPOLATED BETWEEN LEVEL 1 AND 2
-        V(P) = A * (1._FPP - PZ) + B * PZ
+        V(P) = DELTA(I0, J0, K0)
 
       ENDDO
 
