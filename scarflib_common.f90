@@ -19,57 +19,21 @@ MODULE SCARFLIB_COMMON
   ! SET PRECISION
 
   ! INTEGERS HAVE ALWAYS SAME "PRECISION"
-  !INTEGER, PARAMETER :: IPP = INT32
-  INTEGER, PARAMETER  :: IPP = C_INT
+  INTEGER, PARAMETER :: IPP = INT32
 
 #ifdef DOUBLE_PREC
-   !INTEGER(IPP), PARAMETER :: FPP          = REAL64
-   INTEGER(IPP), PARAMETER :: FPP          = C_DOUBLE
+   INTEGER(IPP), PARAMETER :: FPP          = REAL64
    INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
    INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
    INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
    INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
 #else
-    !INTEGER(IPP), PARAMETER :: FPP          = REAL32
-    INTEGER(IPP), PARAMETER :: FPP          = C_FLOAT
+    INTEGER(IPP), PARAMETER :: FPP          = REAL32
     INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
     INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
     INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
     INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
 #endif
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-  ! INTERFACES
-  ! INTERFACE
-  !   MODULE SUBROUTINE SCARF3D_FFT(COMM, NPTS, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
-  !     INTEGER(IPP),                      INTENT(IN) :: COMM               !< MPI COMMUNICATOR
-  !     INTEGER(IPP),     DIMENSION(3),    INTENT(IN) :: NPTS                  !< MODEL SIZE: NUMBER OF POINTS ALONG X, Y, Z
-  !     REAL(FPP),                         INTENT(IN) :: DH                 !< GRID-STEP
-  !     CHARACTER(LEN=*),                  INTENT(IN) :: ACF                !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-  !     REAL(FPP),        DIMENSION(3),    INTENT(IN) :: CL                 !< CORRELATION LENGTH
-  !     REAL(FPP),                         INTENT(IN) :: SIGMA              !< STANDARD DEVIATION
-  !     REAL(FPP),                         INTENT(IN) :: HURST              !< HURST EXPONENT
-  !     INTEGER(IPP),                      INTENT(IN) :: SEED               !< SEED NUMBER
-  !     INTEGER(IPP),     DIMENSION(:,:),  INTENT(IN) :: POI                !< LOCATION OF POINT(S)-OF-INTEREST
-  !     INTEGER(IPP),                      INTENT(IN) :: MUTE               !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-  !     INTEGER(IPP),                      INTENT(IN) :: TAPER              !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-  !   END SUBROUTINE SCARF3D_FFT
-  !
-  !   MODULE SUBROUTINE SCARF3D_SPEC(COMM, NPTS, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER)
-  !     INTEGER(IPP),                      INTENT(IN) :: COMM               !< MPI COMMUNICATOR
-  !     INTEGER(IPP),     DIMENSION(3),    INTENT(IN) :: NPTS                  !< MODEL SIZE: NUMBER OF POINTS ALONG X, Y, Z
-  !     REAL(FPP),                         INTENT(IN) :: DH                 !< GRID-STEP
-  !     CHARACTER(LEN=*),                  INTENT(IN) :: ACF                !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-  !     REAL(FPP),        DIMENSION(3),    INTENT(IN) :: CL                 !< CORRELATION LENGTH
-  !     REAL(FPP),                         INTENT(IN) :: SIGMA              !< STANDARD DEVIATION
-  !     REAL(FPP),                         INTENT(IN) :: HURST              !< HURST EXPONENT
-  !     INTEGER(IPP),                      INTENT(IN) :: SEED               !< SEED NUMBER
-  !     INTEGER(IPP),     DIMENSION(:,:),  INTENT(IN) :: POI                !< LOCATION OF POINT(S)-OF-INTEREST
-  !     INTEGER(IPP),                      INTENT(IN) :: MUTE               !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-  !     INTEGER(IPP),                      INTENT(IN) :: TAPER              !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-  !   END SUBROUTINE SCARF3D_SPEC
-  ! END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
@@ -162,6 +126,67 @@ MODULE SCARFLIB_COMMON
       DEALLOCATE(TMP_SEED)
 
     END SUBROUTINE SET_STREAM
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE SCARF3D_WRITE_ONE(V, FILENAME, NWRITERS)
+
+      REAL(FPP),                    DIMENSION(:,:,:),           INTENT(IN) :: V                                  !< RANDOM FIELD
+      CHARACTER(LEN=*),                                         INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
+      INTEGER(IPP),                                   OPTIONAL, INTENT(IN) :: NWRITERS
+      INTEGER(IPP)                                                         :: I                                  !< COUNTER
+      INTEGER(IPP)                                                         :: COLOR, NEWCOMM, RANK, NTASKS
+      INTEGER(IPP)                                                         :: NEWTYPE, IERR, FH                  !< MPI STUFF
+      INTEGER(KIND=MPI_OFFSET_KIND)                                        :: FILESIZE, OFFSET                   !< MPI STUFF
+      INTEGER(IPP),                 DIMENSION(3)                           :: SUBSIZES, STARTS                   !< ARRAYS FOR DERIVED DATATYPE
+      INTEGER(IPP),                 ALLOCATABLE, DIMENSION(:)              :: RANK0, RANK1
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ALLOCATE(RANK0(NWRITERS), RANK1(NWRITERS))
+
+
+      ! ORGANIZE PROCESSES INTO "NWRITERS" COMMUNICATORS
+      CALL MPI_SPLIT_TASK(WORLD_SIZE, NWRITERS, RANK0, RANK1)
+
+      ! LOWEST RANK MUST BE ZERO
+      RANK0 = RANK0 - 1
+      RANK1 = RANK1 - 1
+
+      DO I = 1, NWRITERS
+        IF ( (WORLD_RANK .GE. RANK0(I)) .AND. (WORLD_RANK .LE. RANK1(I)) ) COLOR = I
+      ENDDO
+
+      ! CREATE NEW COMMUNICATOR
+      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, NEWCOMM, IERR)
+
+      ! PROCESS ID AND COMMUNICATOR SIZE
+      CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
+      CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
+
+      COLOR = 0
+
+      ! NOW CREATE A NEW COMMUNICATOR MADE ONLY BY THOSE PROCESSES HAVING RANK=0 WITHIN EACH "NEWCOMM"
+      IF (RANK .EQ. 0) COLOR = 1
+
+      ! CREATE NEW COMMUNICATOR
+      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, WRTCOMM, IERR)
+
+      !<<<< TEMPORARY CALL
+      CALL MPI_COMM_SIZE(WRTCOMM, I, IERR); PRINT*, 'WRITERS ', I
+
+      DO J = 0, NTASKS - 1
+
+
+
+
+
+
+      ENDDO
+
+    END SUBROUTINE SCARF3D_WRITE_ONE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
