@@ -131,6 +131,38 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    SUBROUTINE SCARF3D_WRITE_SINGLE(V, FILENAME, NWRITERS)
+
+      REAL(FPP),                     DIMENSION(:,:,:), INTENT(IN) :: V                                  !< RANDOM FIELD
+      CHARACTER(LEN=*),                                INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
+      INTEGER(IPP),                                    INTENT(IN) :: NWRITERS
+      INTEGER(IPP)                                                :: I
+      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                 :: RANK0, RANK1
+
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      DO I = 0, WORLD_SIZE - 1, NWRITES
+
+        N = I + NWRITERS
+
+        ! ONLY PROCESSES IN THE RANGE [I, I + NWRITERS), I.E. "NWRITERS" PROCESSES AT TIME.
+        IF ( (WORLD_RANK .GE. I) .AND. (WORLD_RANK .LT. J) ) THEN
+
+          ! WRITE
+
+        ENDIF
+
+        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+
+      ENDDO
+
+    END SUBROUTINE SCARF3D_WRITE_SINGLE
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
     SUBROUTINE SCARF3D_WRITE_ONE(V, FILENAME, NWRITERS)
 
       REAL(FPP),                    DIMENSION(:,:,:),           INTENT(IN) :: V                                  !< RANDOM FIELD
@@ -211,15 +243,15 @@ MODULE SCARFLIB_COMMON
 
         CALL MPI_FILE_OPEN(WRTCOMM, FILENAME, MPI_MODE_CREATE + MPI_MODE_WRONLY, MPI_INFO_NULL, FH, IERR)
 
-        FILESIZE = INT(NPTS(1), MPI_OFFSET_KIND) * INT(NPTS(2), MPI_OFFSET_KIND) * INT(NPTS(3), MPI_OFFSET_KIND)
+        !FILESIZE = INT(NPTS(1), MPI_OFFSET_KIND) * INT(NPTS(2), MPI_OFFSET_KIND) * INT(NPTS(3), MPI_OFFSET_KIND)
 
-        CALL MPI_FILE_SET_SIZE(FH, FILESIZE, IERR)
+        !CALL MPI_FILE_SET_SIZE(FH, FILESIZE, IERR)
 
         OFFSET = 0_MPI_OFFSET_KIND
 
         DO J = 0, MAXTASKS - 1
 
-          CALL WATCH_START(TICTOC, WRTCOMM)
+          !CALL WATCH_START(TICTOC, WRTCOMM)
 
           IF (J .LE. NTASKS - 1) THEN
 
@@ -233,19 +265,15 @@ MODULE SCARFLIB_COMMON
 
           ENDIF
 
-          CALL WATCH_STOP(TICTOC, WRTCOMM); PRINT*, 'RECV ', WORLD_RANK, REAL(TICTOC, FPP)
+          !CALL WATCH_STOP(TICTOC, WRTCOMM); PRINT*, 'RECV ', WORLD_RANK, REAL(TICTOC, FPP)
 
           ! TRANSFORM TO GLOBAL RANK
           SUBSIZES(:) = GE(:, RCVRANK) - GS(:, RCVRANK) + 1
           STARTS(:)   = GS(:, RCVRANK) - 1
 
-          CALL WATCH_START(TICTOC, WRTCOMM)
-
           CALL MPI_TYPE_CREATE_SUBARRAY(3, NPTS, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
 
           CALL MPI_TYPE_COMMIT(NEWTYPE, IERR)
-
-          CALL WATCH_STOP(TICTOC, WRTCOMM); PRINT*, 'DERIVED ', WORLD_RANK, REAL(TICTOC, FPP)
 
           !CALL MPI_FILE_SET_SIZE(FH, FILESIZE, IERR)
 
@@ -253,7 +281,9 @@ MODULE SCARFLIB_COMMON
 
           CALL WATCH_START(TICTOC, WRTCOMM)
           CALL MPI_FILE_WRITE_ALL(FH, BUFFER, PRODUCT(SUBSIZES), REAL_TYPE, MPI_STATUS_IGNORE, IERR)
-          CALL WATCH_STOP(TICTOC, WRTCOMM); PRINT*, 'WRITE ', WORLD_RANK, REAL(TICTOC, FPP)
+          CALL WATCH_STOP(TICTOC, WRTCOMM)
+
+          IF (WORLD_RANK == 0) PRINT*, 'WRITE ', NWRITERS, REAL(TICTOC, FPP), ' -- ', J, MAXTASKS
 
           CALL MPI_TYPE_FREE(NEWTYPE, IERR)
 
@@ -271,154 +301,6 @@ MODULE SCARFLIB_COMMON
       CALL MPI_COMM_FREE(WRTCOMM, IERR)
 
     END SUBROUTINE SCARF3D_WRITE_ONE
-
-    ! SUBROUTINE SCARF3D_WRITE_ONE(V, FILENAME, NWRITERS)
-    !
-    !   REAL(FPP),                    DIMENSION(:,:,:),           INTENT(IN) :: V                                  !< RANDOM FIELD
-    !   CHARACTER(LEN=*),                                         INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
-    !   INTEGER(IPP),                                   OPTIONAL, INTENT(IN) :: NWRITERS
-    !   INTEGER(IPP)                                                         :: I, J, N, NMAX                               !< COUNTER
-    !   INTEGER(IPP)                                                         :: COLOR, NEWCOMM, WRTCOMM
-    !   INTEGER(IPP)                                                         :: RANK, RCVRANK, REQUEST
-    !   INTEGER(IPP)                                                         :: NTASKS, MAXTASKS
-    !   INTEGER(IPP)                                                         :: NEWTYPE, IERR, FH                  !< MPI STUFF
-    !   INTEGER(KIND=MPI_OFFSET_KIND)                                        :: FILESIZE, OFFSET                   !< MPI STUFF
-    !   INTEGER(IPP),                 DIMENSION(MPI_STATUS_SIZE)             :: STATUS
-    !   INTEGER(IPP),                 DIMENSION(3)                           :: SUBSIZES, STARTS                   !< ARRAYS FOR DERIVED DATATYPE
-    !   INTEGER(IPP),                 ALLOCATABLE, DIMENSION(:)              :: RANK0, RANK1
-    !   INTEGER(IPP),                 ALLOCATABLE, DIMENSION(:)              :: NEW2WORLD
-    !   REAL(FPP),                    ALLOCATABLE, DIMENSION(:)              :: BUFFER
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   ALLOCATE(RANK0(NWRITERS), RANK1(NWRITERS))
-    !
-    !   ! ORGANIZE PROCESSES INTO "NWRITERS" COMMUNICATORS
-    !   CALL SPLIT_TASK(WORLD_SIZE, NWRITERS, RANK0, RANK1)
-    !
-    !   ! LOWEST RANK MUST BE ZERO
-    !   RANK0 = RANK0 - 1
-    !   RANK1 = RANK1 - 1
-    !
-    !   DO I = 1, NWRITERS
-    !     IF ( (WORLD_RANK .GE. RANK0(I)) .AND. (WORLD_RANK .LE. RANK1(I)) ) COLOR = I
-    !   ENDDO
-    !
-    !   ! CREATE NEW COMMUNICATOR
-    !   CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, NEWCOMM, IERR)
-    !
-    !   ! PROCESS ID AND COMMUNICATOR SIZE
-    !   CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
-    !   CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
-    !
-    !   ALLOCATE(NEW2WORLD(0:NTASKS - 1))
-    !
-    !   CALL MAP_RANKS(NEWCOMM, MPI_COMM_WORLD, NEW2WORLD)
-    !
-    !   COLOR = 0
-    !
-    !   ! NOW CREATE A NEW COMMUNICATOR MADE ONLY BY THOSE PROCESSES HAVING RANK=0 WITHIN EACH "NEWCOMM"
-    !   IF (RANK .EQ. 0) COLOR = 1
-    !
-    !   ! CREATE NEW COMMUNICATOR
-    !   CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, WRTCOMM, IERR)
-    !
-    !   MAXTASKS = NTASKS + 1
-    !
-    !   CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAXTASKS, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
-    !
-    !   N = SIZE(V)
-    !
-    !   NMAX = N
-    !
-    !   CALL MPI_ALLREDUCE(MPI_IN_PLACE, NMAX, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
-    !
-    !   ALLOCATE(BUFFER(NMAX))
-    !
-    !   IF (RANK .EQ. 0) THEN
-    !
-    !     CALL MPI_FILE_OPEN(WRTCOMM, FILENAME, MPI_MODE_CREATE + MPI_MODE_WRONLY, MPI_INFO_NULL, FH, IERR)
-    !
-    !     FILESIZE = INT(NPTS(1), MPI_OFFSET_KIND) * INT(NPTS(2), MPI_OFFSET_KIND) * INT(NPTS(3), MPI_OFFSET_KIND)
-    !
-    !     CALL MPI_FILE_SET_SIZE(FH, FILESIZE, IERR)
-    !
-    !     OFFSET = 0_MPI_OFFSET_KIND
-    !
-    !     CALL MPI_ISEND(V, N, REAL_TYPE, 0, 0, NEWCOMM, REQUEST, IERR)
-    !
-    !   ENDIF
-    !
-    !   DO J = 1, MAXTASKS - 1
-    !
-    !     IF (RANK .EQ. J) THEN
-    !       CALL MPI_ISEND(V, N, REAL_TYPE, 0, 0, NEWCOMM, REQUEST, IERR)
-    !       ! print*, 'rank ', WORLD_RANK, ' sending to rank 0', j
-    !     endif
-    !
-    !
-    !     IF (RANK .EQ. 0) THEN
-    !
-    !       IF (J .LE. NTASKS) THEN
-    !
-    !         CALL MPI_IRECV(BUFFER, SIZE(BUFFER), REAL_TYPE, J - 1, 0, NEWCOMM, REQUEST, IERR)
-    !
-    !         ! MAP LOCAL INTO GLOBAL RANK
-    !         RCVRANK = NEW2WORLD(J - 1)
-    !
-    !       ENDIF
-    !
-    !       ! TRANSFORM TO GLOBAL RANK
-    !       SUBSIZES(:) = GE(:, RCVRANK) - GS(:, RCVRANK) + 1
-    !       STARTS(:)   = GS(:, RCVRANK) - 1
-    !
-    !       CALL MPI_TYPE_CREATE_SUBARRAY(3, NPTS, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
-    !
-    !       CALL MPI_TYPE_COMMIT(NEWTYPE, IERR)
-    !
-    !       CALL MPI_FILE_SET_VIEW(FH, OFFSET, REAL_TYPE, NEWTYPE, 'NATIVE', MPI_INFO_NULL, IERR)
-    !
-    !       ! WAIT FOR RECEIVING FROM (J-1)-TH PROCESS
-    !       IF (J .LE. NTASKS) CALL MPI_WAIT(REQUEST, MPI_STATUS_IGNORE, IERR)
-    !
-    !       CALL MPI_FILE_WRITE_ALL(FH, BUFFER, PRODUCT(SUBSIZES), REAL_TYPE, MPI_STATUS_IGNORE, IERR)
-    !
-    !       CALL MPI_TYPE_FREE(NEWTYPE, IERR)
-    !
-    !     ENDIF
-    !
-    !     CALL MPI_BARRIER(NEWCOMM, IERR)
-    !
-    !   ENDDO
-    !
-    !   IF (RANK .EQ. 0) CALL MPI_FILE_CLOSE(FH, IERR)
-    !
-    !   DEALLOCATE(RANK0, RANK1, NEW2WORLD, BUFFER)
-    !
-    !   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-    !
-    !   CALL MPI_COMM_FREE(NEWCOMM, IERR)
-    !   CALL MPI_COMM_FREE(WRTCOMM, IERR)
-    !
-    ! END SUBROUTINE SCARF3D_WRITE_ONE
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE SCARF3D_WRITE_ONE2(V, FILENAME, NWRITERS)
-
-      REAL(FPP),                    DIMENSION(:,:,:),           INTENT(IN) :: V                                  !< RANDOM FIELD
-      CHARACTER(LEN=*),                                         INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
-      INTEGER(IPP),                                   OPTIONAL, INTENT(IN) :: NWRITERS
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-
-      
-
-
-    END SUBROUTINE SCARF3D_WRITE_ONE2
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
