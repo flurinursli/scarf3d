@@ -13,7 +13,7 @@ MODULE SCARFLIB_FFT3
 
   PRIVATE
 
-  PUBLIC :: SCARF3D_FFT
+  PUBLIC :: SCARF3D_FFT, BEST_CONFIG
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -791,8 +791,8 @@ MODULE SCARFLIB_FFT3
       ! BACKWARD DATA
       CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
 
-      ! COPY INTERPOLATED DATA TO RIGHT LOCATION
-      DO I = 1, BLOCKWIDTH
+      ! COPY INTERPOLATED DATA TO RIGHT LOCATION. LIMIT THE MAXIMUM ITERATION INDEX IN CASE "NP" NOT MULTIPLE OF "BLOCKWIDTH"
+      DO I = 1, P1(NBLOCKS) - P0(NBLOCKS) + 1
         FIELD(MAP(I)) = RV(I)
       ENDDO
 
@@ -963,8 +963,8 @@ MODULE SCARFLIB_FFT3
       ! BACKWARD DATA
       CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
 
-      ! COPY INTERPOLATED DATA TO RIGHT LOCATION
-      DO I = 1, BLOCKWIDTH
+      ! COPY INTERPOLATED DATA TO RIGHT LOCATION. LIMIT THE MAXIMUM ITERATION INDEX IN CASE "NP" NOT MULTIPLE OF "BLOCKWIDTH"
+      DO I = 1, P1(NBLOCKS) - P0(NBLOCKS) + 1
         FIELD(MAP(1, I), MAP(2, I), MAP(3, I)) = RV(I)
       ENDDO
 
@@ -997,6 +997,8 @@ MODULE SCARFLIB_FFT3
       !-----------------------------------------------------------------------------------------------------------------------------
 
       SENDCOUNTS = 0
+
+      MAP = 0
 
       C = 0
 
@@ -1059,6 +1061,8 @@ MODULE SCARFLIB_FFT3
       !-----------------------------------------------------------------------------------------------------------------------------
 
       SENDCOUNTS = 0
+
+      MAP = 0
 
       C = 0
 
