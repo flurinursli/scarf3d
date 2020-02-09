@@ -469,6 +469,8 @@ MODULE SCARFLIB_FFT3
       ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
       CALL BEST_CONFIG(DIMS)
 
+dims = [1, 2, 2]
+
       ! TEMPORARY MESSAGE
       IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS
 
@@ -505,6 +507,9 @@ MODULE SCARFLIB_FFT3
                     ( (PE(J) .LT. GE(J, I)) .AND. (PE(J) .GE. (GS(J, I) - 1)) ) .OR.     &
                     ( (PE(J) .GE. GE(J, I)) .AND. (PS(J) .LT. (GS(J, I) - 1)) )
         ENDDO
+
+print*, 'w ', world_rank, i, ' -- ', ps, pe, ' -- ', gs(:,i), ge(:,i), ALL(BOOL .EQV. .TRUE.)
+
         IF (ALL(BOOL .EQV. .TRUE.)) POINTS_RANK2WORLD(I) = 1
       ENDDO
 
@@ -657,12 +662,7 @@ MODULE SCARFLIB_FFT3
       REAL(FPP),    ALLOCATABLE, DIMENSION(:)                        :: RV, SV
       REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)                      :: SXYZ, RXYZ, SXYZ_N
 
-real(REAL64) :: TICTOC
-real(fpp), DIMENSION(3) :: info
-
       !-----------------------------------------------------------------------------------------------------------------------------
-
-info = 0.
 
       FIELD = 0._FPP
 
@@ -713,6 +713,12 @@ info = 0.
         IF ( (P0(I) .GT. N) .AND. (P1(I) .GT. N) ) P1(I) = P0(I) - 1
       ENDDO
 
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! FOR EACH BLOCK OF POINTS, EACH PROCESS BUILD AN ORDERED LIST OF POINTS TO BE SENT TO ALL OTHER PROCESSES AND THEIR NUMBER.
+      ! THEN IT COMPUTES THE NUMBER OF POINTS TO BE RECEIVED. THESE POINTS ARE INTERPOLATED AND SENT BACK TO THE RIGHT OWNER. AT THE
+      ! SAME TIME, POINTS INTERPOLATED BY OTHER PROCESSES ARE COLLECTED AND STORED AT THE RIGHT LOCATION.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
       ! THE STRATEGY IS TO ALLOCATE ONLY ONCE THESE ARRAY, EVEN IF THEY MAY RESULT LARGER THAN NECESSARY
       ALLOCATE(SXYZ(3, BLOCKWIDTH), MAP(BLOCKWIDTH), RV(BLOCKWIDTH))
       ALLOCATE(RXYZ(3, BLOCKWIDTH * NB), SV(BLOCKWIDTH * NB))
@@ -722,9 +728,9 @@ info = 0.
       CALL MPI_TYPE_COMMIT(TRIP, IERR)
 
       ! COLLECT DATA
-call WATCH_START(TICTOC)
       CALL ORDER_POINTS(P0(1), P1(1), DH, X, Y, Z, SXYZ, SENDCOUNTS, MAP)
-call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
+
+      ! DETERMINE NUMBER OF POINTS TO BE RECEIVED FROM EACH PROCESS
       CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
       ! SET DISPLACEMENTS
@@ -738,37 +744,32 @@ call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
 
       DO J = 2, NBLOCKS
 
-        ! FORWARD OLD DATA
+        ! FORWARD POINTS REFERRED TO PREVIOUS (J - 1) ITERATION
         CALL MPI_IALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, REQ, IERR)
 
-        ! COLLECT NEW DATA
-call WATCH_START(TICTOC)
+        ! COLLECT DATA TO BE USED IN THE NEXT (J) ITERATION
         CALL ORDER_POINTS(P0(J), P1(J), DH, X, Y, Z, SXYZ_N, SENDCOUNTS_N, MAP_N)
-call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
+
         CALL MPI_ALLTOALL(SENDCOUNTS_N, 1, MPI_INTEGER, RECVCOUNTS_N, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
-        ! WAIT FOR OLD DATA
+        ! WAIT FOR DATA FROM PREVIOUS (J - 1) ITERATION
         CALL MPI_WAIT(REQ, MPI_STATUS_IGNORE, IERR)
 
         ! NUMBER OF POINTS RECEIVED: NEED TO INTEPOLATE ONLY THESE, NOT WHOLE "RXYZ" VECTOR
         N = SUM(RECVCOUNTS)
 
         ! INTERPOLATION
-call WATCH_START(TICTOC)
         CALL INTERPOLATE(N, RXYZ, DELTA, SV)
-call WATCH_STOP(TICTOC); info(2) = info(2) + TICTOC
 
-        ! BACKWARD DATA
+        ! COLLECT POINTS THAT HAVE BEEN INTERPOLATED BY OTHER PROCESSES
         CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
 
-        ! COPY INTERPOLATED DATA TO RIGHT LOCATION
-call WATCH_START(TICTOC)
-        DO I = 1, BLOCKWIDTH
+        ! COPY INTERPOLATED DATA (IF ANY) TO RIGHT LOCATION
+        DO I = 1, P1(J - 1) - P0(J - 1) + 1
           FIELD(MAP(I)) = RV(I)
         ENDDO
-call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
 
-        ! ASSIGN "NEW DATA"
+        ! ASSIGN DATA TO BE SENT AT NEXT ITERATION
         DO I = 1, BLOCKWIDTH
           SXYZ(1, I) = SXYZ_N(1, I)
           SXYZ(2, I) = SXYZ_N(2, I)
@@ -779,7 +780,6 @@ call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
         RDISPLS(1) = 0
         SDISPLS(1) = 0
 
-        ! ASSIGN "NEW DATA"
         SENDCOUNTS(1) = SENDCOUNTS_N(1)
         RECVCOUNTS(1) = RECVCOUNTS_N(1)
 
@@ -799,19 +799,15 @@ call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
       N = SUM(RECVCOUNTS)
 
       ! INTERPOLATION
-call WATCH_START(TICTOC)
       CALL INTERPOLATE(N, RXYZ, DELTA, SV)
-call WATCH_STOP(TICTOC); info(2) = info(2) + TICTOC
 
       ! BACKWARD DATA
       CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
 
       ! COPY INTERPOLATED DATA TO RIGHT LOCATION. LIMIT THE MAXIMUM ITERATION INDEX IN CASE "NP" NOT MULTIPLE OF "BLOCKWIDTH"
-call WATCH_START(TICTOC)
       DO I = 1, P1(NBLOCKS) - P0(NBLOCKS) + 1
         FIELD(MAP(I)) = RV(I)
       ENDDO
-call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
 
       ! FREE RESOURCES
       CALL MPI_TYPE_FREE(TRIP, IERR)
@@ -819,8 +815,6 @@ call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
       DEALLOCATE(SXYZ, RXYZ, MAP, RV, SV)
       DEALLOCATE(SXYZ_N, MAP_N)
       DEALLOCATE(P0, P1)
-
-if (WORLD_RANK == 0) print*, info
 
     END SUBROUTINE GRID_MAPPING
 
@@ -835,22 +829,18 @@ if (WORLD_RANK == 0) print*, info
       REAL(FPP),                                       INTENT(IN)    :: DS
       INTEGER(IPP),              DIMENSION(3),         INTENT(IN)    :: FS, FE
       REAL(FPP),                 DIMENSION(:,:,:),     INTENT(OUT)   :: FIELD
-      INTEGER(IPP)                                                   :: I, J
-      INTEGER(IPP)                                                   :: M, N, NP, NB
+      INTEGER(IPP)                                                   :: I, J, C
+      INTEGER(IPP)                                                   :: M, N, NP, NB, NX, NY, NZ
       INTEGER(IPP)                                                   :: MAXWIDTH, BLOCKWIDTH, NBLOCKS
       INTEGER(IPP)                                                   :: IERR, TRIP, REQ
       INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS, RECVCOUNTS, SDISPLS, RDISPLS
       INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS_N, RECVCOUNTS_N
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)                      :: MAP, MAP_N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                        :: P0, P1
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)                        :: P0, P1
       REAL(FPP),    ALLOCATABLE, DIMENSION(:)                        :: RV, SV
       REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)                      :: SXYZ, RXYZ, SXYZ_N
 
-      real(REAL64) :: TICTOC
-      real(fpp), DIMENSION(3) :: info
       !-----------------------------------------------------------------------------------------------------------------------------
-
-info = 0.
 
       FIELD = 0._FPP
 
@@ -867,52 +857,115 @@ info = 0.
       ! MAXIMUM NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS (CONSERVATIVE ESTIMATE)
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, NB, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
 
-      NP = (FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)
+      NX = FE(1) - FS(1) + 1
+      NY = FE(2) - FS(2) + 1
+      NZ = FE(3) - FS(3) + 1
 
       ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE, [NX, NY, NZ], 3, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+      NP = NX * NY * NZ
 
       ! MAX NUMBER OF POINTS THAT CAN BE HANDLED AT ONCE (*_N ARRAYS FOR NON-BLOCKING "ALLTOALLV" ARE INCLUDED)
       !MAXWIDTH = (M * 2) / (5 + 4 * NB)
       MAXWIDTH = (M * 2) / (9 + 4 * NB)
 
-      BLOCKWIDTH = MAXWIDTH
+      ! NUMBER OF Z-PLANES THAT CAN BE PROCESSED AT ONCE
+      BLOCKWIDTH = MAXWIDTH / (NX * NY)
 
-      ! NUMBER OF BLOCKS REQUIRED TO COVER ALL POINTS
-      NBLOCKS = NP / BLOCKWIDTH
+      ! NUMBER OF BLOCKS REQUIRED TO COVER HIGHEST NUMBER OF Z-PLANES
+      NBLOCKS = NZ / BLOCKWIDTH
 
-      ! ADD ONE BLOCK MORE IF "NP" IS NOT MULTIPLE OF "BLOCKWIDTH"
-      IF (MOD(NP, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
+      IF (MOD(NZ, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
 
-      ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
+      ALLOCATE(P0(3, NBLOCKS), P1(3, NBLOCKS))
 
-      ! DEFINE FIRST/LAST POINT INDEX FOR EACH BLOCK
-      DO I = 1, NBLOCKS
-        P0(I) = (I - 1) * BLOCKWIDTH + 1
-        P1(I) = I * BLOCKWIDTH
-      ENDDO
+      IF (BLOCKWIDTH .GE. 1) THEN
 
-      ! MAKE SURE THAT INDICES DO NOT EXCEED ACTUAL NUMBER OF POINTS IN CALLING PROCESS
-      N = (FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)
+        DO I = 1, NBLOCKS
+          P0(1, I) = 1
+          P1(1, I) = FE(1) - FS(1) + 1
+          P0(2, I) = 1
+          P1(2, I) = FE(2) - FS(2) + 1
+          P0(3, I) = (I - 1) * BLOCKWIDTH + 1
+          P1(3, I) = I * BLOCKWIDTH
+        ENDDO
 
-      ! LIMIT POINTS INDICES TO MAXIMUM NUMBER OF POINTS AVAILABLE TO CALLING PROCESS
-      DO I = 1, NBLOCKS
-        IF ( (P0(I) .LE. N) .AND. (P1(I) .GT. N) ) P1(I) = N
-        IF ( (P0(I) .GT. N) .AND. (P1(I) .GT. N) ) P1(I) = P0(I) - 1
-      ENDDO
+        N = FE(3) - FS(3) + 1
+
+        DO I = 1, NBLOCKS
+          IF ( (P0(3, I) .LE. N) .AND. (P1(3, I) .GT. N) ) P1(3, I) = N
+          IF ( (P0(3, I) .GT. N) .AND. (P1(3, I) .GT. N) ) P1(3, I) = P0(3, I) - 1
+        ENDDO
+
+      ELSE
+
+        ! NUMBER OF Y-ROWS
+        ! BLOCKWIDTH = MAXWIDTH / NX
+        !
+        ! IF (WORLD_RANK == 2) PRINT*, 'NUMBER Y ROWS ', BLOCKWIDTH
+        !
+        ! ! NUMBER OF BLOCKS OF Y-ROWS
+        ! NBLOCKS = NY / BLOCKWIDTH
+        !
+        ! IF (MOD(NY, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
+        !
+        ! ALLOCATE(P0(3, NBLOCKS*NZ), P1(3, NBLOCKS*NZ))
+        !
+        ! DO J = 1, NZ
+        !   DO I = 1, NBLOCKS
+        !     C        = (J - 1) * NBLOCKS + I
+        !     P0(1, C) = 1
+        !     P1(1, C) = FE(1) - FS(1) + 1
+        !     P0(2, C) = (I - 1) * BLOCKWIDTH + 1
+        !     P1(2, C) = I * BLOCKWIDTH
+        !     P0(3, C) = J
+        !     P1(3, C) = J
+        !   ENDDO
+        ! ENDDO
+        !
+        ! ! MAKE SURE WE DO NOT EXCEED INDICES
+        !
+        ! N = FE(2) - FS(2) + 1
+        !
+        ! DO J = 1, NZ
+        !   DO I = 1, NBLOCKS
+        !     C = (J - 1) * NBLOCKS + I
+        !     IF ( (P0(2, C) .LE. N) .AND. (P1(2, C) .GT. N) ) P1(2, C) = N
+        !     IF ( (P0(2, C) .GT. N) .AND. (P1(2, C) .GT. N) ) P1(2, C) = P0(2, C) - 1
+        !   ENDDO
+        ! ENDDO
+        !
+        ! N = FE(3) - FS(3) + 1
+        !
+        ! DO J = 1, NZ
+        !   DO I = 1, NBLOCKS
+        !     C = (J - 1) * NBLOCKS + I
+        !     IF ( (P0(3, C) .GT. N) .AND. (P1(3, C) .GT. N) ) P1(3, C) = P0(3, C) - 1
+        !   ENDDO
+        ! ENDDO
+        !
+        ! BLOCKWIDTH = NX * BLOCKWIDTH
+        !
+        ! NBLOCKS = NBLOCKS * NZ
+        !
+        ! IF (WORLD_RANK == 2) PRINT*, 'NUMBER OF BLOCKWIDTH (POINTS) ', BLOCKWIDTH, 'BLOCKS ', NBLOCKS, NBLOCKS/NZ
+
+      ENDIF
+
+      ! NUMBER OF BLOCKS REQUIRED TO COVER HIGHEST NUMBER OF POINTS
+      NBLOCKS = NP / MAXWIDTH
 
       ! THE STRATEGY IS TO ALLOCATE ONLY ONCE THESE ARRAY, EVEN IF THEY MAY RESULT LARGER THAN NECESSARY
-      ALLOCATE(SXYZ(3, BLOCKWIDTH), MAP(3, BLOCKWIDTH), RV(BLOCKWIDTH))
-      ALLOCATE(RXYZ(3, BLOCKWIDTH * NB), SV(BLOCKWIDTH * NB))
-      ALLOCATE(SXYZ_N(3, BLOCKWIDTH), MAP_N(3, BLOCKWIDTH))
+      ALLOCATE(SXYZ(3, MAXWIDTH), MAP(3, MAXWIDTH), RV(MAXWIDTH))
+      ALLOCATE(RXYZ(3, MAXWIDTH * NB), SV(MAXWIDTH * NB))
+      ALLOCATE(SXYZ_N(3, MAXWIDTH), MAP_N(3, MAXWIDTH))
 
       CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIP, IERR)
       CALL MPI_TYPE_COMMIT(TRIP, IERR)
 
       ! COLLECT DATA
-      call WATCH_START(TICTOC)
-      CALL ORDER_POINTS_STRUCT(P0(1), P1(1), DH, FS, FE, DS, SXYZ, SENDCOUNTS, MAP)
-      call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
+      CALL ORDER_POINTS_STRUCT(P0(:, 1), P1(:, 1), DH, FS, FE, DS, SXYZ, SENDCOUNTS, MAP)
       CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
       ! SET DISPLACEMENTS
@@ -930,9 +983,7 @@ info = 0.
         CALL MPI_IALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, REQ, IERR)
 
         ! COLLECT NEW DATA
-call WATCH_START(TICTOC)
-        CALL ORDER_POINTS_STRUCT(P0(J), P1(J), DH, FS, FE, DS, SXYZ_N, SENDCOUNTS_N, MAP_N)
-call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
+        CALL ORDER_POINTS_STRUCT(P0(:, J), P1(:, J), DH, FS, FE, DS, SXYZ_N, SENDCOUNTS_N, MAP_N)
         CALL MPI_ALLTOALL(SENDCOUNTS_N, 1, MPI_INTEGER, RECVCOUNTS_N, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
         ! WAIT FOR OLD DATA
@@ -942,19 +993,15 @@ call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
         N = SUM(RECVCOUNTS)
 
         ! INTERPOLATION
-        call WATCH_START(TICTOC)
         CALL INTERPOLATE(N, RXYZ, DELTA, SV)
-        call WATCH_STOP(TICTOC); info(2) = info(2) + TICTOC
 
         ! BACKWARD DATA
         CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
 
         ! COPY INTERPOLATED DATA TO RIGHT LOCATION
-          call WATCH_START(TICTOC)
-        DO I = 1, BLOCKWIDTH
+        DO I = 1, PRODUCT(P1(:, J - 1) - P0(:, J - 1) + 1)
           FIELD(MAP(1, I), MAP(2, I), MAP(3, I)) = RV(I)
         ENDDO
-        call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
 
         ! ASSIGN "NEW DATA"
         DO I = 1, BLOCKWIDTH
@@ -989,19 +1036,15 @@ call WATCH_STOP(TICTOC); info(1) = info(1) + TICTOC
       N = SUM(RECVCOUNTS)
 
       ! INTERPOLATION
-call WATCH_START(TICTOC)
       CALL INTERPOLATE(N, RXYZ, DELTA, SV)
-call WATCH_STOP(TICTOC); info(2) = info(2) + TICTOC
 
       ! BACKWARD DATA
       CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
 
       ! COPY INTERPOLATED DATA TO RIGHT LOCATION. LIMIT THE MAXIMUM ITERATION INDEX IN CASE "NP" NOT MULTIPLE OF "BLOCKWIDTH"
-call WATCH_START(TICTOC)
-      DO I = 1, P1(NBLOCKS) - P0(NBLOCKS) + 1
+      DO I = 1, PRODUCT(P1(:, NBLOCKS) - P0(:, NBLOCKS) + 1)
         FIELD(MAP(1, I), MAP(2, I), MAP(3, I)) = RV(I)
       ENDDO
-call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
 
       ! FREE RESOURCES
       CALL MPI_TYPE_FREE(TRIP, IERR)
@@ -1010,8 +1053,6 @@ call WATCH_STOP(TICTOC); info(3) = info(3) + TICTOC
       DEALLOCATE(SXYZ_N, MAP_N)
       DEALLOCATE(P0, P1)
 
-if (WORLD_RANK == 0) print*, info
-
     END SUBROUTINE GRID_MAPPING_STRUCT
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
@@ -1019,6 +1060,9 @@ if (WORLD_RANK == 0) print*, info
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     SUBROUTINE ORDER_POINTS(P0, P1, DH, X, Y, Z, XYZ, SENDCOUNTS, MAP)
+
+      ! RE-ORDER POINTS TO BE SENT TO EACH PROCESS IN A LIST "XYZ" CONTAINING GRID INDICES FOR THAT PROCESS. THE NUMBER OF POINTS FOR
+      ! EACH PROCESS IS STORED IN "SENDCOUNTS", WHILE THE ORIGINAL INDEX OF A POINT IS IN "MAP".
 
       INTEGER(IPP),                 INTENT(IN)  :: P0, P1
       REAL(FPP),                    INTENT(IN)  :: DH
@@ -1054,10 +1098,12 @@ if (WORLD_RANK == 0) print*, info
 
         DO P = P0, P1
 
+          ! TRANSFORM POINT COORDINATES INTO GRID INDICES FOR L-TH PROCESS
           I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
           J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
           K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
 
+          ! CHECK IF POINT IS WITHIN BLOCK OF L-TH PROCESS
           BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
 
           IF (BOOL .EQV. .TRUE.) THEN
@@ -1068,6 +1114,7 @@ if (WORLD_RANK == 0) print*, info
 
         ENDDO
 
+        ! NUMBER OF POINTS TO BE SENT TO L-TH PROCESS
         SENDCOUNTS(L + 1) = C - N
 
       ENDDO
@@ -1080,7 +1127,7 @@ if (WORLD_RANK == 0) print*, info
 
     SUBROUTINE ORDER_POINTS_STRUCT(P0, P1, DH, FS, FE, DS, XYZ, SENDCOUNTS, MAP)
 
-      INTEGER(IPP),                 INTENT(IN)  :: P0, P1
+      INTEGER(IPP), DIMENSION(3),   INTENT(IN)  :: P0, P1
       REAL(FPP),                    INTENT(IN)  :: DH
       INTEGER(IPP), DIMENSION(3),   INTENT(IN)  :: FS, FE
       REAL(FPP),                    INTENT(IN)  :: DS
@@ -1093,18 +1140,29 @@ if (WORLD_RANK == 0) print*, info
       INTEGER(IPP), DIMENSION(3)                :: CONST, M
       LOGICAL                                   :: BOOL
       REAL(FPP)                                 :: I, J, K
-      REAL(FPP)                                 :: X, Y, Z
+      REAL(FPP),    DIMENSION(P0(3):P1(3))      :: Z
+      REAL(FPP),    DIMENSION(P0(2):P1(2))      :: Y
+      REAL(FPP),    DIMENSION(P0(1):P1(1))      :: X
 
       !-----------------------------------------------------------------------------------------------------------------------------
+
+      DO K0 = P0(3), P1(3)
+        Z(K0) = ((FS(3) - 1 + K0 - 1) * DS - OFF_AXIS(3)) / DH + 3._FPP
+      ENDDO
+
+      DO J0 = P0(2), P1(2)
+        Y(J0) = ((FS(2) - 1 + J0 - 1) * DS - OFF_AXIS(2)) / DH + 3._FPP
+      ENDDO
+
+      DO I0 = P0(1), P1(1)
+        X(I0) = ((FS(1) - 1 + I0 - 1) * DS - OFF_AXIS(1)) / DH + 3._FPP
+      ENDDO
 
       SENDCOUNTS = 0
 
       MAP = 0
 
       C = 0
-
-      NX  = FE(1) - FS(1) + 1
-      NXY = (FE(2) - FS(2) + 1) * NX
 
       ! LOOP OVER PROCESSES
       DO L = 0, WORLD_SIZE - 1
@@ -1119,27 +1177,29 @@ if (WORLD_RANK == 0) print*, info
 
         N = C
 
-        DO P = P0, P1
+        DO K0 = P0(3), P1(3)
 
-          K0 = (P - 1) / NXY + 1
-          J0 = (P - 1 - (K0 - 1) * NXY) / NX + 1
-          I0 = P - (K0 - 1) * NXY - (J0 - 1) * NX
+          K = Z(K0) - CONST(3)
 
-          X = (FS(1) + I0 -1 - 1) * DS
-          Y = (FS(2) + J0 -1 - 1) * DS
-          Z = (FS(3) + K0 -1 - 1) * DS
+          DO J0 = P0(2), P1(2)
 
-          I = (X - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
-          J = (Y - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
-          K = (Z - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
+            J = Y(J0) - CONST(2)
 
-          BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
+            DO I0 = P0(1), P1(1)
 
-          IF (BOOL .EQV. .TRUE.) THEN
-            C         = C + 1
-            XYZ(:, C) = [I, J, K]
-            MAP(:, C) = [I0, J0, K0]
-          ENDIF
+              I = X(I0) - CONST(1)
+
+              BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
+
+              IF (BOOL .EQV. .TRUE.) THEN
+                C         = C + 1
+                XYZ(:, C) = [I, J, K]
+                MAP(:, C) = [I0, J0, K0]
+              ENDIF
+
+            ENDDO
+
+          ENDDO
 
         ENDDO
 
