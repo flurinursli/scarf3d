@@ -48,7 +48,7 @@ PROGRAM DRIVER
 
   ! NUMBER OF POINTS FOR WHOLE MODEL
   !N = [2000*2, 3200*2, 1200*2]
-  N = [600, 500, 400]
+  N = [6, 5, 4]
 
   ! GRID STEP FOR FFT GRID
   DH = 100._FPP
@@ -85,7 +85,7 @@ PROGRAM DRIVER
   RESCALE = 0
 
   ! EXPAND GRID TO HANDLE FFT PERIODICITY
-  PAD = 1
+  PAD = 0
 
   ! END INPUT SECTION
   !-----------------------------------------------------------------------
@@ -199,8 +199,6 @@ PROGRAM DRIVER
   V1(:) = 0._FPP
 
   IF (RANK .EQ. 0) PRINT*, 'FFT'
-
-print*, 'driver ', rank, ' -- ', fs, ' -- ', fe
 
   CALL WATCH_START(TICTOC)
 
