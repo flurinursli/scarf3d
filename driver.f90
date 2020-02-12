@@ -48,7 +48,7 @@ PROGRAM DRIVER
 
   ! NUMBER OF POINTS FOR WHOLE MODEL
   !N = [2000*2, 3200*2, 1200*2]
-  N = [6, 5, 4]
+  N = [600, 500, 400]
 
   ! GRID STEP FOR FFT GRID
   DH = 100._FPP
@@ -85,7 +85,7 @@ PROGRAM DRIVER
   RESCALE = 0
 
   ! EXPAND GRID TO HANDLE FFT PERIODICITY
-  PAD = 0
+  PAD = 1
 
   ! END INPUT SECTION
   !-----------------------------------------------------------------------

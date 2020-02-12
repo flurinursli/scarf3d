@@ -2,6 +2,8 @@
 #include <trng/yarn2.hpp>
 #include <trng/uniform01_dist.hpp>
 
+// g++ -c prng.cpp -I/home/walter/Backedup/Software/trng-4.22/include -O3 -cpp -DDOUBLE_PREC
+
 extern "C"
 {
 #ifdef DOUBLE_PREC
@@ -25,7 +27,7 @@ float* prng(int seed, int *ls, int *le, int *npts)
   trng::yarn2 r;
   trng::uniform01_dist<> u;
 
-  int n = (le[0] - ls[0] + 1) * (le[1] - ls[1] + 1) * (le[2] - ls[2] + 1);
+  unsigned long long n = (le[0] - ls[0] + 1) * (le[1] - ls[1] + 1) * (le[2] - ls[2] + 1);
 
   // allocate array for random numbers
 #ifdef DOUBLE_PREC
@@ -40,21 +42,34 @@ float* prng(int seed, int *ls, int *le, int *npts)
   r.seed(myseed);
 
   // initialise counter
-  int c = -1;
-  int s;
+  long long c = -1;
+  unsigned long long s;
 
   //std::cout << "input " << seed << ' ' << ls[0] << ' ' << le[0] << std::endl;
+
+  // skip previous z-levels
+  s = (ls[2] - 1) * npts[0];
+  s = s * npts[1];
+  r.jump(s);
 
   for (int k = ls[2]; k <= le[2]; ++k){
 
     // skip z-levels
-    s = (k - 1) * npts[0] * npts[1];
+    //s = (k - 1) * npts[0] * npts[1];
+    //r.jump(s);
+
+    // skip further for previous y-levels
+    s = (ls[1] - 1) * npts[0];
     r.jump(s);
 
     for (int j = ls[1]; j <= le[1]; ++j){
 
       // skip points in the XY plane until "ls[0]"
-      s = (j - 1) * npts[0] + ls[0] - 1;
+      //s = (j - 1) * npts[0] + ls[0] - 1;
+      //r.jump(s);
+
+      // skip first points along x
+      s = ls[0] - 1;
       r.jump(s);
 
       for (int i = ls[0]; i <= le[0]; ++i){
@@ -63,10 +78,19 @@ float* prng(int seed, int *ls, int *le, int *npts)
       }
 
       // skip remaning points in the XY plane
-      s = (npts[0] - le[0]) + (npts[1] - j) * npts[0];
+      //s = (npts[0] - le[0]) + (npts[1] - j) * npts[0];
+      //r.jump(s);
+
+      // skip remaning points along x
+      s = (npts[0] - le[0]);
       r.jump(s);
 
     }
+
+    // skip remaning points in XY plane
+    s = (npts[1] - le[1]) * npts[0];
+    r.jump(s);
+
   }
 
   return x;

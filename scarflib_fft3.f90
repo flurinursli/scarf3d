@@ -469,10 +469,8 @@ MODULE SCARFLIB_FFT3
       ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
       CALL BEST_CONFIG(DIMS)
 
-dims = [1, 3, 1]
-
       ! TEMPORARY MESSAGE
-      IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS
+      IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS, ' -- ', NPTS
 
       CALL WATCH_START(TICTOC)
 
@@ -491,12 +489,6 @@ dims = [1, 3, 1]
       ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-IF (WORLD_RANK == 0) THEN
-  DO I = 0, WORLD_SIZE - 1
-    PRINT*, I, ' - ', GS(1,I), GE(1,I), ' - ', GS(2,I), GE(2,I), ' - ', GS(3,I), GE(3,I)
-  ENDDO
-ENDIF
 
       ALLOCATE(POINTS_WORLD2RANK(0:WORLD_SIZE - 1), POINTS_RANK2WORLD(0:WORLD_SIZE - 1))
 
@@ -842,6 +834,7 @@ ENDIF
       INTEGER(IPP)                                                   :: M, N, NP, NB, NX, NY, NZ
       INTEGER(IPP)                                                   :: MAXWIDTH, BLOCKWIDTH, NBLOCKS
       INTEGER(IPP)                                                   :: IERR, TRIP, REQ
+      INTEGER(IPP),              DIMENSION(3)                        :: DUM
       INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS, RECVCOUNTS, SDISPLS, RDISPLS
       INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS_N, RECVCOUNTS_N
       INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)                      :: MAP, MAP_N
@@ -877,16 +870,26 @@ ENDIF
       NY = FE(2) - FS(2) + 1
       NZ = FE(3) - FS(3) + 1
 
-      ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, [NX, NY, NZ], 3, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+      DUM = [NX, NY, NZ]
 
-      NP = NX * NY * NZ
+      ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
+      CALL MPI_ALLREDUCE(MPI_IN_PLACE, DUM, 3, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+      NX = DUM(1); NY = DUM(2); NZ = DUM(3)
+
+      !NP = NX * NY * NZ
 
       ! MAX NUMBER OF POINTS THAT CAN BE HANDLED AT ONCE (*_N ARRAYS FOR NON-BLOCKING "ALLTOALLV" ARE INCLUDED)
       MAXWIDTH = (M * 2) / (9 + 4 * NB)
 
       ! NUMBER OF Z-PLANES THAT CAN BE PROCESSED AT ONCE
       BLOCKWIDTH = MAXWIDTH / (NX * NY)
+
+      ! TEMPORARY WORKAROUND IF NO Z-PLANES CAN BE PREOCESSED: THIS MAY OCCURR IF INPUT MODEL DIMENSIONS ARE VERY SMALL!
+      IF (BLOCKWIDTH .EQ. 0) THEN
+        BLOCKWIDTH = 1
+        MAXWIDTH   = NX * NY
+      ENDIF
 
       ! NUMBER OF BLOCKS REQUIRED TO COVER HIGHEST NUMBER OF Z-PLANES
       NBLOCKS = NZ / BLOCKWIDTH
@@ -914,6 +917,8 @@ ENDIF
         ENDDO
 
       ELSE
+
+        ! THIS PART MUST BE COMPLETED
 
         ! NUMBER OF Y-ROWS
         ! BLOCKWIDTH = MAXWIDTH / NX
@@ -2418,23 +2423,18 @@ ENDIF
           I = NYQUIST(1)
         ENDIF
 
-PRINT*, 'A ', WORLD_RANK, NTASKS
-
         CALL EXCHANGE_CONJG
 
       ! ... OTHERWISE WORK IN TWO STEPS
       ELSEIF (COLOR .EQ. 3) THEN
 
-PRINT*, 'B ', WORLD_RANK, NTASKS
-CALL SLEEP(1)
-
         I = 1
 
         CALL EXCHANGE_CONJG
 
-        !I = NYQUIST(1)
+        I = NYQUIST(1)
 
-        !CALL EXCHANGE_CONJG
+        CALL EXCHANGE_CONJG
 
       ENDIF
 
@@ -2472,7 +2472,7 @@ CALL SLEEP(1)
 
           BOOL = (I .EQ. 1) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .EQ. 1)
 
-          IF (BOOL) SPEC(I, 1, 1) = CMPLX(1._FPP, 1.)                                                         !< ALPHA MUST BE ZERO FOR ZERO-MEAN FIELD
+          IF (BOOL) SPEC(I, 1, 1) = 0._FPP                                                         !< ALPHA MUST BE ZERO FOR ZERO-MEAN FIELD
 
           BOOL = (I .EQ. NYQUIST(1)) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .EQ. 1)
 
@@ -2491,7 +2491,8 @@ CALL SLEEP(1)
           IF (BOOL) SPEC(I, NYQUIST(2), 1) = REAL(SPEC(I, NYQUIST(2), 1), FPP)                     !< ETA MUST BE REAL
 
           ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-          ! APPLY CONDITIONS OF FIGURE 4 FOR BETA*
+          ! APPLY CONDITIONS OF FIGURE 4 AT REMAINING REGIONS. EXCHANGE DATA AMONGST PROCESSES. BETA- AND DELTA- REGIONS ARE TREATED
+          ! SEPARATELY.
           ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
           SENDCOUNTS = 0
@@ -2511,124 +2512,7 @@ CALL SLEEP(1)
             ENDDO
           ENDDO
 
-          ! CROSS EPSILON
-          ! J0 = MAX(2, FS(2))
-          ! J1 = MIN(FE(2), NYQUIST(2) - 1)
-          !
-          ! K0 = MAX(2, FS(3))
-          ! K1 = MIN(FE(3), NYQUIST(3) - 1)
-          !
-          ! CY = J1 + J0
-          ! CZ = K1 + K0
-          !
-          ! DO K = K0, K1
-          !   DO J = J0, J1
-          !     SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          ! ! CROSS GAMMA
-          ! J0 = MAX(NYQUIST(2) + 1, FS(2))
-          ! J1 = FE(2)
-          !
-          ! K0 = MAX(2, FS(3))
-          ! K1 = MIN(FE(3), NYQUIST(3) - 1)
-          !
-          ! CY = J1 + J0
-          ! CZ = K1 + K0
-          !
-          ! DO K = K0, K1
-          !   DO J = J0, J1
-          !     SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          ! ! REVERSE BETA
-          ! J0 = MAX(2, FS(2))
-          ! J1 = MIN(FE(2), NYQUIST(2) - 1)
-          !
-          ! K0 = MAX(1, FS(3))
-          ! K1 = 1
-          !
-          ! CY = J1 + J0
-          ! CZ = K1 + K0
-          !
-          ! DO K = K0, K1
-          !   DO J = J0, J1
-          !     SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          ! ! REVERSE THETA
-          ! J0 = MAX(2, FS(2))
-          ! J1 = MIN(FE(2), NYQUIST(2) - 1)
-          !
-          ! K0 = MAX(NYQUIST(3), FS(3))
-          ! K1 = NYQUIST(3)
-          !
-          ! CY = J1 + J0
-          ! CZ = K1 + K0
-          !
-          ! DO K = K0, K1
-          !   DO J = J0, J1
-          !     SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          ! ! REVERSE DELTA
-          ! J0 = MAX(1, FS(2))
-          ! J1 = MIN(1, FE(2))
-          !
-          ! K0 = MAX(2, FS(3))
-          ! K1 = MIN(FE(3), NYQUIST(3) - 1)
-          !
-          ! CY = J1 + J0
-          ! CZ = K1 + K0
-          !
-          ! DO K = K0, K1
-          !   DO J = J0, J1
-          !     SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          ! ! REVERSE PHI
-          ! J0 = MAX(NYQUIST(2), FS(2))
-          ! J1 = MIN(NYQUIST(2), FE(2))
-          !
-          ! K0 = MAX(2, FS(3))
-          ! K1 = MIN(FE(3), NYQUIST(3) - 1)
-          !
-          ! CY = J1 + J0
-          ! CZ = K1 + K0
-          !
-          ! DO K = K0, K1
-          !   DO J = J0, J1
-          !     SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          !
-          ! DO P = 0, NTASKS - 1
-          !   L = NEW2WORLD(P)
-          !   IF (WORLD_RANK == P) THEN
-          !     PRINT*, '*********** ', WORLD_RANK
-          !     DO J = FS(3), FE(3)
-          !       PRINT*, CMPLX(REAL(BUFFER(:, J)), AIMAG(BUFFER(:, J)), KIND=REAL32)
-          !     ENDDO
-          !     PRINT*, '+++++++++++ '
-          !     DO J = FS(3), FE(3)
-          !       PRINT*, CMPLX(REAL(SENDBUF(:, J)), AIMAG(SENDBUF(:, J)), KIND=REAL32)
-          !     ENDDO
-          !   ENDIF
-          !   CALL SLEEP(1)
-          ! ENDDO
-          !
-          ! CALL MPI_BARRIER(NEWCOMM, IERR)
-          !STOP
-
-
-
-
+          ! EXCHANGE DATA IN THE WHOLE REGION, EXCEPT BETA- AND DELTA-REGION
           DO P = 0, NTASKS - 1
 
             L = NEW2WORLD(P)                                                              !< GLOBAL INDEX OF P-TH PROCESS
@@ -2643,26 +2527,14 @@ CALL SLEEP(1)
             KS = NPTS(3) - GE(3, L) + 2
             KE = NPTS(3) - GS(3, L) + 2
 
-            ! NOTE: GS=1 RESUTS IN JE=NPTS+1. THIS OUT-OF-BOUNDS IS NEUTRALIZED BY "MIN" BELOW, THEREFORE J1 ALWAYS <= NPTS. I NEED
-            ! TO INTRODUCE A PIECE OF CODE HANDLING THIS GS=1 CASE. REMEMBER TO REVERSE VECTOR ALSO IN THIS CASE!
-
             J0 = MAX(FS(2), JS)
             J1 = MIN(FE(2), JE)
 
             K0 = MAX(FS(3), KS)
             K1 = MIN(FE(3), KE)
 
-            PRINT*, I, WORLD_RANK, L, ' INDEX ', JS, JE, KS, KE, ' -- ', FS(2), FE(2), FS(3), FE(3), ' -- ', J0, J1, K0, K1
-
             ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
             IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
-
-              ! SSUBSIZES = [1, J1 - J0 + 1, K1 - K0 + 1]
-              ! SSTARTS   = [I - 1, J0 - FS(2), K0 - FS(3)]
-
-              RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
-              RSTARTS   = [J0 - FS(2), K0 - FS(3)]
-
 
               CY = J1 + J0
               CZ = K1 + K0
@@ -2673,18 +2545,11 @@ CALL SLEEP(1)
                 ENDDO
               ENDDO
 
-
-
-              !PRINT*, I, ' FROM ', WORLD_RANK, ' TO ', L, ' -- ', SSUBSIZES, ' -- ', SSTARTS + 1
-
-              !CALL MPI_TYPE_CREATE_SUBARRAY(3, SSIZES, SSUBSIZES, SSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
-              CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
-              CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
-
               RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
               RSTARTS   = [J0 - FS(2), K0 - FS(3)]
 
-              !PRINT*, I, ' TO ', WORLD_RANK, ' FROM ', L, ' -- ', RSUBSIZES, ' -- ', RSTARTS + 1
+              CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
+              CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
 
               CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
               CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
@@ -2698,82 +2563,218 @@ CALL SLEEP(1)
 
           CALL MPI_ALLTOALLW(SENDBUF, SENDCOUNTS, SDISPLS, SENDTYPES, BUFFER, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
 
-          ! DO P = 0, NTASKS - 1
-          !   CALL MPI_TYPE_FREE(SENDTYPES(P), IERR)
-          !   CALL MPI_TYPE_FREE(RECVTYPES(P), IERR)
-          ! ENDDO
+          ! FREE RESOURCES
+          DO P = 0, NTASKS - 1
+            IF (SENDCOUNTS(P) .EQ. 1) THEN
+              CALL MPI_TYPE_FREE(SENDTYPES(P), IERR)
+              CALL MPI_TYPE_FREE(RECVTYPES(P), IERR)
+            ENDIF
+          ENDDO
 
+          SENDCOUNTS = 0
+          RECVCOUNTS = 0
+
+          ! NOW EXCHANGE DATA IN THE BETA- AND DELTA-REGION
           DO P = 0, NTASKS - 1
 
-            L = NEW2WORLD(P)
-
-            RSIZES    = [NPTS(2), NPTS(3)]
-            RSUBSIZES = [GE(2,L) - GS(2,L), GE(3,L) - GS(3,L)] + 1
-            RSTARTS   = [GS(2,L), GS(3, L)] - 1
-
-            SENDCOUNTS(P) = (GE(2,L) - GS(2,L) + 1) * (GE(3,L) - GS(3,L) + 1)
-
-            RECVCOUNTS(P) = 1
-
-            CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
-            CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+            L = NEW2WORLD(P)                                                              !< GLOBAL INDEX OF P-TH PROCESS
 
             SENDTYPES(P) = COMPLEX_TYPE
+            RECVTYPES(P) = COMPLEX_TYPE
+
+            ! PROJECT POINTS OF PROCESS "P" INTO CONJUGATED FIELD.
+            IF (GS(3, L) .EQ. 1) THEN
+
+              JS = NPTS(2) - GE(2, L) + 2
+              JE = NPTS(2) - GS(2, L) + 2
+
+              KS = 1
+              KE = 1
+
+              J0 = MAX(FS(2), JS)
+              J1 = MIN(FE(2), JE)
+
+              K0 = MAX(FS(3), KS)
+              K1 = MIN(FE(3), KE)
+
+              !PRINT*, I, WORLD_RANK, L, ' INDEX A ', JS, JE, KS, KE, ' -- ', FS(2), FE(2), FS(3), FE(3), ' -- ', J0, J1, K0, K1
+
+              ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
+              IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
+
+                RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
+                RSTARTS   = [J0 - FS(2), K0 - FS(3)]
+
+                CY = J1 + J0
+                CZ = K1 + K0
+
+                DO K = K0, K1
+                  DO J = J0, J1
+                    SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
+                  ENDDO
+                ENDDO
+
+                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
+                CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
+
+                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
+                CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+
+                SENDCOUNTS(P) = 1
+                RECVCOUNTS(P) = 1
+
+              ENDIF
+
+            ENDIF
+
+            ! PROJECT POINTS OF PROCESS "P" INTO CONJUGATED FIELD.
+            IF (GS(2, L) .EQ. 1) THEN
+
+              JS = 1
+              JE = 1
+
+              KS = NPTS(3) - GE(3, L) + 2
+              KE = NPTS(3) - GS(3, L) + 2
+
+              J0 = MAX(FS(2), JS)
+              J1 = MIN(FE(2), JE)
+
+              K0 = MAX(FS(3), KS)
+              K1 = MIN(FE(3), KE)
+
+              !PRINT*, I, WORLD_RANK, L, ' INDEX B ', JS, JE, KS, KE, ' -- ', FS(2), FE(2), FS(3), FE(3), ' -- ', J0, J1, K0, K1
+
+              ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
+              IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
+
+                RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
+                RSTARTS   = [J0 - FS(2), K0 - FS(3)]
+
+                CY = J1 + J0
+                CZ = K1 + K0
+
+                DO K = K0, K1
+                  DO J = J0, J1
+                    SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
+                  ENDDO
+                ENDDO
+
+                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
+                CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
+
+                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
+                CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+
+                SENDCOUNTS(P) = 1
+                RECVCOUNTS(P) = 1
+
+              ENDIF
+
+            ENDIF
 
           ENDDO
 
-          CALL MPI_ALLTOALLW(SPEC(I,:,:), SENDCOUNTS, SDISPLS, SENDTYPES, MATRIX, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
+          CALL MPI_ALLTOALLW(SENDBUF, SENDCOUNTS, SDISPLS, SENDTYPES, BUFFER, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
 
-          CALL SLEEP(1)
+          ! FREE RESOURCES
+          DO P = 0, NTASKS - 1
+            IF (SENDCOUNTS(P) .EQ. 1) THEN
+              CALL MPI_TYPE_FREE(SENDTYPES(P), IERR)
+              CALL MPI_TYPE_FREE(RECVTYPES(P), IERR)
+            ENDIF
+          ENDDO
 
-          IF (WORLD_RANK == 0) THEN
-            DO P = 1, NPTS(3)
-              PRINT*, CMPLX(REAL(MATRIX(:, P)), AIMAG(MATRIX(:, P)), KIND=REAL32)
+          SENDCOUNTS = 0
+          RECVCOUNTS = 0
+
+          ! REPLACE BUFFER ON THE LHS WITH SPEC ON THE NEXT 3 BLOCKS
+          ! TAKE COMPLEX CONJUGATE
+          ! DELTA*, GAMMA*, PHI*, EPSILON*
+          DO K = MAX(NYQUIST(3) + 1, FS(3)), FE(3)
+            DO J = FS(2), FE(2)
+              ! BUFFER(J, K) = CONJG(BUFFER(J, K))
+              SPEC(I, J, K) = CONJG(BUFFER(J, K))
             ENDDO
-            PRINT*, '*****************'
-          ENDIF
+          ENDDO
 
-          MATRIX = 0.
-
-          CALL MPI_ALLTOALLW(BUFFER, SENDCOUNTS, SDISPLS, SENDTYPES, MATRIX, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
-
-          CALL SLEEP(1)
-
-          IF (WORLD_RANK == 0) THEN
-            DO P = 1, NPTS(3)
-              PRINT*, CMPLX(REAL(MATRIX(:, P)), AIMAG(MATRIX(:, P)), KIND=REAL32)
+          ! BETA*
+          DO K = MAX(1, FS(3)), 1
+            DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
+              !BUFFER(J, K) = CONJG(BUFFER(J, K))
+              SPEC(I, J, K) = CONJG(BUFFER(J, K))
             ENDDO
-          ENDIF
+          ENDDO
+
+          ! THETA*
+          DO K = MAX(NYQUIST(3), FS(3)), MIN(NYQUIST(3), FE(3))
+            DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
+              !BUFFER(J, K) = CONJG(BUFFER(J, K))
+              SPEC(I, J, K) = CONJG(BUFFER(J, K))
+            ENDDO
+          ENDDO
+
+          ! COMMENT OUT THESE TWO BLOCKS BELOW
+          ! ALPHA, BETA, XSI, DELTA, EPSILON, PHI, ETA, THETA, PSI
+          ! DO K = FS(3), MIN(FE(3), NYQUIST(3))
+          !   DO J = FS(2), MIN(FE(2), NYQUIST(2))
+          !     BUFFER(J, K) = SPEC(I, J, K)
+          !   ENDDO
+          ! ENDDO
+          !
+          ! ! GAMMA
+          ! DO K = MAX(2, FS(3)), MIN(FE(3), NYQUIST(3) - 1)
+          !   DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
+          !     BUFFER(J, K) = SPEC(I, J, K)
+          !   ENDDO
+          ! ENDDO
+
 
           ! DO P = 0, NTASKS - 1
           !
-          !   IF (RANK .EQ. P) THEN
-          !     PRINT*, WORLD_RANK
-          !     DO L = FS(3), FE(3)
-          !       PRINT*, CMPLX(REAL(SPEC(I, :, L)), AIMAG(SPEC(I, :, L)), KIND=REAL32)
-          !     ENDDO
-          !     PRINT*, '----'
-          !     CALL SLEEP(1)
-          !     DO L = FS(3), FE(3)
-          !       PRINT*, CMPLX(REAL(BUFFER(:, L)), AIMAG(BUFFER(:, L)), KIND=REAL32)
-          !     ENDDO
-          !     PRINT*, '***************'
-          !     CALL SLEEP(1)
-          !   ENDIF
+          !   L = NEW2WORLD(P)
           !
-          !   CALL MPI_BARRIER(NEWCOMM, IERR)
+          !   RSIZES    = [NPTS(2), NPTS(3)]
+          !   RSUBSIZES = [GE(2,L) - GS(2,L), GE(3,L) - GS(3,L)] + 1
+          !   RSTARTS   = [GS(2,L), GS(3, L)] - 1
+          !
+          !   SENDCOUNTS(P) = (GE(2,L) - GS(2,L) + 1) * (GE(3,L) - GS(3,L) + 1)
+          !
+          !   RECVCOUNTS(P) = 1
+          !
+          !   CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
+          !   CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+          !
+          !   SENDTYPES(P) = COMPLEX_TYPE
           !
           ! ENDDO
+          !
+          ! CALL MPI_ALLTOALLW(SPEC(I,:,:), SENDCOUNTS, SDISPLS, SENDTYPES, MATRIX, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
+          !
+          ! CALL SLEEP(1)
+          !
+          ! IF (WORLD_RANK == 0) THEN
+          !   DO P = 1, NPTS(3)
+          !     PRINT*, CMPLX(REAL(MATRIX(:, P)), AIMAG(MATRIX(:, P)), KIND=REAL32)
+          !   ENDDO
+          !   PRINT*, '*****************'
+          ! ENDIF
+          !
+          ! MATRIX = 0.
+          !
+          ! CALL MPI_ALLTOALLW(BUFFER, SENDCOUNTS, SDISPLS, SENDTYPES, MATRIX, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
+          !
+          ! CALL SLEEP(1)
+          !
+          ! IF (WORLD_RANK == 0) THEN
+          !   DO P = 1, NPTS(3)
+          !     PRINT*, CMPLX(REAL(MATRIX(:, P)), AIMAG(MATRIX(:, P)), KIND=REAL32)
+          !   ENDDO
+          ! ENDIF
+          !
+          ! CALL MPI_BARRIER(NEWCOMM, IERR)
+          !
+          ! STOP
 
-           CALL MPI_BARRIER(NEWCOMM, IERR)
-
-          STOP
-
-          ! NOW COPY POINTS NEEDED INTO "SPEC"
-
-          !SPEC(I, ....) = BUFFER
-
-CALL SLEEP(1)
 
 
         END SUBROUTINE EXCHANGE_CONJG
