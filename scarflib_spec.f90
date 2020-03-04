@@ -1,4 +1,4 @@
-MODULE SCARFLIB_SPECTRAL
+MODULE SCARFLIB_SPEC
   ! ALL VARIABLES AND SUBMODULE PROCEDURES ARE GLOBAL WITHIN THE SUBMODULE, BUT LIMITED TO IT.
 
 !    USE, INTRINSIC     :: OMP_LIB
@@ -23,7 +23,7 @@ MODULE SCARFLIB_SPECTRAL
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! NUMBER OF HARMONICS IN SPECTRAL SUMMATION
-  INTEGER(IPP), PARAMETER :: NHARM = 5000*4
+  INTEGER(IPP), PARAMETER :: NHARM = 5000*4 / 2
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -39,61 +39,34 @@ MODULE SCARFLIB_SPECTRAL
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
-    REAL(FPP),                     DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
-    REAL(FPP),                                       INTENT(IN)  :: DH                   !< GRID-STEP
-    CHARACTER(LEN=*),                                INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-    REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
-    REAL(FPP),                                       INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
-    REAL(FPP),                                       INTENT(IN)  :: HURST                !< HURST EXPONENT
-    INTEGER(IPP),                                    INTENT(IN)  :: SEED                 !< SEED NUMBER
-    REAL(FPP),                     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-    REAL(FPP),                                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-    REAL(FPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    REAL(FPP),                     DIMENSION(:),     INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
-    REAL(FPP),                     DIMENSION(1),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
-
-    ! INTEGER(IPP),     DIMENSION(3),     INTENT(IN)    :: LS, LE         !< FIRST/LAST INDEX ALONG X, Y, Z
-    ! REAL(FPP),        DIMENSION(:),     INTENT(IN)    :: X, Y, Z        !< POSITION OF POINTS ALONG X, Y, Z`
-    ! CHARACTER(LEN=*),                   INTENT(IN)    :: ACF            !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-    ! REAL(FPP),        DIMENSION(3),     INTENT(IN)    :: CL             !< CORRELATION LENGTH
-    ! REAL(FPP),                          INTENT(IN)    :: SIGMA          !< STANDARD DEVIATION
-    ! REAL(FPP),                          INTENT(IN)    :: HURST          !< HURST EXPONENT
-    ! INTEGER(IPP),                       INTENT(IN)    :: SEED           !< SEED NUMBER
-    ! INTEGER(IPP),     DIMENSION(:,:),   INTENT(IN)    :: POI            !< LOCATION OF POINT(S)-OF-INTEREST
-    ! INTEGER(IPP),                       INTENT(IN)    :: MUTE           !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-    ! INTEGER(IPP),                       INTENT(IN)    :: TAPER          !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    ! REAL(FPP),        DIMENSION(:),     INTENT(INOUT) :: FIELD          !< VELOCITY FIELD TO BE PERTURBED
-    ! REAL(FPP),                          INTENT(OUT)   :: TIME           !< TIMING FOR PERFORMANCE ANALYSIS
-
-    INTEGER(IPP)                                      :: I, L
-    INTEGER(IPP)                                      :: NPTS
-    INTEGER(IPP)                                      :: IERR
-    REAL(FPP)                                         :: SCALING
-    REAL(FPP)                                         :: KMAX, UMAX
-    REAL(FPP)                                         :: K, D, U        !< USED TO COMPUTE THE COVARIANCE FUNCTION
-    REAL(FPP)                                         :: PHI, THETA
-    REAL(FPP)                                         :: V1, V2, V3
-    REAL(FPP)                                         :: A, B, ARG
-    REAL(REAL64)                                      :: TICTOC
-    REAL(FPP),        DIMENSION(2)                    :: R              !< RANDOM NUMBER
+    REAL(FPP),    DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
+    REAL(FPP),                      INTENT(IN)  :: DH                   !< GRID-STEP
+    INTEGER(IPP),                   INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
+    REAL(FPP),    DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
+    REAL(FPP),                      INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
+    REAL(FPP),                      INTENT(IN)  :: HURST                !< HURST EXPONENT
+    INTEGER(IPP),                   INTENT(IN)  :: SEED                 !< SEED NUMBER
+    REAL(FPP),    DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
+    REAL(FPP),                      INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
+    REAL(FPP),                      INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
+    REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
+    REAL(FPP),    DIMENSION(1),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
+    INTEGER(IPP)                                :: I, L
+    INTEGER(IPP)                                :: NPTS
+    INTEGER(IPP)                                :: IERR
+    REAL(FPP)                                   :: SCALING
+    REAL(FPP)                                   :: KMAX, UMAX
+    REAL(FPP)                                   :: K, D, U        !< USED TO COMPUTE THE COVARIANCE FUNCTION
+    REAL(FPP)                                   :: PHI, THETA
+    REAL(FPP)                                   :: V1, V2, V3
+    REAL(FPP)                                   :: A, B, ARG
+    REAL(REAL64)                                :: TICTOC
+    REAL(FPP),    DIMENSION(2)                  :: R              !< RANDOM NUMBER
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
     CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
     CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
-
-    ! ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
-    !
-    ! ! STORE GLOBAL INDICES
-    ! GS(:, WORLD_RANK) = LS
-    ! GE(:, WORLD_RANK) = LE
-    !
-    ! ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-    ! CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-    ! CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-    !
-    ! ! FIND TOTAL NUMBER OF POINTS ALONG EACH AXIS
-    ! N = MAXVAL(GE, DIM = 2)
 
     ! INITIALISE RANDOM NUMBERS GENERATOR
     CALL SET_STREAM(SEED)
@@ -111,7 +84,7 @@ MODULE SCARFLIB_SPECTRAL
     FIELD(:) = 0._FPP
 
     ! SELECT PARAMETERS ACCORDING TO AUTOCORRELATION FUNCTION
-    IF (ACF .EQ. 'VK') THEN
+    IF (ACF .EQ. 0) THEN
 
       IF (HURST .LT. 0.25_FPP) THEN
         UMAX = LOG(KMAX + 1._FPP)
@@ -121,7 +94,7 @@ MODULE SCARFLIB_SPECTRAL
         UMAX = ATAN(KMAX)
       ENDIF
 
-    ELSEIF (ACF .EQ. 'GAUSS') THEN
+    ELSEIF (ACF .EQ. 1) THEN
 
       UMAX = SQRT(PI) * (ERF(KMAX * 0.5_FPP - 1._FPP) - ERF(-1._FPP))
 
@@ -135,6 +108,8 @@ MODULE SCARFLIB_SPECTRAL
     !$ACC DATA COPY(FIELD) COPYIN(X, Y, Z, SCALING, NPTS, A, B, V1, V2, V3) CREATE(ARG)
     DO L = 1, NHARM
 
+      IF ((MOD(L, 100) == 0) .AND. (WORLD_RANK == 0)) PRINT*, WORLD_RANK, L
+
       DO
 
         ! FIRST SET OF RANDOM NUMBERS
@@ -147,7 +122,7 @@ MODULE SCARFLIB_SPECTRAL
         K = CDF2K(ACF, HURST, U)
 
         ! EVALUATE ORIGINAL PDF
-        IF (ACF .EQ. 'VK') THEN
+        IF (ACF .EQ. 0) THEN
           D = K**2 / (1._FPP + K**2)**(1.5_FPP + HURST)
         ELSE
           D = K**2 * EXP(-0.25_FPP * K**2)
@@ -242,13 +217,13 @@ MODULE SCARFLIB_SPECTRAL
     ! RETURN THE VALUE OF THE MAJORANT PDF AT WAVENUMBER "K". THE MAJORANT IS SELECTED BASED ON THE AUTOCORRELATION FUNCTION AND THE
     ! HURST EXPONENT (EXCEPT WHEN "ACF" IS GAUSSIAN).
 
-    CHARACTER(LEN=*), INTENT(IN) :: ACF                        !< CORRELATION FUNCTION
+    INTEGER(IPP), INTENT(IN) :: ACF                        !< CORRELATION FUNCTION
     REAL(FPP),        INTENT(IN) :: HURST                      !< HURST EXPONENT
     REAL(FPP),        INTENT(IN) :: K                          !< WAVENUMBER
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    IF (ACF .EQ. 'VK') THEN
+    IF (ACF .EQ. 0) THEN
 
       IF (HURST .LT. 0.25_FPP) THEN
         PDF = 1.2_FPP / (1._FPP + K)
@@ -258,7 +233,7 @@ MODULE SCARFLIB_SPECTRAL
         PDF = 1._FPP / (1._FPP + K**2)
       ENDIF
 
-    ELSEIF (ACF .EQ. 'GAUSS') THEN
+    ELSEIF (ACF .EQ. 1) THEN
 
       PDF = 1.5_FPP * EXP(-0.25_FPP * (K - 2._FPP)**2)
 
@@ -275,14 +250,14 @@ MODULE SCARFLIB_SPECTRAL
     ! RETURN THE VALUE OF THE MAJORANT PDF AT WAVENUMBER "K". THE MAJORANT IS SELECTED BASED ON THE AUTOCORRELATION FUNCTION AND THE
     ! HURST EXPONENT (EXCEPT WHEN "ACF" IS GAUSSIAN).
 
-    CHARACTER(LEN=*), INTENT(IN) :: ACF                        !< CORRELATION FUNCTION
+    INTEGER(IPP), INTENT(IN) :: ACF                        !< CORRELATION FUNCTION
     REAL(FPP),        INTENT(IN) :: HURST                      !< HURST EXPONENT
     REAL(FPP),        INTENT(IN) :: U                          !< RANDOM NUMBER IN THE RANGE [0, 1]
     REAL(FPP)                    :: DERFI
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    IF (ACF .EQ. 'VK') THEN
+    IF (ACF .EQ. 0) THEN
 
       IF (HURST .LT. 0.25_FPP) THEN
         CDF2K = EXP(U) - 1._FPP
@@ -292,7 +267,7 @@ MODULE SCARFLIB_SPECTRAL
         CDF2K = TAN(U)
       ENDIF
 
-    ELSEIF (ACF .EQ. 'GAUSS') THEN
+    ELSEIF (ACF .EQ. 1) THEN
 
       CDF2K = 2._FPP * (1._FPP + DERFI(ERF(-1._FPP) + U / SQRT(PI)))
 
@@ -386,4 +361,4 @@ MODULE SCARFLIB_SPECTRAL
   !
   ! END FUNCTION MEAN
 
-END MODULE SCARFLIB_SPECTRAL
+END MODULE SCARFLIB_SPEC
