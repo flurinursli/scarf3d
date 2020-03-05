@@ -15,15 +15,28 @@ MODULE SCARFLIB_SPEC
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+  ! INTERFACE TO C++ FUNCTIONS/SUBROUTINES
+  INTERFACE
 
-  ! PROCEDURE POINTERS
-  ! PROCEDURE(VK_PSDF), POINTER :: FUN
+    SUBROUTINE SRNG(RAND) BIND(C, NAME="srng")
+      USE, INTRINSIC     :: ISO_C_BINDING
+      USE, NON_INTRINSIC :: SCARFLIB_COMMON
+      IMPLICIT NONE
+      REAL(C_FPP), DIMENSION(2), INTENT(OUT) :: RAND
+    END SUBROUTINE SRNG
+
+    SUBROUTINE SET_SEED(SEED) BIND(C, NAME="set_seed")
+      USE, INTRINSIC :: ISO_C_BINDING
+      IMPLICIT NONE
+      INTEGER(C_INT), VALUE :: SEED
+    END SUBROUTINE SET_SEED
+
+  END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! NUMBER OF HARMONICS IN SPECTRAL SUMMATION
-  INTEGER(IPP), PARAMETER :: NHARM = 5000*4 / 2
+  INTEGER(IPP), PARAMETER :: NHARM = 5000*4 
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -39,29 +52,30 @@ MODULE SCARFLIB_SPEC
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
-    REAL(FPP),    DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
-    REAL(FPP),                      INTENT(IN)  :: DH                   !< GRID-STEP
-    INTEGER(IPP),                   INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-    REAL(FPP),    DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
-    REAL(FPP),                      INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
-    REAL(FPP),                      INTENT(IN)  :: HURST                !< HURST EXPONENT
-    INTEGER(IPP),                   INTENT(IN)  :: SEED                 !< SEED NUMBER
-    REAL(FPP),    DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-    REAL(FPP),                      INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-    REAL(FPP),                      INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
-    REAL(FPP),    DIMENSION(1),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
-    INTEGER(IPP)                                :: I, L
-    INTEGER(IPP)                                :: NPTS
-    INTEGER(IPP)                                :: IERR
-    REAL(FPP)                                   :: SCALING
-    REAL(FPP)                                   :: KMAX, UMAX
-    REAL(FPP)                                   :: K, D, U        !< USED TO COMPUTE THE COVARIANCE FUNCTION
-    REAL(FPP)                                   :: PHI, THETA
-    REAL(FPP)                                   :: V1, V2, V3
-    REAL(FPP)                                   :: A, B, ARG
-    REAL(REAL64)                                :: TICTOC
-    REAL(FPP),    DIMENSION(2)                  :: R              !< RANDOM NUMBER
+    REAL(FPP),     DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
+    REAL(FPP),                       INTENT(IN)  :: DH                   !< GRID-STEP
+    INTEGER(IPP),                    INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
+    REAL(FPP),     DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
+    REAL(FPP),                       INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
+    REAL(FPP),                       INTENT(IN)  :: HURST                !< HURST EXPONENT
+    INTEGER(IPP),                    INTENT(IN)  :: SEED                 !< SEED NUMBER
+    REAL(FPP),     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
+    REAL(FPP),                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
+    REAL(FPP),                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
+    REAL(FPP),     DIMENSION(:),     INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
+    REAL(FPP),     DIMENSION(1),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
+    INTEGER(IPP)                                 :: I, L
+    INTEGER(IPP)                                 :: NPTS
+    INTEGER(IPP)                                 :: IERR
+    INTEGER(C_INT)                               :: C_SEED
+    REAL(FPP)                                    :: SCALING
+    REAL(FPP)                                    :: KMAX, UMAX
+    REAL(FPP)                                    :: K, D, U        !< USED TO COMPUTE THE COVARIANCE FUNCTION
+    REAL(FPP)                                    :: PHI, THETA
+    REAL(FPP)                                    :: V1, V2, V3
+    REAL(FPP)                                    :: A, B, ARG
+    REAL(REAL64)                                 :: TICTOC
+    REAL(C_FPP),    DIMENSION(2)                 :: R
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
@@ -69,7 +83,10 @@ MODULE SCARFLIB_SPEC
     CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
 
     ! INITIALISE RANDOM NUMBERS GENERATOR
-    CALL SET_STREAM(SEED)
+    !CALL SET_STREAM(SEED)
+
+    C_SEED = SEED
+    CALL SET_SEED(C_SEED)
 
     ! SET NYQUIST WAVENUMBER BASED ON MINIMUM GRID-STEP
     KMAX = PI / DH * SQRT(CL(1)**2 + CL(2)**2 + CL(3)**2)
@@ -113,7 +130,8 @@ MODULE SCARFLIB_SPEC
       DO
 
         ! FIRST SET OF RANDOM NUMBERS
-        CALL RANDOM_NUMBER(R)
+        !CALL RANDOM_NUMBER(R)
+        CALL SRNG(R)
 
         ! RANDOM VARIABLE "U" MUST SPAN THE RANGE [0, UMAX]
         U = R(1) * UMAX
@@ -137,7 +155,8 @@ MODULE SCARFLIB_SPEC
       ENDDO
 
       ! SECOND SET OF RANDOM NUMBERS
-      CALL RANDOM_NUMBER(R)
+      !CALL RANDOM_NUMBER(R)
+      CALL SRNG(R)
 
       ! COMPUTE AZIMUTH AND POLAR ANGLES
       PHI   = R(1) * 2._FPP * PI
@@ -148,10 +167,12 @@ MODULE SCARFLIB_SPEC
       V3 = K * COS(THETA)            / CL(3)
 
       ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      CALL RANDOM_NUMBER(R)
+      !CALL RANDOM_NUMBER(R)
+      CALL SRNG(R)
       A = BOX_MUELLER(R)
 
-      CALL RANDOM_NUMBER(R)
+      !CALL RANDOM_NUMBER(R)
+      CALL SRNG(R)
       B = BOX_MUELLER(R)
 
       !$ACC WAIT
@@ -218,8 +239,8 @@ MODULE SCARFLIB_SPEC
     ! HURST EXPONENT (EXCEPT WHEN "ACF" IS GAUSSIAN).
 
     INTEGER(IPP), INTENT(IN) :: ACF                        !< CORRELATION FUNCTION
-    REAL(FPP),        INTENT(IN) :: HURST                      !< HURST EXPONENT
-    REAL(FPP),        INTENT(IN) :: K                          !< WAVENUMBER
+    REAL(FPP),    INTENT(IN) :: HURST                      !< HURST EXPONENT
+    REAL(FPP),    INTENT(IN) :: K                          !< WAVENUMBER
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
@@ -251,9 +272,9 @@ MODULE SCARFLIB_SPEC
     ! HURST EXPONENT (EXCEPT WHEN "ACF" IS GAUSSIAN).
 
     INTEGER(IPP), INTENT(IN) :: ACF                        !< CORRELATION FUNCTION
-    REAL(FPP),        INTENT(IN) :: HURST                      !< HURST EXPONENT
-    REAL(FPP),        INTENT(IN) :: U                          !< RANDOM NUMBER IN THE RANGE [0, 1]
-    REAL(FPP)                    :: DERFI
+    REAL(FPP),    INTENT(IN) :: HURST                      !< HURST EXPONENT
+    REAL(FPP),    INTENT(IN) :: U                          !< RANDOM NUMBER IN THE RANGE [0, 1]
+    REAL(FPP)                :: DERFI
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
