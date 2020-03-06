@@ -25,6 +25,13 @@ MODULE SCARFLIB_SPEC
       REAL(C_FPP), DIMENSION(2), INTENT(OUT) :: RAND
     END SUBROUTINE SRNG
 
+    SUBROUTINE NORMDIST(RAND) BIND(C, NAME="normdist")
+      USE, INTRINSIC     :: ISO_C_BINDING
+      USE, NON_INTRINSIC :: SCARFLIB_COMMON
+      IMPLICIT NONE
+      REAL(C_FPP), DIMENSION(2), INTENT(OUT) :: RAND
+    END SUBROUTINE NORMDIST
+
     SUBROUTINE SET_SEED(SEED) BIND(C, NAME="set_seed")
       USE, INTRINSIC :: ISO_C_BINDING
       IMPLICIT NONE
@@ -162,7 +169,6 @@ MODULE SCARFLIB_SPEC
       ENDDO
 
       ! SECOND SET OF RANDOM NUMBERS
-      !CALL RANDOM_NUMBER(R)
       CALL SRNG(R)
 
       ! COMPUTE AZIMUTH AND POLAR ANGLES
@@ -174,13 +180,15 @@ MODULE SCARFLIB_SPEC
       V3 = K * COS(THETA)            / CL(3)
 
       ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      !CALL RANDOM_NUMBER(R)
-      CALL SRNG(R)
-      A = BOX_MUELLER(R)
+      !CALL SRNG(R)
+      !A = BOX_MUELLER(R)
+      CALL NORMDIST(R)
 
-      !CALL RANDOM_NUMBER(R)
-      CALL SRNG(R)
-      B = BOX_MUELLER(R)
+      A = R(1)
+      B = R(2)
+
+      !CALL SRNG(R)
+      !B = BOX_MUELLER(R)
 
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
 
@@ -229,18 +237,18 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  REAL(FPP) FUNCTION BOX_MUELLER(RAND)
-
-    ! GIVEN TWO UNIFORMLY DISTRIBUTED RANDOM NUMBERS, USE BOX-MUELLER ALGORITHM TO DRAW A NORMALLY DISTRIBUTED NUMBER IN THE RANGE
-    ! (-INF INF)
-
-    REAL(FPP), DIMENSION(2), INTENT(IN) :: RAND
-
-    !-------------------------------------------------------------------------------------------------------------------------------
-
-    BOX_MUELLER = SQRT(-2._FPP * LOG(RAND(1))) * COS(2._FPP * PI * RAND(2))
-
-  END FUNCTION BOX_MUELLER
+  ! REAL(FPP) FUNCTION BOX_MUELLER(RAND)
+  !
+  !   ! GIVEN TWO UNIFORMLY DISTRIBUTED RANDOM NUMBERS, USE BOX-MUELLER ALGORITHM TO DRAW A NORMALLY DISTRIBUTED NUMBER IN THE RANGE
+  !   ! (-INF INF)
+  !
+  !   REAL(FPP), DIMENSION(2), INTENT(IN) :: RAND
+  !
+  !   !-------------------------------------------------------------------------------------------------------------------------------
+  !
+  !   BOX_MUELLER = SQRT(-2._FPP * LOG(RAND(1))) * COS(2._FPP * PI * RAND(2))
+  !
+  ! END FUNCTION BOX_MUELLER
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================

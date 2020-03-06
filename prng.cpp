@@ -1,6 +1,7 @@
 #include <iostream>
 #include <trng/yarn2.hpp>
 #include <trng/uniform01_dist.hpp>
+#include <trng/normal_dist.hpp>
 
 // g++ -c prng.cpp -Ipath-to-trng-include-folder -O3 -cpp -DDOUBLE_PREC
 
@@ -9,16 +10,19 @@ extern "C"
 #ifdef DOUBLE_PREC
   double* prng(int seed, int* ls, int* le, int* npts);
   void srng(double* x);
+  void normdist(double* x);
   void free_mem(double* p);
 #else
   float* prng(int seed, int* ls, int* le, int* npts);
   void srng(float* x);
+  void normdist(float* x);
   void free_mem(float* p);
 #endif
 void set_seed(int seed);
 }
 
-// declare object "r" as static because it gets initialised with seed number only once
+// declare object "r" as static because it gets initialised with seed number only once.
+// this object is used in "srng" and "normdist".
 static trng::yarn2 r;
 
 // -----------------------------------------------------------------------------
@@ -119,6 +123,24 @@ void srng(float* x)
 {
 
   trng::uniform01_dist<> u;
+
+  for (int i = 0; i < 2; i++){
+    x[i] = u(r);
+  }
+
+}
+
+// -----------------------------------------------------------------------------
+
+// thi subroutine returns two random numbers normally distributed around 0 with std.dev=1
+#ifdef DOUBLE_PREC
+void normdist(double* x)
+#else
+void normdist(float* x)
+#endif
+{
+  
+  trng::normal_dist<> u(1., 0.);
 
   for (int i = 0; i < 2; i++){
     x[i] = u(r);
