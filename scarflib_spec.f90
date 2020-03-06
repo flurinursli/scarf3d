@@ -36,7 +36,7 @@ MODULE SCARFLIB_SPEC
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! NUMBER OF HARMONICS IN SPECTRAL SUMMATION
-  INTEGER(IPP), PARAMETER :: NHARM = 5000*4 
+  INTEGER(IPP), PARAMETER :: NHARM = 5000*4 / 2
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -63,7 +63,7 @@ MODULE SCARFLIB_SPEC
     REAL(FPP),                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
     REAL(FPP),                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
     REAL(FPP),     DIMENSION(:),     INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
-    REAL(FPP),     DIMENSION(1),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
+    REAL(FPP),     DIMENSION(2),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
     INTEGER(IPP)                                 :: I, L
     INTEGER(IPP)                                 :: NPTS
     INTEGER(IPP)                                 :: IERR
@@ -82,6 +82,8 @@ MODULE SCARFLIB_SPEC
     CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
     CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
 
+    INFO = 0._FPP
+
     ! INITIALISE RANDOM NUMBERS GENERATOR
     !CALL SET_STREAM(SEED)
 
@@ -90,6 +92,9 @@ MODULE SCARFLIB_SPEC
 
     ! SET NYQUIST WAVENUMBER BASED ON MINIMUM GRID-STEP
     KMAX = PI / DH * SQRT(CL(1)**2 + CL(2)**2 + CL(3)**2)
+
+
+    IF (WORLD_RANK == 0) PRINT*, 'KMAX ', KMAX
 
     ! SET SCALING FACTOR
     SCALING = SIGMA / SQRT(REAL(NHARM, FPP))
@@ -105,6 +110,7 @@ MODULE SCARFLIB_SPEC
 
       IF (HURST .LT. 0.25_FPP) THEN
         UMAX = LOG(KMAX + 1._FPP)
+        !UMAX = KMAX
       ELSEIF ( (HURST .GE. 0.25_FPP) .AND. (HURST .LT. 0.5_FPP) ) THEN
         UMAX = 2._FPP * (1._FPP - 1._FPP / SQRT(KMAX + 1._FPP))
       ELSEIF (HURST .GE. 0.5_FPP) THEN
@@ -117,8 +123,7 @@ MODULE SCARFLIB_SPEC
 
     ENDIF
 
-    ! START TIMER
-    CALL WATCH_START(TICTOC)
+    UMAX = KMAX
 
     ! LOOP OVER HARMONICS
     ! OPENACC: "FIELD" IS COPIED IN&OUT, ALL THE OTHERS ARE ONLY COPIED IN. "ARG" IS CREATED LOCALLY ON THE ACCELERATOR
@@ -126,6 +131,8 @@ MODULE SCARFLIB_SPEC
     DO L = 1, NHARM
 
       IF ((MOD(L, 100) == 0) .AND. (WORLD_RANK == 0)) PRINT*, WORLD_RANK, L
+
+      CALL WATCH_START(TICTOC, MPI_COMM_SELF)
 
       DO
 
@@ -143,7 +150,7 @@ MODULE SCARFLIB_SPEC
         IF (ACF .EQ. 0) THEN
           D = K**2 / (1._FPP + K**2)**(1.5_FPP + HURST)
         ELSE
-          D = K**2 * EXP(-0.25_FPP * K**2)
+          D = K**2 * EXP(-0.25_FPP * K**2) / SQRT(PI)
         ENDIF
 
         ! DIVIDE ORIGINAL PDF BY MAJORANT PDF
@@ -175,6 +182,12 @@ MODULE SCARFLIB_SPEC
       CALL SRNG(R)
       B = BOX_MUELLER(R)
 
+      CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+
+      INFO(1) = INFO(1) + TICTOC
+
+      CALL WATCH_START(TICTOC, MPI_COMM_SELF)
+
       !$ACC WAIT
 
       ! UPDATE SELECTED VARIABLES IN GPU MEMORY
@@ -187,6 +200,10 @@ MODULE SCARFLIB_SPEC
         FIELD(I) = FIELD(I) + A * SIN(ARG) + B * COS(ARG)
       ENDDO
       !$ACC END KERNELS
+
+      CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+
+      INFO(2) = INFO(2) + TICTOC
 
     ENDDO
     ! END LOOP OVER HARMONICS
@@ -203,10 +220,6 @@ MODULE SCARFLIB_SPEC
 
     ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
     !$ACC END DATA
-
-    CALL WATCH_STOP(TICTOC)
-
-    INFO = TICTOC
 
     CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
@@ -244,21 +257,23 @@ MODULE SCARFLIB_SPEC
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    IF (ACF .EQ. 0) THEN
+    ! IF (ACF .EQ. 0) THEN
+    !
+    !   IF (HURST .LT. 0.25_FPP) THEN
+    !     PDF = 1.2_FPP / (1._FPP + K)
+    !   ELSEIF ( (HURST .GE. 0.25_FPP) .AND. (HURST .LT. 0.5_FPP) ) THEN
+    !     PDF = 1.3_FPP / (1._FPP + K)**1.5_FPP
+    !   ELSE
+    !     PDF = 1._FPP / (1._FPP + K**2)
+    !   ENDIF
+    !
+    ! ELSEIF (ACF .EQ. 1) THEN
+    !
+    !   PDF = 1.5_FPP * EXP(-0.25_FPP * (K - 2._FPP)**2)
+    !
+    ! ENDIF
 
-      IF (HURST .LT. 0.25_FPP) THEN
-        PDF = 1.2_FPP / (1._FPP + K)
-      ELSEIF ( (HURST .GE. 0.25_FPP) .AND. (HURST .LT. 0.5_FPP) ) THEN
-        PDF = 1.3_FPP / (1._FPP + K)**1.5_FPP
-      ELSE
-        PDF = 1._FPP / (1._FPP + K**2)
-      ENDIF
-
-    ELSEIF (ACF .EQ. 1) THEN
-
-      PDF = 1.5_FPP * EXP(-0.25_FPP * (K - 2._FPP)**2)
-
-    ENDIF
+    PDF = 1._FPP
 
   END FUNCTION PDF
 
@@ -278,22 +293,24 @@ MODULE SCARFLIB_SPEC
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    IF (ACF .EQ. 0) THEN
+    ! IF (ACF .EQ. 0) THEN
+    !
+    !   IF (HURST .LT. 0.25_FPP) THEN
+    !     CDF2K = EXP(U) - 1._FPP
+    !     !CDF2K = U
+    !   ELSEIF ( (HURST .GE. 0.25_FPP) .AND. (HURST .LT. 0.5_FPP) ) THEN
+    !     CDF2K = 1._FPP / (1._FPP - U / 2._FPP)**2 - 1._FPP
+    !   ELSE
+    !     CDF2K = TAN(U)
+    !   ENDIF
+    !
+    ! ELSEIF (ACF .EQ. 1) THEN
+    !
+    !   CDF2K = 2._FPP * (1._FPP + DERFI(ERF(-1._FPP) + U / SQRT(PI)))
+    !
+    ! ENDIF
 
-      IF (HURST .LT. 0.25_FPP) THEN
-        CDF2K = EXP(U) - 1._FPP
-      ELSEIF ( (HURST .GE. 0.25_FPP) .AND. (HURST .LT. 0.5_FPP) ) THEN
-        CDF2K = 1._FPP / (1._FPP - U / 2._FPP)**2 - 1._FPP
-      ELSE
-        CDF2K = TAN(U)
-      ENDIF
-
-    ELSEIF (ACF .EQ. 1) THEN
-
-      CDF2K = 2._FPP * (1._FPP + DERFI(ERF(-1._FPP) + U / SQRT(PI)))
-
-    ENDIF
-
+    CDF2K = U
 
   END FUNCTION CDF2K
 
@@ -301,85 +318,5 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  ! FUNCTION CUMSUM(X) RESULT(V)
-  !
-  !   REAL(FPP),   DIMENSION(:),      INTENT(IN) :: X                        !< INPUT SEQUENCE
-  !   REAL(FPP),   DIMENSION(SIZE(X))            :: V                        !< RESULT
-  !   INTEGER(IPP)                               :: I, N                     !< COUNTERS
-  !
-  !   !-------------------------------------------------------------------------------------------------------------------------------
-  !
-  !   N = SIZE(X)
-  !
-  !   V(1) = X(1)
-  !
-  !   DO I = 2, N
-  !     V(I) = V(I - 1) + X(I)
-  !   ENDDO
-  !
-  ! END FUNCTION CUMSUM
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
-  !=================================================================================================================================
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
-
-  ! FUNCTION VARIANCE(R) RESULT(V)
-  !
-  !   ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM
-  !
-  !   REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-  !   INTEGER(IPP)                              :: I, J, K
-  !   REAL(FPP)                                 :: MU, S1, S2, X, V
-  !
-  !   !-----------------------------------------------------------------------------------------------------------------------------
-  !
-  !   MU = MEAN(R)
-  !
-  !   S1 = 0._FPP
-  !   S2 = 0._FPP
-  !
-  !   DO K = 1, SIZE(R, 3)
-  !     DO J = 1, SIZE(R, 2)
-  !       DO I = 1, SIZE(R, 1)
-  !         X = R(I, J, K) - MU
-  !         S1 = S1 + X
-  !         S2 = S2 + X**2
-  !       ENDDO
-  !     ENDDO
-  !   ENDDO
-  !
-  !   S1 = (S1**2) / REAL(SIZE(R), FPP)
-  !
-  !   V = (S2 - S1) / REAL(SIZE(R) - 1, FPP)
-  !
-  ! END FUNCTION VARIANCE
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-  !===============================================================================================================================
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-  !
-  ! FUNCTION MEAN(R) RESULT(V)
-  !
-  !   REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-  !   INTEGER(IPP)                              :: I, J, K
-  !   REAL(FPP)                                 :: V, C
-  !
-  !   !-------------------------------------------------------------------------------------------------------------------------------
-  !
-  !   !V = COMPENSATED_SUM(R) / REAL(SIZE(R), FPP)
-  !
-  !   V = 0._FPP
-  !   C = 1._FPP
-  !
-  !   DO K = 1, SIZE(R, 3)
-  !     DO J = 1, SIZE(R, 2)
-  !       DO I = 1, SIZE(R, 1)
-  !         V = V + (R(I, J, K) - V) / C
-  !         C = C + 1._FPP
-  !       ENDDO
-  !     ENDDO
-  !   ENDDO
-  !
-  ! END FUNCTION MEAN
 
 END MODULE SCARFLIB_SPEC
