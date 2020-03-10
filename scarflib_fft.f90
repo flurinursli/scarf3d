@@ -1,4 +1,4 @@
-MODULE SCARFLIB_FFT3
+MODULE SCARFLIB_FFT
 
   ! ALL VARIABLES AND SUBMODULE PROCEDURES ARE GLOBAL WITHIN THE SUBMODULE, BUT LIMITED TO IT.
 
@@ -2933,4 +2933,4 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-END MODULE SCARFLIB_FFT3
+END MODULE SCARFLIB_FFT
