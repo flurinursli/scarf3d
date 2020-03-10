@@ -2905,7 +2905,7 @@ MODULE SCARFLIB_FFT3
 
           DO I = FS(1), FE(1)
 
-            DX = ((I - 1) * DH + OFF_AXIS(3) - POI(1))**2                             !< DISTANCE ALONG X FROM "POI"
+            DX = ((I - 1) * DH + OFF_AXIS(1) - POI(1))**2                             !< DISTANCE ALONG X FROM "POI"
 
             D = SQRT(DX + DY + DZ)                                                    !< TOTAL DISTANCE
 
