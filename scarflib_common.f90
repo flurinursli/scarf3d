@@ -20,6 +20,10 @@ MODULE SCARFLIB_COMMON
     MODULE PROCEDURE MEAN_1D, MEAN_3D
   END INTERFACE
 
+  INTERFACE TAPERING
+    MODULE PROCEDURE TAPERING_UNSTRUCTURED, TAPERING_STRUCTURED
+  END INTERFACE
+
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
   ! SET PRECISION
@@ -28,17 +32,17 @@ MODULE SCARFLIB_COMMON
   INTEGER, PARAMETER :: IPP = INT32
 
 #ifdef DOUBLE_PREC
-   INTEGER(IPP), PARAMETER :: FPP          = REAL64
-   INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
-   INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
-   INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
-   INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
+  INTEGER(IPP), PARAMETER :: FPP          = REAL64
+  INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
+  INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
+  INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
+  INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
 #else
-    INTEGER(IPP), PARAMETER :: FPP          = REAL32
-    INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
-    INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
-    INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
-    INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
+  INTEGER(IPP), PARAMETER :: FPP          = REAL32
+  INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
+  INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
+  INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
+  INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
 #endif
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
@@ -753,6 +757,109 @@ MODULE SCARFLIB_COMMON
       AVG = REAL(MU, FPP)
 
     END SUBROUTINE PARALLEL_VARIANCE
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE TAPERING_STRUCTURED (DH, FS, FE, FIELD, POI, MUTE, TAPER)
+
+      ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
+      ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
+
+      REAL(FPP),                                                      INTENT(IN)    :: DH
+      INTEGER(IPP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE                !< START/END INDICES ALONG EACH DIRECTION
+      REAL(FPP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: FIELD                !< RANDOM FIELD
+      REAL(FPP),    DIMENSION(3),                                     INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (TRASLATED)
+      REAL(FPP),                                                      INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
+      INTEGER(IPP)                                                                  :: I, J, K               !< COUNTERS
+      REAL(FPP)                                                                     :: D, DS                 !< VARIOUS DISTANCES
+      REAL(FPP)                                                                     :: DX, DY, DZ            !< NODE-POI DISTANCE
+      REAL(FPP)                                                                     :: T                     !< TAPER PARAMETER
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! TOTAL RADIUS OF TAPERED AND/OR MUTED VOLUME
+      DS = MUTE + TAPER
+
+      DO K = FS(3), FE(3)
+
+        DZ = ((K - 1) * DH - POI(3))**2                                                !< DISTANCE ALONG Z FROM "POI"
+
+        DO J = FS(2), FE(2)
+
+          DY = ((J - 1) * DH - POI(2))**2                                              !< DISTANCE ALONG Y FROM "POI"
+
+          DO I = FS(1), FE(1)
+
+            DX = ((I - 1) * DH - POI(1))**2                                            !< DISTANCE ALONG X FROM "POI"
+
+            D = SQRT(DX + DY + DZ)                                                     !< TOTAL DISTANCE
+
+            ! MUTE IF DISTANCE NODE-POI IS BELOW "MUTE"
+            IF (D .LE. MUTE) THEN
+
+              FIELD(I, J, K) = 0._FPP
+
+            ! TAPER IF DISTANCE NODE-POI IS BETWEEN "MUTE" AND "TAPER + MUTE"
+            ELSEIF ( (D .GT. MUTE) .AND. (D .LE. DS) ) THEN
+
+              T = (D - MUTE) / TAPER                                                   !< TAPER PARAMETER
+
+              FIELD(I, J, K) = FIELD(I, J, K) * (0.5_FPP - 0.5_FPP * COS(T * PI))
+
+            ENDIF
+
+          ENDDO
+        ENDDO
+      ENDDO
+
+    END SUBROUTINE TAPERING_STRUCTURED
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE TAPERING_UNSTRUCTURED(X, Y, Z, FIELD, POI, MUTE, TAPER)
+
+      ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
+      ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
+
+      REAL(FPP),    DIMENSION(:), INTENT(IN)    :: X, Y, Z
+      REAL(FPP),    DIMENSION(:), INTENT(INOUT) :: FIELD                 !< RANDOM FIELD
+      REAL(FPP),    DIMENSION(3), INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (NODES)
+      REAL(FPP),                  INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
+      INTEGER(IPP)                              :: I                     !< COUNTERS
+      REAL(FPP)                                 :: D, DS                 !< VARIOUS DISTANCES
+      REAL(FPP)                                 :: T                     !< TAPER PARAMETER
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! TOTAL RADIUS OF TAPERED AND/OR MUTED VOLUME
+      DS = MUTE + TAPER
+
+      DO I = 1, SIZE(FIELD)
+
+        ! DISTANCE BETWEEN GRID POINT AND "POI"
+        D = SQRT( (X(I) - POI(1))**2 + (Y(I) - POI(2))**2 + (Z(I) - POI(3))**2 )
+
+        ! MUTE IF DISTANCE NODE-POI IS BELOW "MUTE"
+        IF (D .LE. MUTE) THEN
+
+          FIELD(I) = 0._FPP
+
+        ! TAPER IF DISTANCE NODE-POI IS BETWEEN "MUTE" AND "MUTE + TAPER"
+        ELSEIF ( (D .GT. MUTE) .AND. (D .LE. DS) ) THEN
+
+          T = (D - MUTE) / TAPER                                             !< TAPER PARAMETER
+
+          FIELD(I) = FIELD(I) * (0.5_FPP - 0.5_FPP * COS(T * PI))
+
+        ENDIF
+
+      ENDDO
+
+    END SUBROUTINE TAPERING_UNSTRUCTURED
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

@@ -19,10 +19,6 @@ MODULE SCARFLIB_SPEC
     MODULE PROCEDURE SCARF3D_UNSTRUCTURED_SPEC, SCARF3D_STRUCTURED_SPEC
   END INTERFACE
 
-  INTERFACE TAPERING
-    MODULE PROCEDURE TAPERING_UNSTRUCTURED, TAPERING_STRUCTURED
-  END INTERFACE
-
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
   ! INTERFACE TO C++ FUNCTIONS/SUBROUTINES
@@ -498,118 +494,6 @@ MODULE SCARFLIB_SPEC
     CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
   END SUBROUTINE SCARF3D_STRUCTURED_SPEC
-
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-  !===============================================================================================================================
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-  SUBROUTINE TAPERING_STRUCTURED(DH, FS, FE, FIELD, POI, MUTE, TAPER)
-
-    ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
-    ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
-
-    REAL(FPP),                                                      INTENT(IN)    :: DH
-    INTEGER(IPP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE                !< START/END INDICES ALONG EACH DIRECTION
-    REAL(FPP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: FIELD                 !< RANDOM FIELD
-    REAL(FPP),    DIMENSION(3),                                     INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (NODES)
-    REAL(FPP),                                                      INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
-    INTEGER(IPP)                                                                  :: I, J, K               !< COUNTERS
-    REAL(FPP)                                                                     :: D, DS, DM, DT         !< VARIOUS DISTANCES
-    REAL(FPP)                                                                     :: DX, DY, DZ            !< NODE-POI DISTANCE
-    REAL(FPP)                                                                     :: T                     !< TAPER PARAMETER
-
-    !-----------------------------------------------------------------------------------------------------------------------------
-
-    ! TOTAL RADIUS OF VOLUME TAPERED/MUTED
-    DS = MUTE + TAPER
-
-    ! SQUARE RADII FOR TAPERING AND MUTING
-    DM = MUTE
-    DT = TAPER
-
-    DO K = FS(3), FE(3)
-
-      DZ = ((K - 1) * DH - POI(3))**2                                 !< DISTANCE ALONG Z FROM "POI"
-
-      DO J = FS(2), FE(2)
-
-        DY = ((J - 1) * DH - POI(2))**2                               !< DISTANCE ALONG Y FROM "POI"
-
-        DO I = FS(1), FE(1)
-
-          DX = ((I - 1) * DH - POI(1))**2                             !< DISTANCE ALONG X FROM "POI"
-
-          D = SQRT(DX + DY + DZ)                                                    !< TOTAL DISTANCE
-
-          ! MUTE IF DISTANCE NODE-POI IS BELOW "DM"
-          IF (D .LE. DM) THEN
-
-            FIELD(I, J, K) = 0._FPP
-
-          ! TAPER IF DISTANCE NODE-POI IS BETWEEN "DM" AND "DS"
-          ELSEIF ( (D .GT. DM) .AND. (D .LE. DS) ) THEN
-
-            T = (D - DM) / DT                                                       !< TAPER PARAMETER
-
-            FIELD(I, J, K) = FIELD(I, J, K) * (0.5_FPP - 0.5_FPP * COS(T * PI))
-
-          ENDIF
-
-        ENDDO
-      ENDDO
-    ENDDO
-
-  END SUBROUTINE TAPERING_STRUCTURED
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-  !===============================================================================================================================
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-  SUBROUTINE TAPERING_UNSTRUCTURED(X, Y, Z, FIELD, POI, MUTE, TAPER)
-
-    ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
-    ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
-
-    REAL(FPP),    DIMENSION(:), INTENT(IN)    :: X, Y, Z
-    REAL(FPP),    DIMENSION(:), INTENT(INOUT) :: FIELD                 !< RANDOM FIELD
-    REAL(FPP),    DIMENSION(3), INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (NODES)
-    REAL(FPP),                  INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
-    INTEGER(IPP)                              :: I                     !< COUNTERS
-    REAL(FPP)                                 :: D, DS, DM, DT         !< VARIOUS DISTANCES
-    REAL(FPP)                                 :: T                     !< TAPER PARAMETER
-
-    !-----------------------------------------------------------------------------------------------------------------------------
-
-    ! TOTAL RADIUS OF VOLUME TAPERED/MUTED
-    DS = MUTE + TAPER
-
-    ! SQUARE RADII FOR TAPERING AND MUTING
-    DM = MUTE
-    DT = TAPER
-
-    DO I = 1, SIZE(FIELD)
-
-      ! DISTANCE BETWEEN GRID POINT AND "POI"
-      D = SQRT( (X(I) - POI(1))**2 + (Y(I) - POI(2))**2 + (Z(I) - POI(3))**2 )
-
-      ! MUTE IF DISTANCE NODE-POI IS BELOW "DM"
-      IF (D .LE. DM) THEN
-
-        FIELD(I) = 0._FPP
-
-      ! TAPER IF DISTANCE NODE-POI IS BETWEEN "DM" AND "DS"
-      ELSEIF ( (D .GT. DM) .AND. (D .LE. DS) ) THEN
-
-        T = (D - DM) / DT                                                       !< TAPER PARAMETER
-
-        FIELD(I) = FIELD(I) * (0.5_FPP - 0.5_FPP * COS(T * PI))
-
-      ENDIF
-
-    ENDDO
-
-  END SUBROUTINE TAPERING_UNSTRUCTURED
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================
