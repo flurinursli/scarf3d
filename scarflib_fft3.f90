@@ -306,7 +306,7 @@ MODULE SCARFLIB_FFT3
         DO K = 1, M(3)
           DO J = 1, M(2)
             DO I = 1, M(1)
-              BUFFER(I, J, K) = BUFFER(I, J, K) * SCALING
+              BUFFER(I, J, K) = BUFFER(I, J, K) * SCALING - INFO(4)
             ENDDO
           ENDDO
         ENDDO
@@ -354,9 +354,6 @@ MODULE SCARFLIB_FFT3
       DEALLOCATE(POINTS_RANK2WORLD, POINTS_WORLD2RANK)
 
       CALL MPI_COMM_FREE(CARTOPO, IERR)
-
-      !CALL IO_WRITE_ONE(REAL(SPEC, FPP), 'random_struct.bin')
-      !CALL IO_WRITE_SLICE(1, 50, REAL(SPEC, FPP), 'random_struct_slice.bin')
 
       CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
@@ -581,7 +578,7 @@ MODULE SCARFLIB_FFT3
         DO K = 1, M(3)
           DO J = 1, M(2)
             DO I = 1, M(1)
-              BUFFER(I, J, K) = BUFFER(I, J, K) * SCALING
+              BUFFER(I, J, K) = BUFFER(I, J, K) * SCALING - INFO(4)
             ENDDO
           ENDDO
         ENDDO
@@ -2025,353 +2022,6 @@ MODULE SCARFLIB_FFT3
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! SUBROUTINE ENFORCE_SYMMETRY(FS, FE, SPEC)
-    !
-    !   ! MAKE SURE THE COMPLEX SPECTRUM HAS HERMITIAN SYMMETRY. SYMMETRY CONDITIONS ARE ENFORCED AT "I=1" AND "I=NYQUIST" ON THE YZ-PLANE;
-    !   ! SYMMETRY ALONG X-DIRECTION IS IMPLICIT AS WE MAKE USE OF A COMPLEX-TO-REAL IFFT. THE ALGORITHM RUNS OVER EACH PROCESS CUT BY
-    !   ! THE YZ-PLANE(S) STEP BY STEP, IN ORDER TO REQUIRE AS LESS MEMORY AS POSSIBLE (THIS RESULTS IN A PERFORMANCE PERNALTY SINCE MORE
-    !   ! COMMUNICATIONS ARE NEEDED). SEE FIGURE 4 AND 5 OF PARDO-IGUZQUIZA AND CHICA-OLMO FOR A BETTER UNDERSTANDING OF THE SYMMETRY
-    !   ! CONDITIONS.
-    !
-    !   INTEGER(IPP),              DIMENSION(3),                                   INTENT(IN)    :: FS, FE                       !< LOCAL INDICES
-    !   COMPLEX(FPP),              DIMENSION(FS(1):FE(1),FS(2):FE(2),FS(3):FE(3)), INTENT(INOUT) :: SPEC                         !< SPECTRUM
-    !   COMPLEX(FPP), ALLOCATABLE, DIMENSION(:)                                                  :: BUFFER                       !< BUFFER FOR MESSAGING
-    !   INTEGER(IPP)                                                                             :: C, I, J, K, P                !< COUNTERS
-    !   INTEGER(IPP)                                                                             :: I0, J0, J1, K0, K1           !< VARIOUS INDICES
-    !   INTEGER(IPP)                                                                             :: NTASKS, RANK, COLOR, SLICE   !< MPI STUFF
-    !   INTEGER(IPP)                                                                             :: COMM, IERR, KEY              !< MPI STUFF
-    !   INTEGER(IPP),              DIMENSION(3)                                                  :: NYQUIST                      !< INDEX NYQUIST WAVENUMBER
-    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                                                  :: SLICE2GLOBAL, JMAP, KMAP     !< ARRAYS FOR MESSAGING
-    !   LOGICAL                                                                                  :: BOOL
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   ! INDEX OF NYQUIST WAVENUMBER
-    !   DO I = 1, 3
-    !     NYQUIST(I) = NPTS(I) / 2 + 1
-    !   ENDDO
-    !
-    !   ! CONSIDER ONLY I-INDEX = 1 AND I-INDEX = NYQUIST(1)
-    !   DO I = 1, NYQUIST(1), NYQUIST(1) - 1
-    !
-    !     ! "TRUE" IF PROCESS CONTAINS POINT "ALPHA"
-    !     BOOL = (FS(1) .EQ. 1) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .EQ. 1)
-    !
-    !     IF (BOOL) SPEC(1, 1, 1) = 0._FPP                                                         !< ALPHA MUST BE ZERO (ZERO-MEAN FIELD)
-    !
-    !     ! "TRUE" IF PROCESS CONTAINS POINT "ALPHA"
-    !     BOOL = (FS(1) .LE. I) .AND. (FE(1) .GE. I) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .EQ. 1)
-    !
-    !     IF (BOOL) SPEC(I, 1, 1) = REAL(SPEC(I, 1, 1), FPP)                                       !< ALPHA MUST BE REAL
-    !
-    !     ! "TRUE" IF PROCESS CONTAINS POINT "PSI"
-    !     BOOL = (FS(1) .LE. I) .AND. (FE(1) .GE. I) .AND. (FS(2) .LE. NYQUIST(2)) .AND. (FE(2) .GE. NYQUIST(2)) .AND.      &
-    !            (FS(3) .LE. NYQUIST(3)) .AND. (FE(3) .GE. NYQUIST(3))
-    !
-    !     IF (BOOL) SPEC(I, NYQUIST(2), NYQUIST(3)) = REAL(SPEC(I, NYQUIST(2), NYQUIST(3)), FPP)   !< PSI MUST BE REAL
-    !
-    !     ! "TRUE" IF PROCESS CONTAINS POINT "XSI"
-    !     BOOL = (FS(1) .LE. I) .AND. (FE(1) .GE. I) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .LE. NYQUIST(3)) .AND. (FE(3) .GE. NYQUIST(3))
-    !
-    !     IF (BOOL) SPEC(I, 1, NYQUIST(3)) = REAL(SPEC(I, 1, NYQUIST(3)), FPP)                     !< XSI MUST BE REAL
-    !
-    !     ! "TRUE" IF PROCESS CONTAINS POINT "ETA"
-    !     BOOL = (FS(1) .LE. I) .AND. (FE(1) .GE. I) .AND. (FS(2) .LE. NYQUIST(2)) .AND. (FE(2) .GE. NYQUIST(2)) .AND. (FS(3) .EQ. 1)
-    !
-    !     IF (BOOL) SPEC(I, NYQUIST(2), 1) = REAL(SPEC(I, NYQUIST(2), 1), FPP)                     !< ETA MUST BE REAL
-    !
-    !     ! "TRUE" ONLY FOR THOSE PROCESSES CONTAINING "I=1" OR "I=NYQUIST"
-    !     BOOL = (FS(1) .LE. I) .AND. (FE(1) .GE. I)
-    !
-    !     COLOR = 0
-    !
-    !     IF (BOOL) COLOR = I
-    !
-    !     ! FIRST SPLIT OF ORIGINAL COMMUNICATOR
-    !     CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, SLICE, IERR)
-    !
-    !     ! GLOBAL TO LOCAL MAPPING FOR I-INDEX
-    !     I0 = I - FS(1) + 1
-    !
-    !     ! ONLY PROCESSES BELONGING TO THE (YZ-)SLICE (I.E. WITH "COLOR=I") ENTER THIS IF STATEMENT
-    !     IF (COLOR .EQ. I) THEN
-    !
-    !       ! NUMBER OF PROCESSES IN THE NEW COMMUNICATOR
-    !       CALL MPI_COMM_SIZE(SLICE, NTASKS, IERR)
-    !
-    !       CALL MPI_COMM_RANK(SLICE, RANK, IERR)
-    !
-    !       ALLOCATE(SLICE2GLOBAL(0:NTASKS-1))
-    !
-    !       ! SLICE-RANK TO GLOBAL-RANK MAPPING
-    !       SLICE2GLOBAL(RANK) = WORLD_RANK
-    !
-    !       ! UPDATE GLOBAL-RANK MAPPING FOR ALL PROCESSES
-    !       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_INTEGER, SLICE2GLOBAL, 1, MPI_INTEGER, SLICE, IERR)
-    !
-    !       ! LOOP OVER EACH PROCESS IN THE "SLICE" COMMUNICATOR: THOSE PROCESSES WHOSE DATA ARE NEEDED FOR COMPLEX CONJUGATION IN PROCESS
-    !       ! "P" WILL BE PART OF A NEW COMMUNICATOR
-    !       DO P = 0, NTASKS - 1
-    !
-    !         ! ENTER STATEMENT IF PROCESS "P" HAS POINTS IN THE EPSILON*/THETA*/PHI* REGION
-    !         IF ( (GE(2, SLICE2GLOBAL(P)) .GE. NYQUIST(2)) .AND. (GE(3, SLICE2GLOBAL(P)) .GE. NYQUIST(3)) ) THEN
-    !
-    !           ! CORRESPONDING MIN/MAX INDICES IN THE EPSILON/THETA/PHI REGION
-    !           J0 = NPTS(2) - GE(2, SLICE2GLOBAL(P)) + 2
-    !           J1 = NPTS(2) - MAX(GS(2, SLICE2GLOBAL(P)), NYQUIST(2)) + 2
-    !
-    !           K0 = NPTS(3) - GE(3, SLICE2GLOBAL(P)) + 2
-    !           K1 = NPTS(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3)) + 2
-    !
-    !           ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
-    !           BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
-    !                   ( (FS(2) .GE. J0) .AND. (FE(2) .LE. J1) ))                                               .AND.     &
-    !                  (( (FS(3) .LE. K0) .AND. (K0 .LE. FE(3)) ) .OR. ( (FS(3) .LE. K1) .AND. (K1 .LE. FE(3)) ) .OR.      &
-    !                   ( (FS(3) .GE. K0) .AND. (FE(3) .LE. K1) ))
-    !
-    !           COLOR = 0
-    !
-    !           ! CALLING PROCESS IS PART OF NEW COMMUNICATOR
-    !           IF (BOOL) THEN
-    !             COLOR = 1
-    !             KEY   = RANK
-    !           ENDIF
-    !
-    !           ! ADD PROCESS "P" TO COMMUNICATOR AS IT WILL COLLECT DATA
-    !           IF (P .EQ. RANK) THEN
-    !             COLOR = 1
-    !             KEY   = -1                                                  !< MAKE SURE IT GETS LOWEST (0) RANK VALUE
-    !           ENDIF
-    !
-    !           ! SPLIT "SLICE" COMMUNICATOR
-    !           CALL MPI_COMM_SPLIT(SLICE, COLOR, KEY, COMM, IERR)
-    !
-    !           ! ONLY PROCESSES IN THE NEW COMMUNICATOR EXECUTE STATEMENTS BELOW
-    !           IF (COLOR .EQ. 1) THEN
-    !
-    !             ! GATHER DATA FROM PROCESSES
-    !             CALL GATHER_DATA(COMM, I0, SPEC, JMAP, KMAP, BUFFER)
-    !
-    !             DO C = 1, SIZE(BUFFER)
-    !
-    !               ! "TRUE" IF CURRENT POINT IS INSIDE THE EPSILON/THETA/PHI REGION
-    !               BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
-    !
-    !               ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-    !               J = NPTS(2) - JMAP(C) + 2
-    !               K = NPTS(3) - KMAP(C) + 2
-    !
-    !               ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
-    !               IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
-    !
-    !             ENDDO
-    !
-    !           ENDIF
-    !
-    !           CALL MPI_COMM_FREE(COMM, IERR)
-    !
-    !         ENDIF
-    !         ! END EPSILON*/THETA*/PHI* REGION
-    !
-    !         ! ENTER STATEMENT IF PROCESS "P" HAS POINTS IN THE GAMMA* REGION
-    !         IF ( (GS(2, SLICE2GLOBAL(P)) .LT. NYQUIST(2)) .AND. (GE(3, SLICE2GLOBAL(P)) .GT. NYQUIST(3)) ) THEN
-    !
-    !           ! CORRESPONDING MIN/MAX INDICES IN THE GAMMA REGION
-    !           J0 = NPTS(2) - MIN(GE(2, SLICE2GLOBAL(P)), NYQUIST(2) - 1) + 2
-    !           J1 = NPTS(2) - GS(2, SLICE2GLOBAL(P)) + 2
-    !
-    !           K0 = NPTS(3) - GE(3, SLICE2GLOBAL(P)) + 2
-    !           K1 = NPTS(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3) + 1) + 2
-    !
-    !           ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
-    !           BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
-    !                   ( (FS(2) .GE. J0) .AND. (FE(2) .LE. J1) ))                                               .AND.     &
-    !                  (( (FS(3) .LE. K0) .AND. (K0 .LE. FE(3)) ) .OR. ( (FS(3) .LE. K1) .AND. (K1 .LE. FE(3)) ) .OR.      &
-    !                   ( (FS(3) .GE. K0) .AND. (FE(3) .LE. K1) ))
-    !
-    !           COLOR = 0
-    !
-    !           ! CALLING PROCESS IS PART OF NEW COMMUNICATOR
-    !           IF (BOOL) THEN
-    !             COLOR = 1
-    !             KEY   = RANK
-    !           ENDIF
-    !
-    !           ! ADD PROCESS "P" TO COMMUNICATOR AS IT WILL COLLECT DATA
-    !           IF (P .EQ. RANK) THEN
-    !             COLOR = 1
-    !             KEY   = -1                                                  !< MAKE SURE IT GETS LOWEST (0) RANK VALUE
-    !           ENDIF
-    !
-    !           ! SPLIT "SLICE" COMMUNICATOR
-    !           CALL MPI_COMM_SPLIT(SLICE, COLOR, KEY, COMM, IERR)
-    !
-    !           ! ONLY PROCESSES IN THE NEW COMMUNICATOR EXECUTE STATEMENTS BELOW
-    !           IF (COLOR .EQ. 1) THEN
-    !
-    !             ! GATHER DATA FROM PROCESSES
-    !             CALL GATHER_DATA(COMM, I0, SPEC, JMAP, KMAP, BUFFER)
-    !
-    !             DO C = 1, SIZE(BUFFER)
-    !
-    !               ! "TRUE" IF CURRENT POINT IS INSIDE THE GAMMA REGION
-    !               BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
-    !
-    !               ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-    !               J = NPTS(2) - JMAP(C) + 2
-    !               K = NPTS(3) - KMAP(C) + 2
-    !
-    !               ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
-    !               IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
-    !
-    !             ENDDO
-    !
-    !           ENDIF
-    !
-    !           CALL MPI_COMM_FREE(COMM, IERR)
-    !
-    !         ENDIF
-    !         ! END GAMMA* REGION
-    !
-    !         ! ENTER STATEMENT IF PROCESS "P" HAS POINTS IN THE BETA* REGION
-    !         IF ( (GE(2, SLICE2GLOBAL(P)) .GT. NYQUIST(2)) .AND. (GS(3, SLICE2GLOBAL(P)) .EQ. 1) ) THEN
-    !
-    !           ! CORRESPONDING MIN/MAX INDICES IN THE BETA REGION
-    !           J0 = NPTS(2) - GE(2, SLICE2GLOBAL(P)) + 2
-    !           J1 = NPTS(2) - MAX(GS(2, SLICE2GLOBAL(P)), NYQUIST(2) + 1) + 2
-    !
-    !           K0 = 1
-    !           K1 = 1
-    !
-    !           ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
-    !           BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
-    !                   ( (FS(2) .GE. J0) .AND. (FE(2) .LE. J1) ))                                               .AND.     &
-    !                  (( (FS(3) .LE. K0) .AND. (K0 .LE. FE(3)) ) .OR. ( (FS(3) .LE. K1) .AND. (K1 .LE. FE(3)) ) .OR.      &
-    !                   ( (FS(3) .GE. K0) .AND. (FE(3) .LE. K1) ))
-    !
-    !           COLOR = 0
-    !
-    !           ! CALLING PROCESS IS PART OF NEW COMMUNICATOR
-    !           IF (BOOL) THEN
-    !             COLOR = 1
-    !             KEY   = RANK
-    !           ENDIF
-    !
-    !           ! ADD PROCESS "P" TO COMMUNICATOR AS IT WILL COLLECT DATA
-    !           IF (P .EQ. RANK) THEN
-    !             COLOR = 1
-    !             KEY   = -1                                                  !< MAKE SURE IT GETS LOWEST (0) RANK VALUE
-    !           ENDIF
-    !
-    !           ! SPLIT "SLICE" COMMUNICATOR
-    !           CALL MPI_COMM_SPLIT(SLICE, COLOR, KEY, COMM, IERR)
-    !
-    !           ! ONLY PROCESSES IN THE NEW COMMUNICATOR EXECUTE STATEMENTS BELOW
-    !           IF (COLOR .EQ. 1) THEN
-    !
-    !             ! GATHER DATA FROM PROCESSES
-    !             CALL GATHER_DATA(COMM, I0, SPEC, JMAP, KMAP, BUFFER)
-    !
-    !             DO C = 1, SIZE(BUFFER)
-    !
-    !               ! "TRUE" IF CURRENT POINT IS INSIDE THE BETA REGION
-    !               BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
-    !
-    !               ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-    !               J = NPTS(2) - JMAP(C) + 2
-    !               K = 1
-    !
-    !               ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
-    !               IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
-    !
-    !             ENDDO
-    !
-    !           ENDIF
-    !
-    !           CALL MPI_COMM_FREE(COMM, IERR)
-    !
-    !         ENDIF
-    !         ! END BETA* REGION
-    !
-    !         ! ENTER STATEMENT IF PROCESS "P" HAS POINTS IN THE DELTA* REGION
-    !         IF ( (GS(2, SLICE2GLOBAL(P)) .EQ. 1) .AND. (GE(3, SLICE2GLOBAL(P)) .GT. NYQUIST(3)) ) THEN
-    !
-    !           ! CORRESPONDING MIN/MAX INDICES IN THE DELTA REGION
-    !           J0 = 1
-    !           J1 = 1
-    !
-    !           K0 = NPTS(3) - GE(3, SLICE2GLOBAL(P)) + 2
-    !           K1 = NPTS(3) - MAX(GS(3, SLICE2GLOBAL(P)), NYQUIST(3) + 1) + 2
-    !
-    !           ! "TRUE" IF CALLING PROCESS HAS DATA NEEDED BY PROCESS "P"
-    !           BOOL = (( (FS(2) .LE. J0) .AND. (J0 .LE. FE(2)) ) .OR. ( (FS(2) .LE. J1) .AND. (J1 .LE. FE(2)) ) .OR.      &
-    !                   ( (FS(2) .GE. J0) .AND. (FE(2) .LE. J1) ))                                               .AND.     &
-    !                  (( (FS(3) .LE. K0) .AND. (K0 .LE. FE(3)) ) .OR. ( (FS(3) .LE. K1) .AND. (K1 .LE. FE(3)) ) .OR.      &
-    !                   ( (FS(3) .GE. K0) .AND. (FE(3) .LE. K1) ))
-    !
-    !           COLOR = 0
-    !
-    !           ! CALLING PROCESS IS PART OF NEW COMMUNICATOR
-    !           IF (BOOL) THEN
-    !             COLOR = 1
-    !             KEY   = RANK
-    !           ENDIF
-    !
-    !           ! ADD PROCESS "P" TO COMMUNICATOR AS IT WILL COLLECT DATA
-    !           IF (P .EQ. RANK) THEN
-    !             COLOR = 1
-    !             KEY   = -1                                                  !< MAKE SURE IT GETS LOWEST (0) RANK VALUE
-    !           ENDIF
-    !
-    !           ! SPLIT "SLICE" COMMUNICATOR
-    !           CALL MPI_COMM_SPLIT(SLICE, COLOR, KEY, COMM, IERR)
-    !
-    !           ! ONLY PROCESSES IN THE NEW COMMUNICATOR EXECUTE STATEMENTS BELOW
-    !           IF (COLOR .EQ. 1) THEN
-    !
-    !             ! GATHER DATA FROM PROCESSES
-    !             CALL GATHER_DATA(COMM, I0, SPEC, JMAP, KMAP, BUFFER)
-    !
-    !             DO C = 1, SIZE(BUFFER)
-    !
-    !               ! "TRUE" IF CURRENT POINT IS INSIDE THE BETA REGION
-    !               BOOL = (JMAP(C) .GE. J0) .AND. (JMAP(C) .LE. J1) .AND. (KMAP(C) .GE. K0) .AND. (KMAP(C) .LE. K1)
-    !
-    !               ! INDICES WHERE COMPLEX-CONJUGATED VALUES MUST BE PLACED
-    !               J = 1
-    !               K = NPTS(3) - KMAP(C) + 2
-    !
-    !               ! UPDATE SPECTRUM (ONLY ROOT PROCESS IN COMMUNICATOR "COMM")
-    !               IF (BOOL .AND. (KEY .EQ. -1)) SPEC(I, J, K) = CONJG(BUFFER(C))
-    !
-    !             ENDDO
-    !
-    !           ENDIF
-    !
-    !           CALL MPI_COMM_FREE(COMM, IERR)
-    !
-    !         ENDIF
-    !         ! END BETA* REGION
-    !
-    !
-    !       ENDDO
-    !       ! END LOOP OVER PROCESSES IN "SLICE" COMMUNICATOR
-    !
-    !       DEALLOCATE(SLICE2GLOBAL)
-    !
-    !     ENDIF
-    !     ! END IF FOR COLOR = 1
-    !
-    !     CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-    !
-    !     CALL MPI_COMM_FREE(SLICE, IERR)
-    !
-    !
-    !   ENDDO
-    !   ! END LOOP OVER INDEX "I"
-    !
-    ! END SUBROUTINE ENFORCE_SYMMETRY
-
     SUBROUTINE ENFORCE_SYMMETRY(FS, FE, SPEC)
 
       INTEGER(IPP),              DIMENSION(3),                                   INTENT(IN)    :: FS, FE
@@ -2449,21 +2099,17 @@ MODULE SCARFLIB_FFT3
 
         SUBROUTINE EXCHANGE_CONJG
 
-          COMPLEX(FPP), DIMENSION(FS(2):FE(2),FS(3):FE(3))         :: BUFFER, SENDBUF
-          INTEGER(IPP)                                             :: J, K, P, L, C, CY, CZ
-          INTEGER(IPP)                                             :: JS, JE, KS, KE
-          INTEGER(IPP)                                             :: J0, J1, K0, K1
-          INTEGER(IPP)                                             :: IERR
-          INTEGER(IPP), DIMENSION(2)                               :: RSIZES, RSUBSIZES, RSTARTS
-          INTEGER(IPP), DIMENSION(3)                               :: SSIZES, SSUBSIZES, SSTARTS
-          INTEGER(IPP), DIMENSION(0:NTASKS-1)                      :: SENDCOUNTS, RECVCOUNTS
-          INTEGER(IPP), DIMENSION(0:NTASKS-1)                      :: SDISPLS, RDISPLS
-          INTEGER(IPP), DIMENSION(0:NTASKS-1)                      :: SENDTYPES, RECVTYPES
-          LOGICAL                                                  :: BOOL
-
-          !COMPLEX(FPP), DIMENSION(SIZE(BUFFER, 1),SIZE(BUFFER,2))  :: SENDBUF
-
-          COMPLEX(FPP), DIMENSION(NPTS(2), NPTS(3)) :: MATRIX
+          COMPLEX(FPP), DIMENSION(FS(2):FE(2),FS(3):FE(3)) :: BUFFER, SENDBUF
+          INTEGER(IPP)                                     :: J, K, P, L, C, CY, CZ
+          INTEGER(IPP)                                     :: JS, JE, KS, KE
+          INTEGER(IPP)                                     :: J0, J1, K0, K1
+          INTEGER(IPP)                                     :: IERR
+          INTEGER(IPP), DIMENSION(2)                       :: RSIZES, RSUBSIZES, RSTARTS
+          INTEGER(IPP), DIMENSION(3)                       :: SSIZES, SSUBSIZES, SSTARTS
+          INTEGER(IPP), DIMENSION(0:NTASKS-1)              :: SENDCOUNTS, RECVCOUNTS
+          INTEGER(IPP), DIMENSION(0:NTASKS-1)              :: SDISPLS, RDISPLS
+          INTEGER(IPP), DIMENSION(0:NTASKS-1)              :: SENDTYPES, RECVTYPES
+          LOGICAL                                          :: BOOL
 
           !-------------------------------------------------------------------------------------------------------------------------
 
@@ -2598,8 +2244,6 @@ MODULE SCARFLIB_FFT3
               K0 = MAX(FS(3), KS)
               K1 = MIN(FE(3), KE)
 
-              !PRINT*, I, WORLD_RANK, L, ' INDEX A ', JS, JE, KS, KE, ' -- ', FS(2), FE(2), FS(3), FE(3), ' -- ', J0, J1, K0, K1
-
               ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
               IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
 
@@ -2642,8 +2286,6 @@ MODULE SCARFLIB_FFT3
 
               K0 = MAX(FS(3), KS)
               K1 = MIN(FE(3), KE)
-
-              !PRINT*, I, WORLD_RANK, L, ' INDEX B ', JS, JE, KS, KE, ' -- ', FS(2), FE(2), FS(3), FE(3), ' -- ', J0, J1, K0, K1
 
               ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
               IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
@@ -2693,7 +2335,6 @@ MODULE SCARFLIB_FFT3
           ! DELTA*, GAMMA*, PHI*, EPSILON*
           DO K = MAX(NYQUIST(3) + 1, FS(3)), FE(3)
             DO J = FS(2), FE(2)
-              ! BUFFER(J, K) = CONJG(BUFFER(J, K))
               SPEC(I, J, K) = CONJG(BUFFER(J, K))
             ENDDO
           ENDDO
@@ -2701,7 +2342,6 @@ MODULE SCARFLIB_FFT3
           ! BETA*
           DO K = MAX(1, FS(3)), 1
             DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
-              !BUFFER(J, K) = CONJG(BUFFER(J, K))
               SPEC(I, J, K) = CONJG(BUFFER(J, K))
             ENDDO
           ENDDO
@@ -2709,74 +2349,9 @@ MODULE SCARFLIB_FFT3
           ! THETA*
           DO K = MAX(NYQUIST(3), FS(3)), MIN(NYQUIST(3), FE(3))
             DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
-              !BUFFER(J, K) = CONJG(BUFFER(J, K))
               SPEC(I, J, K) = CONJG(BUFFER(J, K))
             ENDDO
           ENDDO
-
-          ! COMMENT OUT THESE TWO BLOCKS BELOW
-          ! ALPHA, BETA, XSI, DELTA, EPSILON, PHI, ETA, THETA, PSI
-          ! DO K = FS(3), MIN(FE(3), NYQUIST(3))
-          !   DO J = FS(2), MIN(FE(2), NYQUIST(2))
-          !     BUFFER(J, K) = SPEC(I, J, K)
-          !   ENDDO
-          ! ENDDO
-          !
-          ! ! GAMMA
-          ! DO K = MAX(2, FS(3)), MIN(FE(3), NYQUIST(3) - 1)
-          !   DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
-          !     BUFFER(J, K) = SPEC(I, J, K)
-          !   ENDDO
-          ! ENDDO
-
-
-          ! DO P = 0, NTASKS - 1
-          !
-          !   L = NEW2WORLD(P)
-          !
-          !   RSIZES    = [NPTS(2), NPTS(3)]
-          !   RSUBSIZES = [GE(2,L) - GS(2,L), GE(3,L) - GS(3,L)] + 1
-          !   RSTARTS   = [GS(2,L), GS(3, L)] - 1
-          !
-          !   SENDCOUNTS(P) = (GE(2,L) - GS(2,L) + 1) * (GE(3,L) - GS(3,L) + 1)
-          !
-          !   RECVCOUNTS(P) = 1
-          !
-          !   CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
-          !   CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
-          !
-          !   SENDTYPES(P) = COMPLEX_TYPE
-          !
-          ! ENDDO
-          !
-          ! CALL MPI_ALLTOALLW(SPEC(I,:,:), SENDCOUNTS, SDISPLS, SENDTYPES, MATRIX, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
-          !
-          ! CALL SLEEP(1)
-          !
-          ! IF (WORLD_RANK == 0) THEN
-          !   DO P = 1, NPTS(3)
-          !     PRINT*, CMPLX(REAL(MATRIX(:, P)), AIMAG(MATRIX(:, P)), KIND=REAL32)
-          !   ENDDO
-          !   PRINT*, '*****************'
-          ! ENDIF
-          !
-          ! MATRIX = 0.
-          !
-          ! CALL MPI_ALLTOALLW(BUFFER, SENDCOUNTS, SDISPLS, SENDTYPES, MATRIX, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
-          !
-          ! CALL SLEEP(1)
-          !
-          ! IF (WORLD_RANK == 0) THEN
-          !   DO P = 1, NPTS(3)
-          !     PRINT*, CMPLX(REAL(MATRIX(:, P)), AIMAG(MATRIX(:, P)), KIND=REAL32)
-          !   ENDDO
-          ! ENDIF
-          !
-          ! CALL MPI_BARRIER(NEWCOMM, IERR)
-          !
-          ! STOP
-
-
 
         END SUBROUTINE EXCHANGE_CONJG
 

@@ -8,11 +8,17 @@ MODULE SCARFLIB_COMMON
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-  !PRIVATE
-
-  !PUBLIC :: SCARF3D_FFT, SCARF3D_SPEC
-
   PUBLIC
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  INTERFACE VARIANCE
+    MODULE PROCEDURE VARIANCE_1D, VARIANCE_3D
+  END INTERFACE
+
+  INTERFACE MEAN
+    MODULE PROCEDURE MEAN_1D, MEAN_3D
+  END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
@@ -555,7 +561,44 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION VARIANCE(R)
+    REAL(FPP) FUNCTION VARIANCE_1D(R)
+
+      ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM. CALCULATIONS ARE ALWAYS IN DOUBLE
+      ! PRECISION.
+
+      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
+      INTEGER(IPP)                          :: I
+      INTEGER(IPP)                          :: N
+      REAL(REAL64)                          :: MU, S1, S2, X, V
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      N = SIZE(R)
+
+      MU = MEAN(R)
+
+      S1 = 0._REAL64
+      S2 = 0._REAL64
+
+      DO I = 1, N
+        X = REAL(R(I), REAL64) - MU
+        S1 = S1 + X
+        S2 = S2 + X**2
+      ENDDO
+
+      S1 = (S1**2) / REAL(N, REAL64)
+
+      V = (S2 - S1) / REAL(N - 1, REAL64)
+
+      VARIANCE_1D = REAL(V, FPP)
+
+    END FUNCTION VARIANCE_1D
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    REAL(FPP) FUNCTION VARIANCE_3D(R)
 
       ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM. CALCULATIONS ARE ALWAYS IN DOUBLE
       ! PRECISION.
@@ -590,15 +633,45 @@ MODULE SCARFLIB_COMMON
 
       V = (S2 - S1) / REAL(SIZE(R) - 1, REAL64)
 
-      VARIANCE = REAL(V, FPP)
+      VARIANCE_3D = REAL(V, FPP)
 
-    END FUNCTION VARIANCE
+    END FUNCTION VARIANCE_3D
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION MEAN(R)
+    REAL(FPP) FUNCTION MEAN_1D(R)
+
+      ! COMPUTE MEAN OF DATASET "R" AVOIDING FLOATING POINT INACCURACIES. CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
+
+      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
+      INTEGER(IPP)                          :: I
+      INTEGER(IPP)                          :: N
+      REAL(REAL64)                          :: V, C
+
+      !-------------------------------------------------------------------------------------------------------------------------------
+
+      N = SIZE(R)
+
+      V = 0._REAL64
+      C = 1._REAL64
+
+      DO I = 1, N
+        V = V + (REAL(R(I), REAL64) - V) / C
+        C = C + 1._REAL64
+      ENDDO
+
+      ! RETURN MEAN AT DESIRED PRECISION
+      MEAN_1D = REAL(V, FPP)
+
+    END FUNCTION MEAN_1D
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    REAL(FPP) FUNCTION MEAN_3D(R)
 
       ! COMPUTE MEAN OF DATASET "R" AVOIDING FLOATING POINT INACCURACIES. CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
 
@@ -626,9 +699,9 @@ MODULE SCARFLIB_COMMON
       ENDDO
 
       ! RETURN MEAN AT DESIRED PRECISION
-      MEAN = REAL(V, FPP)
+      MEAN_3D = REAL(V, FPP)
 
-    END FUNCTION MEAN
+    END FUNCTION MEAN_3D
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
