@@ -1,7 +1,4 @@
 MODULE SCARFLIB_SPEC
-  ! ALL VARIABLES AND SUBMODULE PROCEDURES ARE GLOBAL WITHIN THE SUBMODULE, BUT LIMITED TO IT.
-
-!    USE, INTRINSIC     :: OMP_LIB
 
   USE, NON_INTRINSIC :: SCARFLIB_COMMON
 
@@ -59,7 +56,7 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, FIELD, STATS)
+  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
 
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
@@ -74,7 +71,6 @@ MODULE SCARFLIB_SPEC
     REAL(FPP),                   DIMENSION(:,:), INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
     REAL(FPP),                                   INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
     REAL(FPP),                                   INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    INTEGER(IPP),                                INTENT(IN)  :: RESCALE              !< FLAG FOR RESCALING RANDOM FIELD TO DESIRED SIGMA
     REAL(FPP),                   DIMENSION(:),   INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
     REAL(FPP),                   DIMENSION(6),   INTENT(OUT) :: STATS                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
     INTEGER(IPP)                                             :: I, L
@@ -280,13 +276,14 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_STRUCTURED_SPEC(DH, FS, FE, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, FIELD, STATS)
+  SUBROUTINE SCARF3D_STRUCTURED_SPEC(DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
 
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
-    REAL(FPP),                                     INTENT(IN)  :: DH                   !< STRUCTURED GRID-STEP
+    REAL(FPP),                                     INTENT(IN)  :: DS                   !< STRUCTURED GRID-STEP
     INTEGER(IPP),                DIMENSION(3),     INTENT(IN)  :: FS, FE               !< FIRST/LAST STRUCTURED GRID INDICES
+    REAL(FPP),                                     INTENT(IN)  :: DH                   !< MAXIMUM GRID-STEP
     INTEGER(IPP),                                  INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
     REAL(FPP),                   DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
     REAL(FPP),                                     INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
@@ -295,7 +292,6 @@ MODULE SCARFLIB_SPEC
     REAL(FPP),                   DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
     REAL(FPP),                                     INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
     REAL(FPP),                                     INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    INTEGER(IPP),                                  INTENT(IN)  :: RESCALE              !< FLAG FOR RESCALING RANDOM FIELD TO DESIRED SIGMA
     REAL(FPP),                   DIMENSION(:,:,:), INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
     REAL(FPP),                   DIMENSION(6),     INTENT(OUT) :: STATS                !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
     INTEGER(IPP)                                               :: I, J, K, L
@@ -333,7 +329,7 @@ MODULE SCARFLIB_SPEC
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     ! DISTANCE SPANNED BY INPUT GRID ALONG EACH DIMENSION
-    SPAN = (FE - FS) * DH
+    SPAN = (FE - FS) * DS
 
     KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
 
@@ -347,7 +343,7 @@ MODULE SCARFLIB_SPEC
 
     IF (ANY(2._FPP * PI / SPAN .GE. 1._FPP / CL)) STATS(1) = 1._FPP
 
-    IF (ANY(DH .GT. CL / 2._FPP)) STATS(2) = 1._FPP
+    IF (ANY(DS .GT. CL / 2._FPP)) STATS(2) = 1._FPP
 
     IF (WORLD_RANK == 0) PRINT*, 'KMAX ', KMIN, KMAX
 
@@ -366,7 +362,7 @@ MODULE SCARFLIB_SPEC
 
     ! LOOP OVER HARMONICS
     ! OPENACC: "FIELD" IS COPIED IN&OUT, ALL THE OTHERS ARE ONLY COPIED IN. "ARG" IS CREATED LOCALLY ON THE ACCELERATOR
-    !$ACC DATA COPY(FIELD) COPYIN(DH, SCALING, NPTS, FS, A, B, V1, V2, V3)
+    !$ACC DATA COPY(FIELD) COPYIN(DS, SCALING, NPTS, FS, A, B, V1, V2, V3)
     DO L = 1, NHARM
 
       IF ((MOD(L, 100) == 0) .AND. (WORLD_RANK == 0)) PRINT*, WORLD_RANK, L
@@ -424,11 +420,11 @@ MODULE SCARFLIB_SPEC
       !$ACC KERNELS ASYNC
       !$ACC LOOP INDEPENDENT PRIVATE(X, Y, Z, ARG)
       DO K = 1, NPTS(3)
-        Z = (K + FS(3) - 2) * DH
+        Z = (K + FS(3) - 2) * DS
         DO J = 1, NPTS(2)
-          Y = (J + FS(2) - 2) * DH
+          Y = (J + FS(2) - 2) * DS
           DO I = 1, NPTS(1)
-            X              = (I + FS(1) - 2) * DH
+            X              = (I + FS(1) - 2) * DS
             ARG            = V1 * X + V2 * Y + V3 * Z
             FIELD(I, J, K) = FIELD(I, J, K) + A * SIN(ARG) + B * COS(ARG)
           ENDDO
@@ -488,7 +484,7 @@ MODULE SCARFLIB_SPEC
 
     ! APPLY TAPER/MUTE
     DO I = 1, SIZE(POI, 2)
-      CALL TAPERING(DH, FS, FE, FIELD, POI(:, I), MUTE, TAPER)
+      CALL TAPERING(DS, FS, FE, FIELD, POI(:, I), MUTE, TAPER)
     ENDDO
 
     CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)

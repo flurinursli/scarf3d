@@ -7,29 +7,40 @@ PROGRAM DRIVER
   ! the product of "dims" below should be equal to the number of processes
 
 
-  !USE :: MPI
-
-  ! USE, NON_INTRINSIC :: SCARFLIB_COMMON
-  ! USE, NON_INTRINSIC :: SCARFLIB_SPEC
-  ! USE, NON_INTRINSIC :: SCARFLIB_FFT
+  USE, INTRINSIC     :: ISO_FORTRAN_ENV
+  USE, NON_INTRINSIC :: MPI
   USE, NON_INTRINSIC :: SCARFLIB
+  USE, NON_INTRINSIC :: SCARFLIB_COMMON, ONLY: WATCH_START, WATCH_STOP
+  USE, NON_INTRINSIC :: SCARFLIB_AUX
 
   IMPLICIT NONE
 
-  INTEGER(IPP)                                         :: I, J, K
-  INTEGER(IPP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IPP)                                         :: SEED, RESCALE, PAD, ACF
-  INTEGER(IPP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
+  INTEGER, PARAMETER :: IP = INT32
+  !INTEGER, PARAMETER :: IP = INT64
+  INTEGER(IP), PARAMETER :: FP = REAL32
+  !INTEGER(IP), PARAMETER :: FP = REAL64
+
+  INTEGER(IP)                ::
+  REAL(FP),       DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
+
+  TYPE(SCARF_OBJ)            :: PARAMS
+
+
+
+  INTEGER(IP)                                         :: I, J, K
+  INTEGER(IP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
+  INTEGER(IP)                                         :: SEED, RESCALE, PAD, ACF
+  INTEGER(IP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
   LOGICAL                                              :: REORDER
   LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
-  REAL(FPP)                                            :: DH, DR, SIGMA, HURST
-  REAL(FPP)                                            :: MUTE, TAPER
+  REAL(FP)                                            :: DH, DS, SIGMA, HURST
+  REAL(FP)                                            :: MUTE, TAPER
   REAL(REAL64)                                         :: TICTOC
-  REAL(FPP),                 DIMENSION(3)              :: CL
-  REAL(FPP),                 DIMENSION(8)              :: INFO
-  REAL(FPP),                 DIMENSION(3,2)            :: POI
-  REAL(FPP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
-  REAL(FPP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
+  REAL(FP),                 DIMENSION(3)              :: CL
+  REAL(FP),                 DIMENSION(8)              :: INFO
+  REAL(FP),                 DIMENSION(3,2)            :: POI
+  REAL(FP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
+  REAL(FP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
 
   !--------------------------------------------------------------------------------------------------------------------------------
 
@@ -44,40 +55,38 @@ PROGRAM DRIVER
 
   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
-  !-----------------------------------------------------------------------
+  !---------------------------------------------------------------------------------------------------------------------------------
   ! INPUT SECTION
+  !---------------------------------------------------------------------------------------------------------------------------------
+
+  ! FFT = 0, SPEC = 1
+  METHOD = 0
 
   ! NUMBER OF POINTS FOR WHOLE MODEL
   !N = [2000*2, 3200*2, 1200*2]
   N = [500, 500, 500]
-  !N = [64, 64, 64]
 
-  ! GRID STEP FOR FFT GRID
-  DH = 100._FPP / 1.
-  !DH = 1.5625
-
-  ! GRID STEP FOR POINTS
-  !DR = 100._FPP / 1
-  DR = DH
+  ! GRID STEP
+  DS = 100._FP
 
   ! AUTOCORRELATION (0=VON KARMAN/EXPONENTIAL, 1=GAUSSIAN)
   ACF = 0
 
   ! CORRELATION LENGTH
-  CL = [5000._FPP, 5000._FPP, 5000._FPP] / 1._FPP
+  CL = [5000._FP, 5000._FP, 5000._FP]
 
   ! STANDARD DEVIATION (SIGMA%/100)
-  SIGMA = 0.05_FPP
+  SIGMA = 0.05_FP
 
   ! HURST EXPONENT (NOT USED FOR GAUSSIAN ACF)
-  HURST = 0.5_FPP
+  HURST = 0.5_FP
 
   ! SEED NUMBER
   SEED = 1235
 
   ! SET POSITION OF POINT-OF-INTEREST (MUTING/TAPERING), SAME UNITS AS "DH"
-  POI(:, 1) = [400., 250., 100.] * DH
-  POI(:, 2) = [350., 200.,  50.] * DH
+  POI(:, 1) = [400., 250., 100.] * DS
+  POI(:, 2) = [350., 200.,  50.] * DS
 
   ! RADIUS FOR MUTING (AT POI), SAME UNITS AS "DH"
   MUTE = 1000. !1000.
@@ -103,181 +112,130 @@ PROGRAM DRIVER
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! STEP A)
 
-  ! WE WORK IN 3D
-  NDIMS = 3
 
-  ! NUMBER OF PROCESSES ALONG EACH DIRECTION
-  !DIMS  = [10*2, 16*2, 6*2]
-  !DIMS = [2, 1, 2]
 
-  WORLD_SIZE = NTASKS
-  NPTS       = N
 
-  CALL BEST_CONFIG(DIMS)
 
-  IF (RANK == 0) PRINT*, 'CPU GRID IN DRIVER: ', DIMS
-
-  ! ALLOW REORDERING
-  REORDER = .TRUE.
-
-  ! NO PERIODICITY
-  ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
-
-  ! CREATE TOPOLOGY
-  CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, TOPO, IERR)
-
-  CALL MPI_CART_COORDS(TOPO, RANK, NDIMS, COORDS, IERR)
-
-  ! SPLIT EACH AXIS AND ASSIGN POINTS TO CURRENT PROCESS
-  CALL MPI_SPLIT_TASK(N, DIMS, COORDS, FS, FE)
-
-  ! DO I = 0, NTASKS - 1
-  !   IF (RANK .EQ. I) THEN
-  !     PRINT*, 'INPUT MESH: ', RANK, FS(1), FE(1), ' -- ', FS(2), FE(2), ' -- ', FS(3), FE(3)
-  !   ENDIF
-  !   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-  ! ENDDO
-
-  ! PREPARE ARRAY FOR RANDOM FIELD
-  ALLOCATE(V1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-
-  ! MAP 1D ARRAY INTO 3D ONE
-  V3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => V1
-
-  ! PREPARE ARRAY WITH MODEL POINTS POSITION
-  ALLOCATE(X1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(Y1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(Z1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  CALL SAMPLE_MESH(RANK, NTASKS, N, FS, FE, X1, Y1, Z1, V1)
 
   X3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => X1
   Y3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Y1
   Z3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Z1
+  V3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => V1
 
   DO K = FS(3), FE(3)
     DO J = FS(2), FE(2)
       DO I = FS(1), FE(1)
-        X3(I, J, K) = (I - 0.5) * DR
-        Y3(I, J, K) = (J - 0.5) * DR
-        Z3(I, J, K) = (K - 0.5) * DR
+        X3(I, J, K) = (I - 0.5) * DS
+        Y3(I, J, K) = (J - 0.5) * DS
+        Z3(I, J, K) = (K - 0.5) * DS
       ENDDO
     ENDDO
   ENDDO
 
-  ! COMPUTE ZERO-MEAN RANDOM FIELD
-  !CALL SCARF3D_FFT(MPI_COMM_WORLD, [NX, NY, NZ], 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.1_fpp, 1235, POI, 4, 26)
-  !CALL SCARF3D_FFT(MPI_COMM_WORLD, N, 100._fpp, 'VK', [5000._fpp, 5000._fpp, 5000._fpp], 0.05_fpp, 0.5_fpp, 1235, POI, 0, 0)
 
-  ! --------------------------------------------------------------------------------------------------------------------------------
-  ! STEP B + C: GPU
+  ! STRUCTURED MESH TEST
+  PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST)
 
-  IF (RANK .EQ. 0) PRINT*, 'GPU'
+  ! PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 0, HURST, POI = POI, MUTE = MUTE, TAPER = TAPER, PAD = 1)
+  ! PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 0, HURST, RESCALE = 1, PAD = 1)
 
   CALL WATCH_START(TICTOC)
 
-  !CALL SCARF3D_SPEC(DR, FS, FE, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, V3, INFO(1:6))
-  !CALL SCARF3D_SPEC(X1, Y1, Z1, DR, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, V1, INFO(1:6))
+  CALL SCARF_EXECUTE(PARAMS, SEED, V3)
 
   CALL WATCH_STOP(TICTOC)
 
-  IF (RANK .EQ. 0) PRINT*, 'EXEC TIME GPU:', REAL(TICTOC, REAL32)
+  IF (RANK .EQ. 0) PRINT*, 'STRUCTURED MESH TEST COMPLETED IN: ', REAL(TICTOC, REAL32)
 
-  ! SOME TIMING INFO
-  IF (RANK .EQ. 0) THEN
-    PRINT*, 'DOMAIN TOO SMALL?', NINT(INFO(1))
-    PRINT*, 'DH TOO LARGE?',     NINT(INFO(2))
-    PRINT*, 'STAND. DEV.: ',     REAL(INFO(3), KIND=REAL32)
-    PRINT*, 'MEAN: ',            REAL(INFO(4), KIND=REAL32)
-    PRINT*, 'TIMING CPU: ',      REAL(INFO(5), KIND=REAL32)
-    PRINT*, 'TIMING GPU: ',      REAL(INFO(6), KIND=REAL32)
+  IF ((RANK .EQ. 0) .AND. (METHOD .EQ. 0)) THEN
+    PRINT*, 'DOMAIN TOO SMALL?', NINT(PARAMS%STATS(1))
+    PRINT*, 'DS TOO LARGE?',     NINT(PARAMS%STATS(2))
+    PRINT*, 'STAND. DEV.: ',     REAL(PARAMS%STATS(3), KIND=REAL32)
+    PRINT*, 'MEAN: ',            REAL(PARAMS%STATS(4), KIND=REAL32)
+    PRINT*, 'TIMING SPECTRUM: ', REAL(PARAMS%STATS(5), KIND=REAL32)
+    PRINT*, 'TIMING SYMMETRY: ', REAL(PARAMS%STATS(6), KIND=REAL32)
+    PRINT*, 'TIMING IFFT: ',     REAL(PARAMS%STATS(7), KIND=REAL32)
+    PRINT*, 'TIMING INTERP: ',   REAL(PARAMS%STATS(8), KIND=REAL32)
   ENDIF
 
-  ! ARRAYS WHERE FIRST AND LAST INDICES FOR EACH PROCESS ARE STORED. THESE WILL BE USED TO WRITE FIELD SLICES TO DISK.
-  ALLOCATE(GS(3, 0:NTASKS-1), GE(3, 0:NTASKS-1))
-
-  ! STORE GLOBAL INDICES
-  GS(:, RANK) = FS
-  GE(:, RANK) = FE
-
-  ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-  ! WRITE A MODEL SLICE TO DISK
-  CALL SCARF3D_WRITE_SLICE(1, 400, V3, 'spec_xslice')
-  CALL SCARF3D_WRITE_SLICE(2, 250, V3, 'spec_yslice')
-  CALL SCARF3D_WRITE_SLICE(3, 100, V3, 'spec_zslice')
-
-  CALL SCARF3D_WRITE_ONE(V3, 'spec_whole', 3)
-
-  DEALLOCATE(GS, GE)
-
-  ! --------------------------------------------------------------------------------------------------------------------------------
-  ! STEP B + C: FFT
-
-  V1(:) = 0._FPP
-
-  IF (RANK .EQ. 0) PRINT*, 'FFT'
-
-  CALL WATCH_START(TICTOC)
-
-  CALL SCARF3D_FFT(X1, Y1, Z1, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, V1, INFO)
-!  CALL SCARF3D_FFT(DR, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, V3, INFO)
-
-  CALL WATCH_STOP(TICTOC)
-
-  IF (RANK .EQ. 0) PRINT*, 'EXEC TIME FFT:', REAL(TICTOC, REAL32)
-
-  ! ARRAYS WHERE FIRST AND LAST INDICES FOR EACH PROCESS ARE STORED. THESE WILL BE USED TO WRITE FIELD SLICES TO DISK.
-  ALLOCATE(GS(3, 0:NTASKS-1), GE(3, 0:NTASKS-1))
-
-  ! STORE GLOBAL INDICES
-  GS(:, RANK) = FS
-  GE(:, RANK) = FE
-
-  NPTS = N
-
-  ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-  CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-  CALL WATCH_START(TICTOC)
-
-  ! WRITE A MODEL SLICE TO DISK
-  CALL SCARF3D_WRITE_SLICE(1, 400, V3, 'fft_xslice')
-  CALL SCARF3D_WRITE_SLICE(2, 250, V3, 'fft_yslice')
-  CALL SCARF3D_WRITE_SLICE(3, 100, V3, 'fft_zslice')
-
-  CALL WATCH_STOP(TICTOC)
-
-  IF (RANK .EQ. 0) PRINT*, 'EXEC SLICE IO:', REAL(TICTOC, REAL32)
-
-  CALL WATCH_START(TICTOC)
-
-  CALL SCARF3D_WRITE_ONE(V3, 'fft_whole', 3)
-  !CALL SCARF3D_WRITE_SINGLE(V3, 'fft_single', 3)
-
-  CALL WATCH_STOP(TICTOC)
-
-  IF (RANK .EQ. 0) PRINT*, 'EXEC WHOLE IO:', REAL(TICTOC, REAL32)
-
-  DEALLOCATE(GS, GE)
-
-  ! DO I = 0, NTASKS - 1
-  !   IF (RANK .EQ. I) PRINT*, RANK, MINVAL(V3), MAXVAL(V3)
-  !   CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
-  ! ENDDO
-
-  ! SOME TIMING INFO
-  IF (RANK .EQ. 0) THEN
-    PRINT*, 'DOMAIN TOO SMALL?',   NINT(INFO(1))
-    PRINT*, 'DH TOO LARGE?',       NINT(INFO(2))
-    PRINT*, 'STAND. DEV.: ',       REAL(INFO(3), KIND=REAL32)
-    PRINT*, 'MEAN: ',              REAL(INFO(4), KIND=REAL32)
-    PRINT*, 'TIMING SPECTRUM: ',   REAL(INFO(5), KIND=REAL32)
-    PRINT*, 'TIMING SYMMETRY: ',   REAL(INFO(6), KIND=REAL32)
-    PRINT*, 'TIMING IFFT: ',       REAL(INFO(7), KIND=REAL32)
-    PRINT*, 'TIMING INTERP: ',     REAL(INFO(8), KIND=REAL32)
+  IF ((RANK .EQ. 0) .AND. (METHOD .EQ. 1)) THEN
+    PRINT*, 'DOMAIN TOO SMALL?', NINT(PARAMS%STATS(1))
+    PRINT*, 'DS TOO LARGE?',     NINT(PARAMS%STATS(2))
+    PRINT*, 'STAND. DEV.: ',     REAL(PARAMS%STATS(3), KIND=REAL32)
+    PRINT*, 'MEAN: ',            REAL(PARAMS%STATS(4), KIND=REAL32)
+    PRINT*, 'TIMING CPU: ',      REAL(PARAMS%STATS(5), KIND=REAL32)
+    PRINT*, 'TIMING GPU: ',      REAL(PARAMS%STATS(6), KIND=REAL32)
   ENDIF
+
+  CALL WATCH_START(TICTOC)
+
+  CALL SCARF_IO(1, 400, V3, 'fft_struct_xslice')
+  CALL SCARF_IO(2, 250, V3, 'fft_struct_yslice')
+  CALL SCARF_IO(3, 100, V3, 'fft_struct_zslice')
+
+  CALL WATCH_STOP(TICTOC)
+
+  IF (RANK .EQ. 0) PRINT*, 'SLICE(S) WRITTEN IN: ', REAL(TICTOC, REAL32)
+
+  CALL WATCH_START(TICTOC)
+
+  CALL SCARF_IO(V3, 'fft_struct_whole', 3)
+
+  CALL WATCH_STOP(TICTOC)
+
+  IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN: ', REAL(TICTOC, REAL32)
+
+  ! UNSTRUCTURED MESH TES
+  PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD, HURST)
+  ! PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD, HURST, POI = POI, MUTE = MUTE, TAPER = TAPER, PAD = 1)
+  ! PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD, HURST, RESCALE = 1, PAD = 1)
+
+  CALL WATCH_START(TICTOC)
+
+  CALL SCARF_EXECUTE(PARAMS, SEED, V1)
+
+  CALL WATCH_STOP(TICTOC)
+
+  IF (RANK .EQ. 0) PRINT*, 'UNSTRUCTURED MESH TEST COMPLETED IN: ', REAL(TICTOC, REAL32)
+
+  IF ((RANK .EQ. 0) .AND. (METHOD .EQ. 0)) THEN
+    PRINT*, 'DOMAIN TOO SMALL?', NINT(PARAMS%STATS(1))
+    PRINT*, 'DS TOO LARGE?',     NINT(PARAMS%STATS(2))
+    PRINT*, 'STAND. DEV.: ',     REAL(PARAMS%STATS(3), KIND=REAL32)
+    PRINT*, 'MEAN: ',            REAL(PARAMS%STATS(4), KIND=REAL32)
+    PRINT*, 'TIMING SPECTRUM: ', REAL(PARAMS%STATS(5), KIND=REAL32)
+    PRINT*, 'TIMING SYMMETRY: ', REAL(PARAMS%STATS(6), KIND=REAL32)
+    PRINT*, 'TIMING IFFT: ',     REAL(PARAMS%STATS(7), KIND=REAL32)
+    PRINT*, 'TIMING INTERP: ',   REAL(PARAMS%STATS(8), KIND=REAL32)
+  ENDIF
+
+  IF ((RANK .EQ. 0) .AND. (METHOD .EQ. 1)) THEN
+    PRINT*, 'DOMAIN TOO SMALL?', NINT(PARAMS%STATS(1))
+    PRINT*, 'DS TOO LARGE?',     NINT(PARAMS%STATS(2))
+    PRINT*, 'STAND. DEV.: ',     REAL(PARAMS%STATS(3), KIND=REAL32)
+    PRINT*, 'MEAN: ',            REAL(PARAMS%STATS(4), KIND=REAL32)
+    PRINT*, 'TIMING CPU: ',      REAL(PARAMS%STATS(5), KIND=REAL32)
+    PRINT*, 'TIMING GPU: ',      REAL(PARAMS%STATS(6), KIND=REAL32)
+  ENDIF
+
+  CALL WATCH_START(TICTOC)
+
+  CALL SCARF_IO(1, 400, V3, 'fft_unstruct_xslice')
+  CALL SCARF_IO(2, 250, V3, 'fft_unstruct_yslice')
+  CALL SCARF_IO(3, 100, V3, 'fft_unstruct_zslice')
+
+  CALL WATCH_STOP(TICTOC)
+
+  IF (RANK .EQ. 0) PRINT*, 'SLICE(S) WRITTEN IN: ', REAL(TICTOC, REAL32)
+
+  CALL WATCH_START(TICTOC)
+
+  CALL SCARF_IO(V3, 'fft_unstruct_whole', 3)
+
+  CALL WATCH_STOP(TICTOC)
+
+  IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN: ', REAL(TICTOC, REAL32)
 
   NULLIFY(V3, X3, Y3, Z3)
   DEALLOCATE(V1, X1, Y1, Z1)

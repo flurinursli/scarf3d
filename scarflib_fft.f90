@@ -5,7 +5,7 @@ MODULE SCARFLIB_FFT
   ! mpif90 -O3 scarflib_fft2.f90 scarflib_spec.f90 scarflib.f90 driver.f90 *.f -I/home/walter/Backedup/Software/fftw-3.3.8/include
   ! -L/home/walter/Backedup/Software/fftw-3.3.8/lib -lfftw3 -fcheck=all -fbacktrace -fopenacc
 
-  USE, NON_INTRINSIC ::  SCARFLIB_COMMON
+  USE, NON_INTRINSIC :: SCARFLIB_COMMON
 
   IMPLICIT NONE
 
@@ -13,7 +13,7 @@ MODULE SCARFLIB_FFT
 
   PRIVATE
 
-  PUBLIC :: SCARF3D_FFT, BEST_CONFIG
+  PUBLIC :: SCARF3D_FFT !, BEST_CONFIG
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 

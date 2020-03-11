@@ -1,37 +1,62 @@
+################################################################################
+# Makefile for building the SCARF3D library
+################################################################################
 
-
-#---------------------------------------------------------------------
-
+# Edit here below
+#-------------------------------------------------------------------------------
+# build
+# choose compiler wrapper
 FC = mpif90
+# choose compiler vendor
+COMPILER = pgi
+# compile library in single or double precision
+PRECISION = single
+# compile in debug mode?
+DEBUG = no
+# activate stopwatch for performance analysis
+TIMING = yes
+# target for parallel filesystem (pfs)?
+PFS = no
+# path to external library TRNG4: update also LD_LIBRARY_PATH if necessary
+TRNG_PATH += $(TRNG_PATH)
+# path to external library FFTW: update also LD_LIBRARY_PATH if necessary
+FFTW_PATH += $(FFTW_PATH)
+#-------------------------------------------------------------------------------
+# Do NOT edit rest of file
 
-CPP = -DSINGLE_PREC
+CPP =
 
-ifeq ($(precision),double)
-   CPP = -DDOUBLE_PREC
+ifeq ($(PRECISION),double)
+   CPP += -DDOUBLE_PREC
 endif
 
-ifeq ($(compiler),gcc)
-   #FFLAGS = -O3
+ifeq ($(TIMING),yes)
+   CPP += -DTIMING
+endif
+
+ifeq ($(PFS),yes)
+   CPP += -DPFS
+endif
+
+ifeq ($(COMPILER),gcc)
    FFLAGS = -O3 -fopenacc -foffload=-lm
    CXXFLAGS = -O3
-else ifeq ($(compiler),pgi)
-   FFLAGS = -fast -ta=tesla:cc75 -acc
-   #FFLAGS = -fast
+else ifeq ($(COMPILER),pgi)
+   FFLAGS = -fast -acc -ta=tesla:cc75
    CXXFLAGS = -fast
-else ifeq ($(compiler),intel)
+else ifeq ($(COMPILER),intel)
    FFLAGS = -O3
    CXXFLAGS = -O3
 endif
 
-
-ifeq ($(debug),yes)
-   ifeq ($(compiler),gcc)
+ifeq ($(DEBUG),yes)
+   ifeq ($(COMPILER),gcc)
       FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
       CXXFLAGS = -O0 -fno-lto -g -fbacktrace
-   else ifeq ($(compiler),pgi)
+   else ifeq ($(COMPILER),pgi)
       FFLAGS    = -O0 -g -c -traceback -Minfo
       CXXFLAGS  = -g -Minfo
-   else ifeq ($(compiler),intel)
+   else ifeq ($(COMPILER),intel)
       FFLAGS    = -O0 -g -traceback -check all -check bounds -debug all
       CXXFLAGS  = -g
    endif

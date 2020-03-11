@@ -8,6 +8,7 @@ MODULE SCARFLIB_COMMON
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+  ! ALL VARIABLES/SUBROUTINE ARE ACCESSIBLE FROM OTHER MODULES VIA HOST-ASSOCIATION
   PUBLIC
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
@@ -115,33 +116,33 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SET_STREAM(SEED)
-
-      ! INITIALSE THE RANDOM NUMBER GENERATOR
-
-      INTEGER(IPP),                           INTENT(IN) :: SEED                      !< USER-DEFINED SEED NUMBER
-      INTEGER(IPP)                                       :: SEED_SIZE                 !< STORE ARRAY SIZE
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)            :: TMP_SEED                  !< USED TO INITIALISE THE RANDOM GENERATOR
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      CALL RANDOM_SEED(SIZE = SEED_SIZE)
-
-      ALLOCATE(TMP_SEED(SEED_SIZE))
-
-      TMP_SEED = SEED
-
-      CALL RANDOM_SEED(PUT = TMP_SEED)
-
-      DEALLOCATE(TMP_SEED)
-
-    END SUBROUTINE SET_STREAM
+    ! SUBROUTINE SET_STREAM(SEED)
+    !
+    !   ! INITIALSE THE RANDOM NUMBER GENERATOR
+    !
+    !   INTEGER(IPP),                           INTENT(IN) :: SEED                      !< USER-DEFINED SEED NUMBER
+    !   INTEGER(IPP)                                       :: SEED_SIZE                 !< STORE ARRAY SIZE
+    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)            :: TMP_SEED                  !< USED TO INITIALISE THE RANDOM GENERATOR
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   CALL RANDOM_SEED(SIZE = SEED_SIZE)
+    !
+    !   ALLOCATE(TMP_SEED(SEED_SIZE))
+    !
+    !   TMP_SEED = SEED
+    !
+    !   CALL RANDOM_SEED(PUT = TMP_SEED)
+    !
+    !   DEALLOCATE(TMP_SEED)
+    !
+    ! END SUBROUTINE SET_STREAM
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_WRITE_SINGLE(V, FILENAME, NWRITERS)
+    SUBROUTINE WRITE_SINGLE(V, FILENAME, NWRITERS)
 
       ! EACH PROCESS WRITES ITS OWN FILE WITH DATA. ONLY "NWRITERS" FILES ARE CREATED AT THE SAME TIME.
 
@@ -178,13 +179,13 @@ MODULE SCARFLIB_COMMON
 
       ENDDO
 
-    END SUBROUTINE SCARF3D_WRITE_SINGLE
+    END SUBROUTINE WRITE_SINGLE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_WRITE_ONE(V, FILENAME, NWRITERS)
+    SUBROUTINE WRITE_ONE(V, FILENAME, NWRITERS)
 
       ! "NWRITERS" PROCESSES WRITE DATA OF ALL PROCESSES TO A SINGLE FILE
 
@@ -346,7 +347,7 @@ MODULE SCARFLIB_COMMON
       CALL MPI_COMM_FREE(NEWCOMM, IERR)
       CALL MPI_COMM_FREE(WRTCOMM, IERR)
 
-    END SUBROUTINE SCARF3D_WRITE_ONE
+    END SUBROUTINE WRITE_ONE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -434,7 +435,7 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_WRITE_SLICE(DIRECTION, PLANE, V, FILENAME)
+    SUBROUTINE WRITE_SLICE(DIRECTION, PLANE, V, FILENAME)
 
       ! CREATE A SINGLE FILE CONTAINING A SLICE OF THE RANDOM FIELD. EACH PROCESS WRITE ITS OWN PART BY MAKING USE OF THE SUBARRAY
       ! DATATYPE. A SLICE CAN BE ORIENTED ALONG THE X-, Y- OR Z-AXIS.
@@ -559,7 +560,7 @@ MODULE SCARFLIB_COMMON
 
       CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
 
-    END SUBROUTINE SCARF3D_WRITE_SLICE
+    END SUBROUTINE WRITE_SLICE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -865,5 +866,126 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    SUBROUTINE BEST_CONFIG(DIMS)
+
+      ! COMPUTE BEST GRID OF PROCESSES
+
+      INTEGER(IPP),              DIMENSION(3), INTENT(OUT) :: DIMS
+      !INTEGER(IPP),                            INTENT(OUT) :: NITER
+
+      INTEGER(IPP)                                         :: I, J, K, L, C
+      INTEGER(IPP)                                         :: N2, N3 !, N
+      INTEGER(IPP)                                         :: A, B
+      INTEGER(IPP),              DIMENSION(3)              :: V1, V2
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
+      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: LIST
+
+      REAL(FPP) :: N, NITER
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      !NITER = HUGE(1)
+      NITER = HUGE(1._FPP)
+
+      C = 0
+
+      ! FACTORISE NUMBER OF AVAILABLE PROCESSES
+      CALL FACTORIZATION(WORLD_SIZE, FACT3)
+
+      N3 = SIZE(FACT3, 2)
+
+      ALLOCATE(LIST(3, N3 * 5))
+
+      LIST = 0
+
+      ! LOOP OVER FACTORISED PROCESSES
+      DO L = 1, N3
+
+        DO K = 1, 2
+
+          IF (K .EQ. 1) THEN
+            A = FACT3(1, L)
+            B = FACT3(2, L)
+          ELSE
+            B = FACT3(1, L)
+            A = FACT3(2, L)
+          ENDIF
+
+          CALL FACTORIZATION(B, FACT2)
+
+          N2 = SIZE(FACT2, 2)
+
+          DO J = 1, N2
+
+            V1 = [A, FACT2(:, J)]
+
+            ! SKIP TO NEXT PROCESSES GRID IF ALREADY ANALYSED
+            IF (MATCH(V1, C, LIST) .EQV. .TRUE.) CYCLE
+
+            C = C + 1
+
+            ! ADD TO LIST
+            LIST(:, C) = V1
+
+            DO I = 0, 2
+
+              V1 = CSHIFT(V1, 1)
+
+              CALL TEST_CONFIG(V1, N)
+
+              IF (N .LT. NITER) THEN
+                DIMS  = V1
+                NITER = N
+              ENDIF
+
+              V2 = [V1(1), V1(3), V1(2)]
+
+              CALL TEST_CONFIG(V2, N)
+
+              IF (N .LT. NITER) THEN
+                DIMS  = V2
+                NITER = N
+              ENDIF
+
+            ENDDO
+            ! END PERMUTATIONS
+
+          ENDDO
+          ! END LOOP OVER FACTOR PAIRS FOR "A/B"
+
+        ENDDO
+        ! END LOOP OVER "A/B"
+
+      ENDDO
+      ! END LOOP OVER FACTOR PAIRS FOR "WORLD_SIZE"
+
+      DEALLOCATE(FACT3, FACT2, LIST)
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      CONTAINS
+
+      LOGICAL FUNCTION MATCH(VEC, IMAX, LIST)
+
+        INTEGER(IPP), DIMENSION(3),   INTENT(IN) :: VEC
+        INTEGER(IPP),                 INTENT(IN) :: IMAX
+        INTEGER(IPP), DIMENSION(:,:), INTENT(IN) :: LIST
+        INTEGER(IPP)                             :: I
+
+        !---------------------------------------------------------------------------------------------------------------------------
+
+        DO I = 1, IMAX
+          MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))
+          IF (MATCH .EQV. .TRUE.) EXIT
+        ENDDO
+
+      END FUNCTION MATCH
+
+    END SUBROUTINE BEST_CONFIG
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
 END MODULE SCARFLIB_COMMON
