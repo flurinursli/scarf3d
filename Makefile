@@ -12,7 +12,7 @@ COMPILER = gcc
 # compile library in single or double precision
 PRECISION = single
 # compile in debug mode?
-DEBUG = yes
+DEBUG = no
 # activate stopwatch for performance analysis
 TIMING = yes
 # target for parallel filesystem (pfs)?
