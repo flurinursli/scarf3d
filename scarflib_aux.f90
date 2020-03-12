@@ -9,7 +9,7 @@ MODULE SCARFLIB_AUX
 
   PRIVATE
 
-  PUBLIC :: SAMPLE_MESH
+  PUBLIC :: SAMPLE_MESH, WATCH_START, WATCH_STOP
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -36,7 +36,7 @@ MODULE SCARFLIB_AUX
 
       CALL BEST_CONFIG(DIMS)
 
-      PRINT*, 'CPU GRID IN DRIVER: ', DIMS
+      IF (RANK .EQ. 0) PRINT*, 'CPU GRID IN DRIVER PROGRAM: ', DIMS
 
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, 3, DIMS, [.FALSE., .FALSE., .FALSE.], .TRUE., TOPO, IERR)

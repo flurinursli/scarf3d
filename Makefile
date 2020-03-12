@@ -14,9 +14,11 @@ PRECISION = single
 # compile in debug mode?
 DEBUG = no
 # activate stopwatch for performance analysis
-TIMING = yes
+TIMING = no
 # target for parallel filesystem (pfs)?
 PFS = no
+# enable test of spectral method in driver programs
+SPECTRAL = yes
 # path to external library TRNG4: update also LD_LIBRARY_PATH if necessary
 TRNG_DIR = $(TRNG_PATH)
 # path to external library FFTW: update also LD_LIBRARY_PATH if necessary
@@ -45,6 +47,10 @@ endif
 
 ifeq ($(PFS),yes)
   CPP += -DPFS
+endif
+
+ifeq ($(SPECTRAL),yes)
+	CPP += -DSPECTRAL
 endif
 
 # optimizationflags for each compiler
@@ -102,7 +108,7 @@ OBJECTS += $(CPP_OBJ)
 
 # now link
 # $(PROGRAM) : $(OBJECTS)
-#  	$(FC) $(FFLAGS) $(LIBRARY) -o $@ $^
+#  	$(FC) $(FFLAGS) -o $@ $^ $(LIBRARY)
 $(PROGRAM) : $(OBJECTS)
 	$(FC) $(FFLAGS) -o $(PROGRAM) $(OBJECTS) $(LIBRARY)
 
@@ -117,13 +123,13 @@ debug:
 
 clean:
 	rm  scarflib.mod scarflib_spec.mod scarflib_fft.mod scarflib_common.mod scarflib_aux.mod
-	rm  $(OBJECTS)
+	rm  $(OBJECTS) $(PROGRAM)
 
 .PHONY: debug default clean
 
 # list dependencies for main program
 #$(MAIN_OBJ) : $(MOD_OBJ)
-$(MAIN_OBJ) : scarflib.o scarflib_common.o scarflib_aux.o
+$(MAIN_OBJ) : scarflib.o scarflib_aux.o
 
 # inter-module dependencies
 scarflib_spec.o scarflib_fft.o : scarflib_common.o

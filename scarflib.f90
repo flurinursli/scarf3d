@@ -81,7 +81,7 @@ MODULE SCARFLIB
       OBJ%FE  = FE
       OBJ%DS  = DS
 
-      OBJ%DH    = DS
+      OBJ%DH    = DS                      !< DEFAULT MAXIMUM GRID-STEP TO ACTUAL ONE
       OBJ%ACF   = ACF
       OBJ%CL    = CL
       OBJ%SIGMA = SIGMA
@@ -239,8 +239,9 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_SLICE(OBJ, DIRECTION, PLANE, FIELD, FILENAME)
+    SUBROUTINE SCARF_IO_SLICE(N, OBJ, DIRECTION, PLANE, FIELD, FILENAME)
 
+      INTEGER(IPP),     DIMENSION(3),     INTENT(IN) :: N
       TYPE(SCARF_OBJ),                    INTENT(IN) :: OBJ
       INTEGER(IPP),                       INTENT(IN) :: DIRECTION
       INTEGER(IPP),                       INTENT(IN) :: PLANE
@@ -263,7 +264,7 @@ MODULE SCARFLIB
       GS(:, RANK) = OBJ%FS
       GE(:, RANK) = OBJ%FE
 
-      NPTS = [500, 500, 500]
+      NPTS = N
 
       ! SHARE INFO AMONGST ALL PROCESSES
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
@@ -279,8 +280,9 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_ONE(OBJ, FIELD, FILENAME, NWRITERS)
+    SUBROUTINE SCARF_IO_ONE(N, OBJ, FIELD, FILENAME, NWRITERS)
 
+      INTEGER(IPP),     DIMENSION(3),     INTENT(IN) :: N
       TYPE(SCARF_OBJ),                    INTENT(IN) :: OBJ
       REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
       CHARACTER(LEN=*),                   INTENT(IN) :: FILENAME
@@ -302,7 +304,7 @@ MODULE SCARFLIB
       GS(:, RANK) = OBJ%FS
       GE(:, RANK) = OBJ%FE
 
-      NPTS = [500, 500, 500]
+      NPTS = N
 
       ! SHARE INFO AMONGST ALL PROCESSES
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
