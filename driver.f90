@@ -20,27 +20,17 @@ PROGRAM DRIVER
   INTEGER(IP), PARAMETER :: FP = REAL32
   !INTEGER(IP), PARAMETER :: FP = REAL64
 
-  INTEGER(IP)                ::
+  INTEGER(IP)                               :: I, J, K
+  INTEGER(IP)                               :: RANK, NTASKS, IERR
+  INTEGER(IP)                               :: METHOD, ACF, RESCALE, PAD, SEED
+  INTEGER(IP),    DIMENSION(3)              :: N, FS, FE
+  REAL(FP)                                  :: DS, DH, SIGMA, HURST, MUTE, TAPER
+  REAL(FP),       DIMENSION(3)              :: CL
+  REAL(REAL64)                              :: TICTOC
+  REAL(FP),       DIMENSION(3,2)            :: POI
   REAL(FP),       DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
-
-  TYPE(SCARF_OBJ)            :: PARAMS
-
-
-
-  INTEGER(IP)                                         :: I, J, K
-  INTEGER(IP)                                         :: IERR, RANK, NTASKS, TOPO, NDIMS
-  INTEGER(IP)                                         :: SEED, RESCALE, PAD, ACF
-  INTEGER(IP),              DIMENSION(3)              :: N, FS, FE, COORDS, DIMS
-  LOGICAL                                              :: REORDER
-  LOGICAL,                   DIMENSION(3)              :: ISPERIODIC
-  REAL(FP)                                            :: DH, DS, SIGMA, HURST
-  REAL(FP)                                            :: MUTE, TAPER
-  REAL(REAL64)                                         :: TICTOC
-  REAL(FP),                 DIMENSION(3)              :: CL
-  REAL(FP),                 DIMENSION(8)              :: INFO
-  REAL(FP),                 DIMENSION(3,2)            :: POI
-  REAL(FP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
-  REAL(FP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
+  REAL(FP),       ALLOCATABLE, DIMENSION(:), TARGET :: X1, Y1, Z1, V1
+  TYPE(SCARF_OBJ)                           :: PARAMS
 
   !--------------------------------------------------------------------------------------------------------------------------------
 
@@ -68,6 +58,8 @@ PROGRAM DRIVER
 
   ! GRID STEP
   DS = 100._FP
+
+  DH = DS
 
   ! AUTOCORRELATION (0=VON KARMAN/EXPONENTIAL, 1=GAUSSIAN)
   ACF = 0
@@ -170,9 +162,9 @@ PROGRAM DRIVER
 
   CALL WATCH_START(TICTOC)
 
-  CALL SCARF_IO(1, 400, V3, 'fft_struct_xslice')
-  CALL SCARF_IO(2, 250, V3, 'fft_struct_yslice')
-  CALL SCARF_IO(3, 100, V3, 'fft_struct_zslice')
+  CALL SCARF_IO(PARAMS, 1, 400, V3, 'fft_struct_xslice')
+  CALL SCARF_IO(PARAMS, 2, 250, V3, 'fft_struct_yslice')
+  CALL SCARF_IO(PARAMS, 3, 100, V3, 'fft_struct_zslice')
 
   CALL WATCH_STOP(TICTOC)
 
@@ -180,11 +172,13 @@ PROGRAM DRIVER
 
   CALL WATCH_START(TICTOC)
 
-  CALL SCARF_IO(V3, 'fft_struct_whole', 3)
+  CALL SCARF_IO(PARAMS, V3, 'fft_struct_whole', 3)
 
   CALL WATCH_STOP(TICTOC)
 
   IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN: ', REAL(TICTOC, REAL32)
+
+  CALL SCARF_FINALIZE(PARAMS)
 
   ! UNSTRUCTURED MESH TES
   PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD, HURST)
@@ -221,9 +215,12 @@ PROGRAM DRIVER
 
   CALL WATCH_START(TICTOC)
 
-  CALL SCARF_IO(1, 400, V3, 'fft_unstruct_xslice')
-  CALL SCARF_IO(2, 250, V3, 'fft_unstruct_yslice')
-  CALL SCARF_IO(3, 100, V3, 'fft_unstruct_zslice')
+  PARAMS%FS = FS
+  PARAMS%FE = FE
+
+  CALL SCARF_IO(PARAMS, 1, 400, V3, 'fft_unstruct_xslice')
+  CALL SCARF_IO(PARAMS, 2, 250, V3, 'fft_unstruct_yslice')
+  CALL SCARF_IO(PARAMS, 3, 100, V3, 'fft_unstruct_zslice')
 
   CALL WATCH_STOP(TICTOC)
 
@@ -231,11 +228,13 @@ PROGRAM DRIVER
 
   CALL WATCH_START(TICTOC)
 
-  CALL SCARF_IO(V3, 'fft_unstruct_whole', 3)
+  CALL SCARF_IO(PARAMS, V3, 'fft_unstruct_whole', 3)
 
   CALL WATCH_STOP(TICTOC)
 
   IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN: ', REAL(TICTOC, REAL32)
+
+  CALL SCARF_FINALIZE(PARAMS)
 
   NULLIFY(V3, X3, Y3, Z3)
   DEALLOCATE(V1, X1, Y1, Z1)

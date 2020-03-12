@@ -16,7 +16,7 @@ MODULE SCARFLIB
   PRIVATE
 
   ! THESE ARE THE ONLY SUBROUTINES/VARIABLES ACCESSIBLE BY CALLING PROGRAM
-  PUBLIC :: SCARF_INITIALIZE, SCARF_EXECUTE, SCARF_FINALIZE, SCARF_IO, SCARF_DECOMP
+  PUBLIC :: SCARF_INITIALIZE, SCARF_EXECUTE, SCARF_FINALIZE, SCARF_IO
   PUBLIC :: SCARF_OBJ
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
@@ -43,8 +43,9 @@ MODULE SCARFLIB
     INTEGER(IPP)                                       :: METHOD
     INTEGER(IPP),                       DIMENSION(3)   :: FS, FE
     REAL(FPP)                                          :: DS, DH
-    REAL(FPP)                                          :: CL, SIGMA, HURST
+    REAL(FPP)                                          :: SIGMA, HURST
     REAL(FPP)                                          :: MUTE, TAPER
+    REAL(FPP),                          DIMENSION(3)   :: CL
     REAL(FPP),                 POINTER, DIMENSION(:)   :: X  => NULL(), Y => NULL(), Z => NULL()
     REAL(FPP),    ALLOCATABLE,          DIMENSION(:)   :: STATS
     REAL(FPP),    ALLOCATABLE,          DIMENSION(:,:) :: POI
@@ -64,7 +65,8 @@ MODULE SCARFLIB
       INTEGER(IPP),   DIMENSION(3),             INTENT(IN) :: FS, FE
       REAL(FPP),                                INTENT(IN) :: DS
       INTEGER(IPP),                             INTENT(IN) :: ACF
-      REAL(FPP),                                INTENT(IN) :: CL, SIGMA
+      REAL(FPP),      DIMENSION(3),             INTENT(IN) :: CL
+      REAL(FPP),                                INTENT(IN) :: SIGMA
       INTEGER(IPP),                   OPTIONAL, INTENT(IN) :: METHOD
       REAL(FPP),                      OPTIONAL, INTENT(IN) :: HURST
       REAL(FPP),                      OPTIONAL, INTENT(IN) :: DH                    !< MAXIMUM GRID-STEP (CONTROLS MAX WAVENUMBER)
@@ -79,7 +81,7 @@ MODULE SCARFLIB
       OBJ%FE  = FE
       OBJ%DS  = DS
 
-      OBJ%DH    = DH
+      OBJ%DH    = DS
       OBJ%ACF   = ACF
       OBJ%CL    = CL
       OBJ%SIGMA = SIGMA
@@ -93,14 +95,14 @@ MODULE SCARFLIB
 
       ALLOCATE(OBJ%POI(0,0))
 
-      IF (.PRESENT(METHOD))  OBJ%METHOD  = METHOD
-      IF (.PRESENT(HURST))   OBJ%HURST   = HURST
-      IF (.PRESENT(DH))      OBJ%DH      = DH
-      IF (.PRESENT(MUTE))    OBJ%MUTE    = MUTE
-      IF (.PRESENT(TAPER))   OBJ%TAPER   = TAPER
-      IF (.PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
-      IF (.PRESENT(PAD))     OBJ%PAD     = PAD
-      IF (.PRESENT(POI))     OBJ%POI     = POI
+      IF (PRESENT(METHOD))  OBJ%METHOD  = METHOD
+      IF (PRESENT(HURST))   OBJ%HURST   = HURST
+      IF (PRESENT(DH))      OBJ%DH      = DH
+      IF (PRESENT(MUTE))    OBJ%MUTE    = MUTE
+      IF (PRESENT(TAPER))   OBJ%TAPER   = TAPER
+      IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
+      IF (PRESENT(PAD))     OBJ%PAD     = PAD
+      IF (PRESENT(POI))     OBJ%POI     = POI
 
       IF (OBJ%METHOD .EQ. 0) THEN
         ALLOCATE(OBJ%STATS(8))
@@ -119,7 +121,8 @@ MODULE SCARFLIB
       REAL(FPP),      DIMENSION(:),   TARGET,           INTENT(IN) :: X, Y, Z
       REAL(FPP),                                        INTENT(IN) :: DH                 !< MAXIMUM GRID-STEP (CONTROLS MAX WAVENUMBER)
       INTEGER(IPP),                                     INTENT(IN) :: ACF
-      REAL(FPP),                                        INTENT(IN) :: CL, SIGMA
+      REAL(FPP),      DIMENSION(3),                     INTENT(IN) :: CL
+      REAL(FPP),                                        INTENT(IN) :: SIGMA
       INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: METHOD
       REAL(FPP),                              OPTIONAL, INTENT(IN) :: HURST
       REAL(FPP),      DIMENSION(:,:),         OPTIONAL, INTENT(IN) :: POI
@@ -147,13 +150,13 @@ MODULE SCARFLIB
 
       ALLOCATE(OBJ%POI(0,0))
 
-      IF (.PRESENT(METHOD))  OBJ%METHOD  = METHOD
-      IF (.PRESENT(HURST))   OBJ%HURST   = HURST
-      IF (.PRESENT(MUTE))    OBJ%MUTE    = MUTE
-      IF (.PRESENT(TAPER))   OBJ%TAPER   = TAPER
-      IF (.PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
-      IF (.PRESENT(PAD))     OBJ%PAD     = PAD
-      IF (.PRESENT(POI))     OBJ%POI     = POI
+      IF (PRESENT(METHOD))  OBJ%METHOD  = METHOD
+      IF (PRESENT(HURST))   OBJ%HURST   = HURST
+      IF (PRESENT(MUTE))    OBJ%MUTE    = MUTE
+      IF (PRESENT(TAPER))   OBJ%TAPER   = TAPER
+      IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
+      IF (PRESENT(PAD))     OBJ%PAD     = PAD
+      IF (PRESENT(POI))     OBJ%POI     = POI
 
       IF (OBJ%METHOD .EQ. 0) THEN
         ALLOCATE(OBJ%STATS(8))
@@ -221,7 +224,7 @@ MODULE SCARFLIB
 
     SUBROUTINE SCARF_FINALIZE(OBJ)
 
-      TYPE(SCARF_OBJ), INTENT(IN) :: OBJ
+      TYPE(SCARF_OBJ), INTENT(INOUT) :: OBJ
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -236,8 +239,9 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_SLICE(DIRECTION, PLANE, FIELD, FILENAME)
+    SUBROUTINE SCARF_IO_SLICE(OBJ, DIRECTION, PLANE, FIELD, FILENAME)
 
+      TYPE(SCARF_OBJ),                    INTENT(IN) :: OBJ
       INTEGER(IPP),                       INTENT(IN) :: DIRECTION
       INTEGER(IPP),                       INTENT(IN) :: PLANE
       REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
@@ -253,7 +257,7 @@ MODULE SCARFLIB
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, NP, IERR)
 
       ! THESE ARE GLOBAL VARIABLES STORED IN "SCARFLIB_COMMON"
-      ALLOCATE(GS(3, NP), GE(3, NP))
+      ALLOCATE(GS(3, 0:NP - 1), GE(3, 0:NP - 1))
 
       ! STORE GLOBAL INDICES
       GS(:, RANK) = OBJ%FS
@@ -273,8 +277,9 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_ONE(FIELD, FILENAME, NWRITERS)
+    SUBROUTINE SCARF_IO_ONE(OBJ, FIELD, FILENAME, NWRITERS)
 
+      TYPE(SCARF_OBJ),                    INTENT(IN) :: OBJ
       REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
       CHARACTER(LEN=*),                   INTENT(IN) :: FILENAME
       INTEGER(IPP),                       INTENT(IN) :: NWRITERS
@@ -289,7 +294,7 @@ MODULE SCARFLIB
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, NP, IERR)
 
       ! THESE ARE GLOBAL VARIABLES STORED IN "SCARFLIB_COMMON"
-      ALLOCATE(GS(3, NP), GE(3, NP))
+      ALLOCATE(GS(3, 0:NP - 1), GE(3, 0:NP - 1))
 
       ! STORE GLOBAL INDICES
       GS(:, RANK) = OBJ%FS
