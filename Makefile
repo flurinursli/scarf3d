@@ -5,10 +5,10 @@
 # Edit here below
 #-------------------------------------------------------------------------------
 # build
-# choose compiler wrapper
+# choose COMPILER wrapper
 FC = mpif90
-# choose compiler vendor
-COMPILER = gcc
+# choose COMPILER vendor
+COMPILER = pgi
 # compile library in single or double precision
 PRECISION = single
 # compile in debug mode?
@@ -60,11 +60,11 @@ else ifeq ($(COMPILER),intel)
 endif
 
 # debugging flags
-ifeq ($(DEBUG),yes)
+ifeq ($(debug),yes)
   ifeq ($(COMPILER),gcc)
     FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
     CXXFLAGS = -O0 -fno-lto -g -fbacktrace
-  else ifeq ($(COMPILER),pgi)
+  else ifeq ($(comiler),pgi)
     FFLAGS    = -O0 -g -c -traceback -Minfo
     CXXFLAGS  = -g -Minfo
   else ifeq ($(COMPILER),intel)
@@ -73,7 +73,7 @@ ifeq ($(DEBUG),yes)
   endif
 endif
 
-PROGRAM = scarf3d
+PROGRAM = scarf3d.exe
 MAIN_OBJ = driver.o
 
 # set default target
@@ -132,6 +132,8 @@ scarflib_aux.o : scarflib_common.o
 
 #
 #
+# OBJECTS = scarflib_common.o scarflib_fft.o scarflib_spec.o driver.o prng.o
+#
 # # executable
 # scarf3d: $(OBJECTS)
 # 	$(FC) $(FFLAGS) -o scarf3d $(OBJECTS) -L${subst :, -L,$(LIBRARY_PATH)} -lstdc++ -ltrng4 -lfftw3f -lfftw3
@@ -161,11 +163,11 @@ scarflib_aux.o : scarflib_common.o
 # scarflib_spec.o: scarflib_common.mod scarflib_spec.f90
 # 	$(FC) $(FFLAGS) -c scarflib_spec.f90
 #
-# #driver.o: scarflib_common.mod scarflib_fft.mod scarflib_spec.mod driver.f90
-# #	$(FC) $(FFLAGS) -c driver.f90
-#
-# driver.o: scarflib.mod driver.f90
+# driver.o: scarflib_common.mod scarflib_fft.mod scarflib_spec.mod driver.f90
 # 	$(FC) $(FFLAGS) -c driver.f90
+#
+# # driver.o: scarflib.mod driver.f90
+# # 	$(FC) $(FFLAGS) -c driver.f90
 #
 # #%.o: %.f
 # #	$(FC) $(FFLAGS) -c $<
