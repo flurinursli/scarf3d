@@ -4,7 +4,8 @@
 
 SCARF3D_DIR = $(CURDIR)
 
-.PHONY : lib examples clean install_dir
+# set default installation directory (overridden if defined by user)
+prefix ?= ~/scarf3d_test
 
 # "make" or "make all" to build library and sample programs
 all : lib examples
@@ -13,21 +14,20 @@ all : lib examples
 lib:
 	cd src; $(MAKE) $@
 
-# "make examples"
+# "make examples" to build examples (and library, if not yet done)
 examples: lib
 	cd $@; $(MAKE) $@
 
 clean:
 	cd src; $(MAKE) $@
-	cd lib; $(MAKE) $@
-	cd include; rm -f *.mod
 	cd examples; $(MAKE) $@
 
-install_dir:
-	mkdir -p $(DESTDIR)$(prefix)
-	mkdir -p $(DESTDIR)$(prefix)/include
-	mkdri -p $(DESTDIR)$(prefix)/lib
+# "make install" copy the library to the desired location
+install: all
+	mkdir -p $(prefix)
+	mkdir -p $(prefix)/include
+	mkdir -p $(prefix)/lib
+	cp $(SCARF3D_DIR)/include/*.mod $(prefix)/include
+	cp $(SCARF3D_DIR)/lib/lib*.a $(prefix)/lib
 
-install: all install_dir
-	cp $(SCARF3D_DIR)/include/*.mod $(DESTDIR)$(prefix)/include
-	cp $(SCARF3D_DIR)/lib/lib*.a $(DESTDIR)$(prefix)/lib
+.PHONY : lib examples clean install

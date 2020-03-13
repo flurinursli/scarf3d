@@ -9,13 +9,13 @@ FC = mpif90
 COMPILER = pgi
 
 # compile library in single or double precision
-PRECISION = single
+PRECISION = double
 
 # compile in debug mode?
 DEBUG = no
 
 # activate stopwatch for performance analysis
-TIMING = no
+TIMING = yes
 
 # target for parallel filesystem (pfs)?
 PFS = no

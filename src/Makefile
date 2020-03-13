@@ -4,6 +4,51 @@
 
 include ../Makefile.inc
 
+# list Fortran objects
+F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o
+
+# compile Fortran objects
+$(F90_OBJS) : %.o : %.f90
+	$(FC) $(FFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
+
+# list C objects
+CPP_OBJS = prng.o
+
+# compile C objects
+$(CPP_OBJS) : %.o : %.cpp
+	$(CXX) $(CXXFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
+
+# define list of Fortran + C objects
+OBJS = $(F90_OBJS)
+OBJS += $(CPP_OBJS)
+
+# default rule: create library, move *.mod files and the move library
+lib: includes libscarf3d.a install_dir
+	mv libscarf3d.a ../lib
+
+install_dir:
+	mkdir -p ../lib
+	mkdir -p ../include
+
+# move *.mod files
+includes: libscarf3d.a install_dir
+	cp *.mod ../include
+
+# compress all objects into (static) library
+libscarf3d.a: $(OBJS)
+	ar qc $@ $(OBJS)
+
+clean:
+	-rm $(OBJS)
+	-rm -rf ../include
+	-rm -rf ../lib
+
+.PHONY: lib clean
+
+# # inter-module dependencies
+# scarflib_spec.o scarflib_fft.o : scarflib_common.o
+# scarflib.o: scarflib_common.o scarflib_spec.o scarflib_fft.o
+
 # prepare paths to "include"
 INCL = -I$(TRNG_DIR)/include
 INCL += -I$(FFTW_DIR)/include
@@ -21,10 +66,6 @@ endif
 
 ifeq ($(PFS),yes)
   CPP += -DPFS
-endif
-
-ifeq ($(SPECTRAL),yes)
-	CPP += -DSPECTRAL
 endif
 
 # optimizationflags for each compiler
@@ -52,46 +93,6 @@ ifeq ($(debug),yes)
     CXXFLAGS  = -g
   endif
 endif
-
-# list Fortran objects
-F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o
-
-# compile Fortran objects
-$(F90_OBJS) : %.o : %.f90
-	$(FC) $(FFLAGS) $(INCLUDE) -cpp $(CPP) -c -o $@ $<
-
-# list C objects
-CPP_OBJS = prng.o
-
-# compile C objects
-$(CPP_OBJS) : %.o : %.cpp
-	$(CXX) $(CXXFLAGS) $(INCLUDE) -cpp $(CPP) -c -o $@ $<
-
-# define list of Fortran/C objects
-OBJS = $(F90_OBJS)
-OBJS += $(CPP_OBJS)
-
-# make invoked without arguments
-lib: includes libscarf3d.a
-	mv libscarf3d.a ../lib
-
-# move *.mod files
-includes: libscarf3d.a
-	mv *.mod ../include
-
-# compress all objects into (static) library
-libscarf3d.a: $(OBJS)
-	ar qc $@ $(OBJS)
-
-clean:
-	rm $(OBJS)
-
-.PHONY: lib clean
-
-# # inter-module dependencies
-# scarflib_spec.o scarflib_fft.o : scarflib_common.o
-# scarflib.o: scarflib_common.o scarflib_spec.o scarflib_fft.o
-
 
 
 

@@ -9,23 +9,20 @@ OBJS = driver.o scarflib_aux.o
 
 # default target: link to create "driver.exe"
 fortran: $(OBJS)
-	$(FC) $(FFLAGS) -o driver.exe $(INCLUDE) $(OBJS) $(LIBS)
+	$(FC) $(FFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
 
 # list dependencies
 driver.o : scarflib_aux.o
 
 # compile objects
 $(OBJS) : %.o : %.f90
-	$(FC) $(FFLAGS) $(INCLUDE) -cpp $(CPP) -c -o $@ $<
+	$(FC) $(FFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
 
 clean:
-	-rm -f *.mod *.o
-
-
-
+	-rm -f *.mod *.o driver.exe fft_* spec_*
 
 # flags
-INCLUDE = -I../../include
+INCL = -I../../include
 
 LIBS = -L../../lib -lscarf3d
 LIBS += -L$(TRNG_DIR)/lib -ltrng4 -lstdc++

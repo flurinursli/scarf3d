@@ -1,0 +1,23 @@
+
+int main(){
+
+
+
+  // INITIALIZE_STRUCTURED(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, MUTE, TAPER, RESCALE, PAD)
+  // INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, MUTE, TAPER, RESCALE, PAD)
+
+  //
+
+  Scarf3D::Initialize<"spec", "struct"> S(fs, fe, ds, acf, cl, sigma, hurst = hurst, pad = 1);
+  Scarf3D::Initialize<"fft", "unstruct"> S(x, y, z, dh, acf, cl, sigma, hurst = hurst, pad = 1);
+
+  S.execute(seed, field);
+
+  // S is destroyed automatically
+
+
+
+
+
+
+}
