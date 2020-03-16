@@ -17,7 +17,7 @@ MODULE SCARFLIB
 
   ! THESE ARE THE ONLY SUBROUTINES/VARIABLES ACCESSIBLE BY CALLING PROGRAM
   PUBLIC :: SCARF_INITIALIZE, SCARF_EXECUTE, SCARF_FINALIZE, SCARF_IO
-  PUBLIC :: SCARF_OBJ
+  !PUBLIC :: SCARF_OBJ
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -52,6 +52,8 @@ MODULE SCARFLIB
 
   END TYPE SCARF_OBJ
 
+  TYPE(SCARF_OBJ) :: OBJ
+
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   CONTAINS
@@ -60,7 +62,7 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    FUNCTION INITIALIZE_STRUCTURED(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, MUTE, TAPER, RESCALE, PAD) RESULT(OBJ)
+    SUBROUTINE INITIALIZE_STRUCTURED(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, MUTE, TAPER, RESCALE, PAD)
 
       INTEGER(IPP),   DIMENSION(3),             INTENT(IN) :: FS, FE
       REAL(FPP),                                INTENT(IN) :: DS
@@ -73,7 +75,6 @@ MODULE SCARFLIB
       REAL(FPP),      DIMENSION(:,:), OPTIONAL, INTENT(IN) :: POI
       REAL(FPP),                      OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(IPP),                   OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      TYPE(SCARF_OBJ)                                      :: OBJ
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -110,13 +111,13 @@ MODULE SCARFLIB
         ALLOCATE(OBJ%STATS(6))
       ENDIF
 
-    END FUNCTION INITIALIZE_STRUCTURED
+    END SUBROUTINE INITIALIZE_STRUCTURED
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    FUNCTION INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, MUTE, TAPER, RESCALE, PAD) RESULT(OBJ)
+    SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, MUTE, TAPER, RESCALE, PAD)
 
       REAL(FPP),      DIMENSION(:),   TARGET,           INTENT(IN) :: X, Y, Z
       REAL(FPP),                                        INTENT(IN) :: DH                 !< MAXIMUM GRID-STEP (CONTROLS MAX WAVENUMBER)
@@ -128,7 +129,6 @@ MODULE SCARFLIB
       REAL(FPP),      DIMENSION(:,:),         OPTIONAL, INTENT(IN) :: POI
       REAL(FPP),                              OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      TYPE(SCARF_OBJ)                                              :: OBJ
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -164,29 +164,35 @@ MODULE SCARFLIB
         ALLOCATE(OBJ%STATS(6))
       ENDIF
 
-    END FUNCTION INITIALIZE_UNSTRUCTURED
+    END SUBROUTINE INITIALIZE_UNSTRUCTURED
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXECUTE_UNSTRUCTURED(OBJ, SEED, FIELD)
+    SUBROUTINE EXECUTE_UNSTRUCTURED(SEED, FIELD, STATS)
 
-      TYPE(SCARF_OBJ),               INTENT(INOUT) :: OBJ
-      INTEGER(IPP),                  INTENT(IN)    :: SEED
-      REAL(FPP),       DIMENSION(:), INTENT(OUT)   :: FIELD
+      INTEGER(IPP),               INTENT(IN)  :: SEED
+      REAL(FPP),    DIMENSION(:), INTENT(OUT) :: FIELD
+      REAL(FPP),    DIMENSION(8), INTENT(OUT) :: STATS
 
       !-----------------------------------------------------------------------------------------------------------------------------
+
+      STATS = 0._FPP
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
         CALL SCARF3D_FFT(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE, OBJ%TAPER,  &
                          OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
+        STATS = OBJ%STATS
+
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
 
         CALL SCARF3D_SPEC(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE, OBJ%TAPER, &
                           FIELD, OBJ%STATS)
+
+        STATS(1:6) = OBJ%STATS(:)
 
       ENDIF
 
@@ -196,23 +202,29 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXECUTE_STRUCTURED(OBJ, SEED, FIELD)
+    SUBROUTINE EXECUTE_STRUCTURED(SEED, FIELD, STATS)
 
-      TYPE(SCARF_OBJ),                INTENT(INOUT) :: OBJ
-      INTEGER(IPP),                   INTENT(IN)    :: SEED
-      REAL(FPP),    DIMENSION(:,:,:), INTENT(OUT)   :: FIELD
+      INTEGER(IPP),                   INTENT(IN)  :: SEED
+      REAL(FPP),    DIMENSION(:,:,:), INTENT(OUT) :: FIELD
+      REAL(FPP),    DIMENSION(8),     INTENT(OUT) :: STATS
 
       !-----------------------------------------------------------------------------------------------------------------------------
+
+      STATS = 0._FPP
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
         CALL SCARF3D_FFT(OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,    &
                          OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
+        STATS = OBJ%STATS
+
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
 
         CALL SCARF3D_SPEC(OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
                           OBJ%TAPER, FIELD, OBJ%STATS)
+
+        STATS(1:6) = OBJ%STATS(:)
 
       ENDIF
 
@@ -222,9 +234,7 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_FINALIZE(OBJ)
-
-      TYPE(SCARF_OBJ), INTENT(INOUT) :: OBJ
+    SUBROUTINE SCARF_FINALIZE()
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -239,10 +249,9 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_SLICE(N, OBJ, DIRECTION, PLANE, FIELD, FILENAME)
+    SUBROUTINE SCARF_IO_SLICE(N, DIRECTION, PLANE, FIELD, FILENAME)
 
       INTEGER(IPP),     DIMENSION(3),     INTENT(IN) :: N
-      TYPE(SCARF_OBJ),                    INTENT(IN) :: OBJ
       INTEGER(IPP),                       INTENT(IN) :: DIRECTION
       INTEGER(IPP),                       INTENT(IN) :: PLANE
       REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
@@ -280,10 +289,9 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_ONE(N, OBJ, FIELD, FILENAME, NWRITERS)
+    SUBROUTINE SCARF_IO_ONE(N, FIELD, FILENAME, NWRITERS)
 
       INTEGER(IPP),     DIMENSION(3),     INTENT(IN) :: N
-      TYPE(SCARF_OBJ),                    INTENT(IN) :: OBJ
       REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
       CHARACTER(LEN=*),                   INTENT(IN) :: FILENAME
       INTEGER(IPP),                       INTENT(IN) :: NWRITERS
