@@ -8,10 +8,10 @@ int main(){
 
   //
 
-  Scarf3D::Initialize<"spec", "struct"> S(fs, fe, ds, acf, cl, sigma, hurst = hurst, pad = 1);
-  Scarf3D::Initialize<"fft", "unstruct"> S(x, y, z, dh, acf, cl, sigma, hurst = hurst, pad = 1);
+  Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma, hurst = hurst, pad = 1);
+  Scarf3D::Initialize<fft> S(x, y, z, dh, acf, cl, sigma, hurst = hurst, pad = 1);
 
-  S.execute(seed, field);
+  S.execute(seed, field, stats);
 
   // S is destroyed automatically
 
