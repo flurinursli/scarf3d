@@ -9,7 +9,7 @@ int main(){
   //
 
   Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma, hurst = hurst, pad = 1);
-  Scarf3D::Initialize<fft> S(x, y, z, dh, acf, cl, sigma, hurst = hurst, pad = 1);
+  Scarf3D::Initialize<fft> S(x, y, z, dh, acf, cl, sigma, hurst = hurst);
 
   S.execute(seed, field, stats);
 
