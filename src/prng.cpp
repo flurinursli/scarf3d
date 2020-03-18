@@ -139,7 +139,7 @@ void normdist(double* x)
 void normdist(float* x)
 #endif
 {
-  
+
   trng::normal_dist<> u(1., 0.);
 
   for (int i = 0; i < 2; i++){

@@ -20,8 +20,8 @@ MODULE SCARF3D_C_BINDING
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_STRUCT_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, NPOI, MUTE, TAPER, RESCALE, PAD)  &
-      BIND(C, NAME = "scarf_struct_initialize")
+    SUBROUTINE STRUCT_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, NPOI, MUTE, TAPER, RESCALE, PAD)  &
+      BIND(C, NAME = "struct_initialize")
 
       INTEGER(C_INT), DIMENSION(3),           INTENT(IN) :: FS, FE
       REAL(C_FPP),                            INTENT(IN) :: DS
@@ -58,16 +58,18 @@ MODULE SCARF3D_C_BINDING
       IF (C_ASSOCIATED(RESCALE)) CALL C_F_POINTER(RESCALE, F_RESCALE)
       IF (C_ASSOCIATED(PAD))     CALL C_F_POINTER(PAD, F_PAD)
 
+print*, 'c_binding.f90 ', FS, FE, DS, ACF, CL, SIGMA, F_METHOD, F_HURST, F_DH, F_POI, F_MUTE, F_TAPER, F_RESCALE, F_PAD
+
       CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, F_METHOD, F_HURST, F_DH, F_POI, F_MUTE, F_TAPER, F_RESCALE, F_PAD)
 
-    END SUBROUTINE SCARF_STRUCT_INITIALIZE
+    END SUBROUTINE STRUCT_INITIALIZE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_UNSTRUCT_INITIALIZE(NPTS, X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, NPOI, MUTE, TAPER, RESCALE, PAD)  &
-      BIND(C, NAME = "scarf_unstruct_initialize")
+    SUBROUTINE UNSTRUCT_INITIALIZE(NPTS, X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, NPOI, MUTE, TAPER, RESCALE, PAD)  &
+      BIND(C, NAME = "unstruct_initialize")
 
       INTEGER(C_INT),                         INTENT(IN) :: NPTS
       TYPE(C_PTR),                            INTENT(IN) :: X, Y, Z
@@ -106,15 +108,17 @@ MODULE SCARF3D_C_BINDING
       IF (C_ASSOCIATED(RESCALE)) CALL C_F_POINTER(RESCALE, F_RESCALE)
       IF (C_ASSOCIATED(PAD))     CALL C_F_POINTER(PAD, F_PAD)
 
+print*, 'c_binding.f90 ', FS, FE, DS, ACF, CL, SIGMA, F_METHOD, F_HURST, F_DH, F_POI, F_MUTE, F_TAPER, F_RESCALE, F_PAD
+
       CALL SCARF_INITIALIZE(F_X, F_Y, F_Z, DH, ACF, CL, SIGMA, F_METHOD, F_HURST, F_POI, F_MUTE, F_TAPER, F_RESCALE, F_PAD)
 
-    END SUBROUTINE SCARF_UNSTRUCT_INITIALIZE
+    END SUBROUTINE UNSTRUCT_INITIALIZE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_C_EXECUTE(SEED, FIELD, STATS) BIND(C, NAME="scarf_execute")
+    SUBROUTINE EXECUTE(SEED, FIELD, STATS) BIND(C, NAME="execute")
 
       INTEGER(C_INT),                           INTENT(IN)    :: SEED
       TYPE(C_PTR),                              INTENT(INOUT) :: FIELD
@@ -127,6 +131,8 @@ MODULE SCARF3D_C_BINDING
 
       CALL C_F_POINTER(STATS, F_STATS, [8])
 
+print*, 'c_binding.f90 ', SEED, STRUCTURED, DIMS, N
+
       IF (STRUCTURED .EQ. 0) THEN
         CALL C_F_POINTER(FIELD, F_UNSTRUCT, [N])
         CALL SCARF_EXECUTE(SEED, F_UNSTRUCT, F_STATS)
@@ -135,22 +141,21 @@ MODULE SCARF3D_C_BINDING
         CALL SCARF_EXECUTE(SEED, F_STRUCT, F_STATS)
       ENDIF
 
-    END SUBROUTINE SCARF_C_EXECUTE
+print*, 'c_binding.f90 ', MINVAL(FIELD), MAXVAL(FIELD), STATS
+
+    END SUBROUTINE EXECUTE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    SUBROUTINE FINALIZE() BIND(C, NAME="finalize")
 
+      !-----------------------------------------------------------------------------------------------------------------------------
 
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+      CALL SCARF_FINALIZE()
 
-    SUBROUTINE SCARF_FINALIZE_F2C
-
-
-    END SUBROUTINE SCARF_FINALIZE_F2C
+    END SUBROUTINE FINALIZE
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

@@ -10,15 +10,17 @@ extern "C"{
 
   enum algorithm {fft, spec};
 
-  void scarf_struct_initialize(const int fs[3], const int fe[3], const fpp ds, const int acf, const fpp cl[3], const fpp sigma, const int,   &
-                               const fpp hurst, const fpp dh, const fpp* poi, const int npoi, const fpp mute, const fpp taper, const int rescale, const int pad);
+  void scarf_struct_initialize(const int fs[3], const int fe[3], const fpp ds, const int acf, const fpp cl[3], const fpp sigma,  &
+                               const int* solver, const fpp* hurst, const fpp* dh, const fpp* poi, const int* npoi, const fpp* mute,  &
+                               const fpp* taper, const int* rescale, const int* pad);
 
-  void scarf_unstruct_initialize(const int npts[3], const fpp* x, const fpp* y, const fpp* z, const fpp dh, const fpp cl[3], const fpp sigma, const int,  &
-                                 const fpp hurst, const fpp* poi, const int npoi, const fpp mute, const fpp taper, const int rescale, const int pad);
+  void scarf_unstruct_initialize(const int npts[3], const fpp* x, const fpp* y, const fpp* z, const fpp dh, const fpp cl[3], const fpp sigma,  &
+                                 const int* solver, const fpp* hurst, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,      &
+                                 const int* rescale, const int* pad);
 
-  void scarf_execute(const int seed, fpp* field, fpp stats[8]);
+  void scarf_execute(const int seed, fpp* field, fpp* stats);
 
-  void finalize();
+  void scarf_finalize();
 
 }
 
@@ -33,27 +35,27 @@ namespace Scarf3D{
     public:
       // structured mesh
       Initialize(const int fs[3], const int fe[3], const fpp ds, const int acf, const fpp cl[3], const fpp sigma,  &
-                 const fpp hurst = 0, const fpp dh = ds, const fpp* poi = nullptr, const int npoi = 0, const fpp mute = -1, const fpp taper = -1, const int rescale = 0, const int pad = 0){
+                 const int* solver = nullptr, const fpp* hurst = nullptr, const fpp* dh = nullptr, const fpp* poi = nullptr, const int* npoi = nullptr,  &
+                 const fpp* mute = nullptr, const fpp* taper = nullptr, const int* rescale = nullptr, const int* pad = nullptr){
 
-         if method == fft{
-            void scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, 0, hurst, dh, poi, npoi, mute, taper, rescale, pad);
+         if method == spec{
+           const int* solver = 1;
          }
-         else{
-            void scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, 1, hurst, dh, poi, npoi, mute, taper, rescale, pad);
-         }
+
+         void scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, solver, hurst, dh, poi, npoi, mute, taper, rescale, pad);
 
       };
 
       // unstructured mesh
       Initialize(const int npts[3], const fpp* x, const fpp* y, const fpp* z, const fpp dh, const fpp cl[3], const fpp sigma,  &
-                 const fpp hurst = 0, const fpp* poi = nullptr, const int npoi = 0, const fpp mute = -1, const fpp taper = -1, const int rescale = 0, const int pad = 0){
+                 const int* solver = nullptr, const fpp* hurst = nullptr, const fpp* poi = nullptr, const int* npoi = nullptr,  &
+                 const fpp* mute = nullptr, const fpp* taper = nullptr, const int* rescale = nullptr, const int* pad = nullptr){
 
-         if method == fft{
-            void scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, 0, hurst, poi, npoi, mute, taper, rescale, pad);
+         if method == spec{
+            const int* solver = 1;
          }
-         else{
-            void scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, 1, hurst, poi, npoi, mute, taper, rescale, pad);
-         }
+
+         void scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, solver, hurst, poi, npoi, mute, taper, rescale, pad);
 
       };
 
@@ -62,7 +64,7 @@ namespace Scarf3D{
         void scarf_finalize();
       };
 
-      void execute(const int seed, fpp* field, fpp stats[8]){
+      void execute(const int seed, fpp* field, fpp* stats){
         void scarf_execute(seed, field, stats);
       };
 
