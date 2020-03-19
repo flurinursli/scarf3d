@@ -1,3 +1,4 @@
+#include <iostream>
 #include <mpi.h>
 #include "scarf3d.h"
 
@@ -43,7 +44,7 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n = {500, 500, 500};
+  const int n[3] = {500, 500, 500};
 
   // grid-step
   const fpp ds = 100.;
@@ -58,7 +59,7 @@ int main(){
   int fs[3], fe[3];
 
   // domain decomposition
-  create_mesh(world_rank, world_size, n, fs, fe);
+  sample_mesh(&world_rank, &world_size, n, fs, fe);
 
   int dims[3];
 
@@ -210,6 +211,9 @@ int main(){
 
 #endif
 
+   delete[] x;
+   delete[] y;
+   delete[] z;
    delete[] field;
    delete[] stats;
 

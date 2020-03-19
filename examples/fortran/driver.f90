@@ -10,30 +10,29 @@ PROGRAM DRIVER
   USE, INTRINSIC     :: ISO_FORTRAN_ENV
   USE, NON_INTRINSIC :: MPI
   USE, NON_INTRINSIC :: SCARFLIB
-  !USE, NON_INTRINSIC :: SCARFLIB_COMMON, ONLY: WATCH_START, WATCH_STOP
   USE, NON_INTRINSIC :: SCARFLIB_AUX
 
   IMPLICIT NONE
 
 #ifdef DOUBLE_PREC
-  INTEGER, PARAMETER :: IP = INT32
+  INTEGER,     PARAMETER :: IP = INT32
   INTEGER(IP), PARAMETER :: FP = REAL64
 #else
-  INTEGER, PARAMETER :: IP = INT32
+  INTEGER,     PARAMETER :: IP = INT32
   INTEGER(IP), PARAMETER :: FP = REAL32
 #endif
 
-  INTEGER(IP)                               :: I, J, K
-  INTEGER(IP)                               :: RANK, NTASKS, IERR
-  INTEGER(IP)                               :: ACF, RESCALE, PAD, SEED
-  INTEGER(IP),    DIMENSION(3)              :: N, FS, FE
-  REAL(FP)                                  :: DS, DH, SIGMA, HURST, MUTE, TAPER
-  REAL(FP),       DIMENSION(3)              :: CL
-  REAL(FP),       DIMENSION(8)              :: STATS
-  REAL(REAL64)                              :: TICTOC
-  REAL(FP),       DIMENSION(3,2)            :: POI
-  REAL(FP),       DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
-  REAL(FP),       ALLOCATABLE, DIMENSION(:), TARGET :: X1, Y1, Z1, V1
+  INTEGER(IP)                                         :: I, J, K
+  INTEGER(IP)                                         :: RANK, NTASKS, IERR
+  INTEGER(IP)                                         :: ACF, RESCALE, PAD, SEED
+  INTEGER(IP),              DIMENSION(3)              :: N, FS, FE
+  REAL(FP)                                            :: DS, DH, SIGMA, HURST, MUTE, TAPER
+  REAL(FP),                 DIMENSION(3)              :: CL
+  REAL(FP),                 DIMENSION(8)              :: STATS
+  REAL(REAL64)                                        :: TICTOC
+  REAL(FP),                 DIMENSION(3,2)            :: POI
+  REAL(FP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
+  REAL(FP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
 
   !--------------------------------------------------------------------------------------------------------------------------------
 
@@ -101,7 +100,13 @@ PROGRAM DRIVER
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================-
 
-  CALL SAMPLE_MESH(RANK, NTASKS, N, FS, FE, X1, Y1, Z1, V1)
+  CALL SAMPLE_MESH(RANK, NTASKS, N, FS, FE)
+
+  ! ALLOCATE MEMORY FOR MESH
+  ALLOCATE(V1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ALLOCATE(X1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ALLOCATE(Y1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ALLOCATE(Z1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
 
   X3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => X1
   Y3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Y1

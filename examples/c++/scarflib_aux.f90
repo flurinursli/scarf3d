@@ -1,5 +1,6 @@
 MODULE SCARFLIB_AUX
 
+  USE, INTRINSIC     :: ISO_C_BINDING
   USE, NON_INTRINSIC :: MPI
   USE, NON_INTRINSIC :: SCARFLIB_COMMON
 
@@ -9,7 +10,7 @@ MODULE SCARFLIB_AUX
 
   PRIVATE
 
-  PUBLIC :: SAMPLE_MESH, WATCH_START, WATCH_STOP
+  PUBLIC :: SAMPLE_MESH
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -19,13 +20,13 @@ MODULE SCARFLIB_AUX
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SAMPLE_MESH(RANK, NTASKS, N, FS, FE)
+    SUBROUTINE SAMPLE_MESH(RANK, NTASKS, N, FS, FE) BIND(C, NAME="sample_mesh")
 
-      INTEGER(IPP),               INTENT(IN)  :: RANK, NTASKS
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: N
-      INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: FS, FE
-      INTEGER(IPP)                            :: TOPO, IERR
-      INTEGER(IPP), DIMENSION(3)              :: DIMS, COORDS
+      INTEGER(C_INT),               INTENT(IN)  :: RANK, NTASKS
+      INTEGER(C_INT), DIMENSION(3), INTENT(IN)  :: N
+      INTEGER(C_INT), DIMENSION(3), INTENT(OUT) :: FS, FE
+      INTEGER(IPP)                              :: TOPO, IERR
+      INTEGER(IPP),   DIMENSION(3)              :: DIMS, COORDS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -44,6 +45,8 @@ MODULE SCARFLIB_AUX
 
       ! SPLIT EACH AXIS AND ASSIGN POINTS TO CURRENT PROCESS
       CALL MPI_SPLIT_TASK(N, DIMS, COORDS, FS, FE)
+
+if (rank == 0) print*, 'sample_mesh f90 ', fs, ' x ', fe
 
     END SUBROUTINE SAMPLE_MESH
 
