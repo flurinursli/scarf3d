@@ -10,6 +10,8 @@
   //using fpp = float;
 #endif
 
+extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
+
 void watch_start(double* t){
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -85,7 +87,7 @@ int main(){
     }
   }
 
-  fpp *stats = new fpp[8];
+  fpp stats[8];
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
@@ -111,7 +113,7 @@ int main(){
   Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma, hurst = 0.5);
 
   watch_start(&tictoc);
-  S.execute(seed, f, stats);
+  S.execute(seed, field, stats);
   watch_stop(&tictoc);
 
   if (world_rank == 0){
