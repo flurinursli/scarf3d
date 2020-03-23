@@ -72,8 +72,23 @@ namespace Scarf3D{
         void scarf_finalize();
       };
 
+      // simulate random field
       void execute(const int seed, fpp* field, fpp stats[]){
         void scarf_execute(seed, field, stats);
+      };
+
+      // IO whole model
+      void io(){
+
+        void io_one();
+
+      };
+
+      // IO model slice
+      void io(){
+
+        void io_slice();
+
       };
 
    };

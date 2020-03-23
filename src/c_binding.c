@@ -48,3 +48,17 @@ void scarf_finalize(){
    finalize();
 
 }
+
+// define C I/O functions
+
+void scarf_io_one(){
+
+  io_one();
+
+}
+
+void scarf_io_slice(){
+
+  io_slice();
+
+}

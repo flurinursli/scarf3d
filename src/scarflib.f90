@@ -291,11 +291,11 @@ MODULE SCARFLIB
 
     SUBROUTINE SCARF_IO_ONE(N, FIELD, FILENAME, NWRITERS)
 
-      INTEGER(IPP),     DIMENSION(3),     INTENT(IN) :: N
-      REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
-      CHARACTER(LEN=*),                   INTENT(IN) :: FILENAME
-      INTEGER(IPP),                       INTENT(IN) :: NWRITERS
-      INTEGER(IPP)                                   :: RANK, NP, IERR
+      INTEGER(IPP),     DIMENSION(3),               INTENT(IN) :: N
+      REAL(FPP),        DIMENSION(:,:,:),           INTENT(IN) :: FIELD
+      CHARACTER(LEN=*),                             INTENT(IN) :: FILENAME
+      INTEGER(IPP),                       OPTIONAL, INTENT(IN) :: NWRITERS
+      INTEGER(IPP)                                             :: RANK, NP, NW, IERR
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -318,7 +318,13 @@ MODULE SCARFLIB
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
-      CALL WRITE_ONE(FIELD, FILENAME, NWRITERS)
+      ! DEFAULT CASE IS TO USE ONE WRITER ONLY
+      NW = 1
+
+      ! WE CANNOT HAVE MORE WRITERS THAN AVAILABLE PROCESSES
+      IF (PRESENT(NWRITERS)) NW = MIN(NP, NWRITERS)
+
+      CALL WRITE_ONE(FIELD, FILENAME, NW)
 
       DEALLOCATE(GS, GE)
 
