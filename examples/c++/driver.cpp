@@ -1,16 +1,17 @@
-#include <iostream>
 #include <mpi.h>
+#include <iostream>
 #include "scarf3d.h"
+#include "aux.h"
 
-#ifdef DOUBLE_PREC
-  typedef double fpp;
-  //using fpp = double;
-#else
-  typedef float fpp;
-  //using fpp = float;
-#endif
+// #ifdef DOUBLE_PREC
+//   typedef double fpp;
+//   //using fpp = double;
+// #else
+//   typedef float fpp;
+//   //using fpp = float;
+// #endif
 
-extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
+//extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
 
 void watch_start(double* t){
 
@@ -31,7 +32,7 @@ void watch_stop(double* t){
 int main(){
 
   // initialise MPI
-  MPI_init(nullptr, nullptr);
+  MPI_Init(nullptr, nullptr);
 
   // get number of tasks
   int world_size;
@@ -66,7 +67,7 @@ int main(){
   int dims[3];
 
   for (int i = 0; i < 3; i++){
-    int dims[i] = (fe[0] - fs[0] + 1);
+    dims[i] = (fe[i] - fs[i] + 1);
   }
 
   fpp* x     = new fpp[dims[0]*dims[1]*dims[2]];
@@ -93,13 +94,15 @@ int main(){
   const int acf = 0;
 
   // correlation length
-  const fpp cl = {500., 500., 500.};
+  const fpp cl[3] = {500., 500., 500.};
 
   // standard deviation
   const fpp sigma = 0.05;
 
   // seed number
   const int seed = 1235;
+
+  const fpp hurst[1] = {0.5};
 
   double tictoc;
 
@@ -110,55 +113,74 @@ int main(){
   // ---------------------------------------------------------------------------
   // ===========================================================================
 
-  Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma, hurst = 0.5);
+  {
+    Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma, hurst);
 
-  watch_start(&tictoc);
-  S.execute(seed, field, stats);
-  watch_stop(&tictoc);
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
 
-  if (world_rank == 0){
-    std::cout << "" << std:endl;
-    std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
-    std::cout << "Domain too small?                : " << (int) stats[1]   << std::endl;
-    std::cout << "Grid-step too large?             : " << (int) stats[2]   << std::endl;
-    std::cout << "Standard deviation               : " << (float) stats[3] << std::endl;
-    std::cout << "Mean value                       : " << (float) stats[4] << std::endl;
-    std::cout << "Timing for spectrum              : " << (float) stats[5] << std::endl;
-    std::cout << "Timing for symmetry              : " << (float) stats[6] << std::endl;
-    std::cout << "Timing for IFFT                  : " << (float) stats[7] << std::endl;
-    std::cout << "Timing for interpolation         : " << (float) stats[8] << std::endl;
+    if (world_rank == 0){
+      std::cout << "" << std::endl;
+      std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
+      std::cout << "Domain too small?                : " << (int) stats[1]   << std::endl;
+      std::cout << "Grid-step too large?             : " << (int) stats[2]   << std::endl;
+      std::cout << "Standard deviation               : " << (float) stats[3] << std::endl;
+      std::cout << "Mean value                       : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for spectrum              : " << (float) stats[5] << std::endl;
+      std::cout << "Timing for symmetry              : " << (float) stats[6] << std::endl;
+      std::cout << "Timing for IFFT                  : " << (float) stats[7] << std::endl;
+      std::cout << "Timing for interpolation         : " << (float) stats[8] << std::endl;
+    }
+
+    // IO
+    watch_start(&tictoc);
+    S.io(n, 1, 400, field, "fft_struct_xslice");
+    S.io(n, 2, 250, field, "fft_struct_yslice");
+    S.io(n, 3, 100, field, "fft_struct_zslice");
+    watch_stop(&tictoc);
+
+    if (world_rank == 0) {
+      std::cout << "Slice(s) written in                : " << (float) tictoc << std::endl;
+    };
+
+    int nwriters[1] = {3};
+
+    watch_start(&tictoc);
+    S.io(n, field, "fft_struct_whole", nwriters);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0) {
+      std::cout << "Whole file written in              : " << (float) tictoc << std::endl;
+    };
+
+    // call destructor explicitly
+    S.~Initialize();
   }
 
+  {
+    Scarf3D::Initialize<fft> S(dims, x, y, z, ds, acf, cl, sigma, hurst);
 
-  // IO
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
 
-  // call destructor explicitly
-  S.~Initialize();
+    if (world_rank == 0){
+      std::cout << "" << std::endl;
+      std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
+      std::cout << "Domain too small?                  : " << (int) stats[1]   << std::endl;
+      std::cout << "Grid-step too large?               : " << (int) stats[2]   << std::endl;
+      std::cout << "Standard deviation                 : " << (float) stats[3] << std::endl;
+      std::cout << "Mean value                         : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for spectrum                : " << (float) stats[5] << std::endl;
+      std::cout << "Timing for symmetry                : " << (float) stats[6] << std::endl;
+      std::cout << "Timing for IFFT                    : " << (float) stats[7] << std::endl;
+      std::cout << "Timing for interpolation           : " << (float) stats[8] << std::endl;
+    }
 
-  Scarf3D::Initialize<fft> S(x, y, z, dh, acf, cl, sigma, hurst = 0.5);
-
-  watch_start(&tictoc);
-  S.execute(seed, field, stats);
-  watch_stop(&tictoc);
-
-  if (world_rank == 0){
-    std::cout << "" << std:endl;
-    std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
-    std::cout << "Domain too small?                  : " << (int) stats[1]   << std::endl;
-    std::cout << "Grid-step too large?               : " << (int) stats[2]   << std::endl;
-    std::cout << "Standard deviation                 : " << (float) stats[3] << std::endl;
-    std::cout << "Mean value                         : " << (float) stats[4] << std::endl;
-    std::cout << "Timing for spectrum                : " << (float) stats[5] << std::endl;
-    std::cout << "Timing for symmetry                : " << (float) stats[6] << std::endl;
-    std::cout << "Timing for IFFT                    : " << (float) stats[7] << std::endl;
-    std::cout << "Timing for interpolation           : " << (float) stats[8] << std::endl;
+    // call destructor explicitly
+    S.~Initialize();
   }
-
-  // IO
-
-
-  // call destructor explicitly
-  S.~Initialize();
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
@@ -168,48 +190,70 @@ int main(){
 
 #ifdef SPECTRAL
 
-  Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma, hurst = 0.5);
+  {
+    Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma, hurst);
 
-  watch_start(&tictoc);
-  S.execute(seed, field, stats);
-  watch_stop(&tictoc);
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
 
-  if (world_rank == 0){
-    std::cout << "" << std:endl;
-    std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
-    std::cout << "Domain too small?                : " << (int) stats[1]   << std::endl;
-    std::cout << "Grid-step too large?             : " << (int) stats[2]   << std::endl;
-    std::cout << "Standard deviation               : " << (float) stats[3] << std::endl;
-    std::cout << "Mean value                       : " << (float) stats[4] << std::endl;
-    std::cout << "Timing for CPU execution         : " << (float) stats[5] << std::endl;
-    std::cout << "Timing for GPU execution         : " << (float) stats[6] << std::endl;
+    if (world_rank == 0){
+      std::cout << "" << std::endl;
+      std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
+      std::cout << "Domain too small?                : " << (int) stats[1]   << std::endl;
+      std::cout << "Grid-step too large?             : " << (int) stats[2]   << std::endl;
+      std::cout << "Standard deviation               : " << (float) stats[3] << std::endl;
+      std::cout << "Mean value                       : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for CPU execution         : " << (float) stats[5] << std::endl;
+      std::cout << "Timing for GPU execution         : " << (float) stats[6] << std::endl;
+    }
+
+    // IO
+    watch_start(&tictoc);
+    S.io(n, 1, 400, field, "spec_struct_xslice");
+    S.io(n, 2, 250, field, "spec_struct_yslice");
+    S.io(n, 3, 100, field, "spec_struct_zslice");
+    watch_stop(&tictoc);
+
+    if (world_rank == 0) {
+      std::cout << "Slice(s) written in                : " << (float) tictoc << std::endl;
+    };
+
+    int nwriters[1] = 3;
+
+    watch_start(&tictoc);
+    S.io(n, field, "spec_struct_whole", nwriters);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0) {
+      std::cout << "Whole file written in              : " << (float) tictoc << std::endl;
+    };
+
+    // call destructor explicitly
+    S.~Initialize();
   }
 
+  {
+    Scarf3D::Initialize<spec> S(dims, x, y, z, dh, acf, cl, sigma, hurst);
 
-  // IO
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
 
-  // call destructor explicitly
-  S.~Initialize();
+    if (world_rank == 0){
+      std::cout << "" << std::endl;
+      std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
+      std::cout << "Domain too small?                  : " << (int) stats[1]   << std::endl;
+      std::cout << "Grid-step too large?               : " << (int) stats[2]   << std::endl;
+      std::cout << "Standard deviation                 : " << (float) stats[3] << std::endl;
+      std::cout << "Mean value                         : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for CPU execution           : " << (float) stats[5] << std::endl;
+      std::cout << "Timing for GPU execution           : " << (float) stats[6] << std::endl;
+    }
 
-  Scarf3D::Initialize<spec> S(x, y, z, dh, acf, cl, sigma, hurst = 0.5);
-
-  watch_start(&tictoc);
-  S.execute(seed, field, stats);
-  watch_stop(&tictoc);
-
-  if (world_rank == 0){
-    std::cout << "" << std:endl;
-    std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
-    std::cout << "Domain too small?                  : " << (int) stats[1]   << std::endl;
-    std::cout << "Grid-step too large?               : " << (int) stats[2]   << std::endl;
-    std::cout << "Standard deviation                 : " << (float) stats[3] << std::endl;
-    std::cout << "Mean value                         : " << (float) stats[4] << std::endl;
-    std::cout << "Timing for CPU execution           : " << (float) stats[5] << std::endl;
-    std::cout << "Timing for GPU execution           : " << (float) stats[6] << std::endl;
+    // call destructor explicitly
+    S.~Initialize();
   }
-
-  // call destructor explicitly
-  S.~Initialize();
 
 #endif
 
@@ -217,7 +261,6 @@ int main(){
    delete[] y;
    delete[] z;
    delete[] field;
-   delete[] stats;
 
    MPI_Finalize();
 

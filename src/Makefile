@@ -5,22 +5,30 @@
 include ../Makefile.inc
 
 # list Fortran objects
-F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o
+F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o f_binding.o
 
 # compile Fortran objects
 $(F90_OBJS) : %.o : %.f90
 	$(FC) $(FFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
 
-# list C objects
+# list C++ objects
 CPP_OBJS = prng.o
 
-# compile C objects
+# compile C++ objects
 $(CPP_OBJS) : %.o : %.cpp
 	$(CXX) $(CXXFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
+
+# list C objects
+C_OBJS = c_binding.o
+
+# compile C objects
+$(C_OBJS) : %.o : %.c
+	$(CC) $(CXXFLAGS) -cpp $(CPP) -c -o $@ $<
 
 # define list of Fortran + C objects
 OBJS = $(F90_OBJS)
 OBJS += $(CPP_OBJS)
+OBJS += $(C_OBJS)
 
 # default rule: create library, move *.mod files and the move library
 lib: includes libscarf3d.a install_dir
@@ -33,6 +41,7 @@ install_dir:
 # move *.mod files
 includes: libscarf3d.a install_dir
 	cp *.mod ../include
+	cp *.h ../include
 
 # compress all objects into (static) library
 libscarf3d.a: $(OBJS)
@@ -81,11 +90,11 @@ else ifeq ($(COMPILER),intel)
 endif
 
 # debugging flags
-ifeq ($(debug),yes)
+ifeq ($(DEBUG),yes)
   ifeq ($(COMPILER),gcc)
     FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
     CXXFLAGS = -O0 -fno-lto -g -fbacktrace
-  else ifeq ($(comiler),pgi)
+  else ifeq ($(COMPILER),pgi)
     FFLAGS    = -O0 -g -c -traceback -Minfo
     CXXFLAGS  = -g -Minfo
   else ifeq ($(COMPILER),intel)

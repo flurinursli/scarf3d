@@ -210,6 +210,28 @@ MODULE SCARFLIB
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
+print*, 'scarflib.f90 '
+print*, 'a ', obj%acf, obj%rescale, obj%pad, obj%method, obj%fs, obj%fe
+print*, 'b ', obj%dh, obj%ds, obj%sigma, obj%hurst, obj%mute, obj%taper, obj%mute, obj%taper
+
+
+
+! INTEGER(IPP)                                       :: ACF
+! INTEGER(IPP)                                       :: RESCALE
+! INTEGER(IPP)                                       :: PAD
+! INTEGER(IPP)                                       :: METHOD
+! INTEGER(IPP),                       DIMENSION(3)   :: FS, FE
+! REAL(FPP)                                          :: DS, DH
+! REAL(FPP)                                          :: SIGMA, HURST
+! REAL(FPP)                                          :: MUTE, TAPER
+! REAL(FPP),                          DIMENSION(3)   :: CL
+! REAL(FPP),                 POINTER, DIMENSION(:)   :: X  => NULL(), Y => NULL(), Z => NULL()
+! REAL(FPP),    ALLOCATABLE,          DIMENSION(:)   :: STATS
+! REAL(FPP),    ALLOCATABLE,          DIMENSION(:,:) :: POI
+
+
+
+
       STATS = 0._FPP
 
       IF (OBJ%METHOD .EQ. 0) THEN

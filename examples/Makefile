@@ -3,13 +3,17 @@
 ################################################################################
 
 # set dependencies if invoked with 'examples' argument
-examples: fortran
+examples: fortran c++
 
 # invoke MAKE with 'fortran' argument
 fortran:
 	cd fortran; $(MAKE)	$@
 
+c++:
+	cd c++; $(MAKE) $@
+
 clean:
 	cd fortran; $(MAKE) $@
+	cd c++; $(MAKE) $@
 
-.PHONY: fortran
+.PHONY: fortran c++

@@ -4,15 +4,16 @@
 
 # choose COMPILER wrapper
 FC = mpif90
+C++ = mpic++
 
 # choose COMPILER vendor
-COMPILER = pgi
+COMPILER = gcc
 
 # compile library in single or double precision
-PRECISION = double
+PRECISION = single
 
 # compile in debug mode?
-DEBUG = no
+DEBUG = yes
 
 # activate stopwatch for performance analysis
 TIMING = yes
@@ -21,7 +22,7 @@ TIMING = yes
 PFS = no
 
 # enable test of spectral method in driver programs
-SPECTRAL = yes
+SPECTRAL = no
 
 # path to external library TRNG4: update also LD_LIBRARY_PATH if necessary
 TRNG_DIR = $(TRNG_PATH)

@@ -5,18 +5,31 @@
 include ../../Makefile.inc
 
 # list Fortran objects
-OBJS = driver.o scarflib_aux.o
+#OBJS = driver.o scarflib_aux.o
+F90_OBJS = scarflib_aux.o
+
+# compile F90 objects
+$(F90_OBJS) : %.o : %.f90
+	$(FC) $(FFLAGS) $(INCL) -c -o $@ $<
+
+# list C++ objects
+CPP_OBJS = driver.o
+
+# compile C++ objects
+$(CPP_OBJS) : %.o : %.cpp
+	$(C++) $(CXXFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
+
+# define list of Fortran + C objects
+OBJS = $(F90_OBJS)
+OBJS += $(CPP_OBJS)
 
 # default target: link to create "driver.exe"
-fortran: $(OBJS)
-	$(FC) $(FFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
+c++: $(OBJS)
+	$(FC) $(CXXLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
+	#$(C++) $(CXXLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
 
 # list dependencies
 driver.o : scarflib_aux.o
-
-# compile objects
-$(OBJS) : %.o : %.f90
-	$(FC) $(FFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
 
 clean:
 	-rm -f *.mod *.o driver.exe fft_* spec_*
