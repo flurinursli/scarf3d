@@ -95,7 +95,7 @@ ifeq ($(DEBUG),yes)
     FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
     CXXFLAGS = -O0 -fno-lto -g -fbacktrace
   else ifeq ($(COMPILER),pgi)
-    FFLAGS    = -O0 -g -c -traceback -Minfo
+    FFLAGS    = -O0 -g -traceback -Minfo
     CXXFLAGS  = -g -Minfo
   else ifeq ($(COMPILER),intel)
     FFLAGS    = -O0 -g -traceback -check all -check bounds -debug all

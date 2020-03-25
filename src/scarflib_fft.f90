@@ -132,6 +132,8 @@ MODULE SCARFLIB_FFT
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
+print*, 'a'
+
       ! GET RANK NUMBER
       CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
 
@@ -189,6 +191,8 @@ MODULE SCARFLIB_FFT
       ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
       ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
 
+print*, 'b'
+
       ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
       CALL BEST_CONFIG(DIMS)
 
@@ -244,6 +248,8 @@ MODULE SCARFLIB_FFT
       ! ALLOCATE MEMORY FOR SPECTRUM
       ALLOCATE(SPEC(M(1), M(2), M(3)))
 
+print*, 'c'
+
       ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
       CALL COMPUTE_SPECTRUM(LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
 
@@ -253,6 +259,8 @@ MODULE SCARFLIB_FFT
       ! START TIMER
       CALL WATCH_START(TICTOC)
 #endif
+
+print*, 'd'
 
       ! TRANSFORM ALONG EACH DIRECTION
       CALL TRANSFORM_ALONG_Z(SPEC)
@@ -264,6 +272,8 @@ MODULE SCARFLIB_FFT
 
       INFO(7) = TICTOC
 #endif
+
+print*, 'e'
 
       ! SCALING PARAMETER
       SCALING = 1._FPP / SQRT(REAL(NPTS(1), FPP) * REAL(NPTS(2), FPP) * REAL(NPTS(3), FPP) * DH**3)
@@ -281,6 +291,8 @@ MODULE SCARFLIB_FFT
 
       DEALLOCATE(SPEC)
 
+print*, 'e1'
+
       ALLOCATE(VAR(0:WORLD_SIZE - 1), MU(0:WORLD_SIZE - 1), NPOINTS(0:WORLD_SIZE - 1))
 
       ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD FOR EACH SINGLE PROCESS
@@ -295,8 +307,12 @@ MODULE SCARFLIB_FFT
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, MU, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
       CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
 
+print*, 'e2'
+
       ! COMPUTE TOTAL VARIANCE ("INFO(3)") AND MEAN ("INFO(4)")
       CALL PARALLEL_VARIANCE(VAR, MU, NPOINTS, INFO(3), INFO(4))
+
+print*, 'e3'
 
       ! RETURN STANDARD DEVIATION
       INFO(3) = SQRT(INFO(3))
@@ -317,6 +333,8 @@ MODULE SCARFLIB_FFT
       ENDIF
 
       DEALLOCATE(VAR, MU, NPOINTS)
+
+print*, 'e4', SIZE(POI, 2)
 
       ! APPLY TAPER/MUTE
       DO I = 1, SIZE(POI, 2)
@@ -344,11 +362,17 @@ MODULE SCARFLIB_FFT
       CALL WATCH_START(TICTOC)
 #endif
 
+print*, 'f'
+
       ! EXCHANGE HALO
       CALL EXCHANGE_HALO(CARTOPO, DELTA)
 
+print*, 'g'
+
       ! INTERPOLATE RANDOM FIELD VALUES AT DESIRED OUTPUT LOCATIONS
       CALL GRID_MAPPING(DH, DELTA, X, Y, Z, FIELD)
+
+print*, 'h'
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC)
@@ -597,6 +621,8 @@ MODULE SCARFLIB_FFT
       ENDIF
 
       DEALLOCATE(VAR, MU, NPOINTS)
+
+print*, 'poi ', size(poi, 2)
 
       ! APPLY TAPER/MUTE
       DO I = 1, SIZE(POI, 2)
@@ -2648,7 +2674,7 @@ MODULE SCARFLIB_FFT
 
       ALLOCATE(LIST(3, N3 * 5))
 
-      LIST = 0
+      LIST(:,:) = 0
 
       ! LOOP OVER FACTORISED PROCESSES
       DO L = 1, N3
@@ -2726,6 +2752,8 @@ MODULE SCARFLIB_FFT
         INTEGER(IPP)                             :: I
 
         !---------------------------------------------------------------------------------------------------------------------------
+
+        MATCH = .FALSE.
 
         DO I = 1, IMAX
           MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))

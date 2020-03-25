@@ -9,7 +9,7 @@ OBJS = driver.o scarflib_aux.o
 
 # default target: link to create "driver.exe"
 fortran: $(OBJS)
-	$(FC) $(FFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
+	$(FC) $(FFLAGS) -o driver.exe $(OBJS) $(LIBS)
 
 # list dependencies
 driver.o : scarflib_aux.o
@@ -57,7 +57,7 @@ ifeq ($(DEBUG),yes)
     FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
     CXXFLAGS = -O0 -fno-lto -g -fbacktrace
   else ifeq ($(COMPILER),pgi)
-    FFLAGS    = -O0 -g -c -traceback -Minfo
+    FFLAGS    = -O0 -g -traceback -Minfo
     CXXFLAGS  = -g -Minfo
   else ifeq ($(COMPILER),intel)
     FFLAGS    = -O0 -g -traceback -check all -check bounds -debug all

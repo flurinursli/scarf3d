@@ -23,10 +23,15 @@ $(CPP_OBJS) : %.o : %.cpp
 OBJS = $(F90_OBJS)
 OBJS += $(CPP_OBJS)
 
+MPI_LINK_FLAGS = $(shell $(FC) --showme:link)
+
 # default target: link to create "driver.exe"
 c++: $(OBJS)
-	$(FC) $(FFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
-	#$(C++) $(CXXLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
+	$(FC) $(FFLAGS) -o driver.exe $(OBJS) $(LIBS) $(LDFLAGS)
+
+#$(C++) $(CXXFLAGS) -o driver.exe $(OBJS) $(LIBS) $(MPI_LINK_FLAGS) $(LDFLAGS)
+#$(FC) $(FFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
+#$(C++) $(CXXFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
 
 # list dependencies
 driver.o : scarflib_aux.o
@@ -55,13 +60,17 @@ endif
 # optimizationflags for each compiler
 ifeq ($(COMPILER),gcc)
   FFLAGS = -O3 -fopenacc -foffload=-lm
-  CXXFLAGS = -O3
+  CXXFLAGS = -O3 -fopenacc
+	LDFLAGS = -lgfortran
 else ifeq ($(COMPILER),pgi)
   FFLAGS = -fast -acc -ta=tesla:cc75
-  CXXFLAGS = -fast
+  CXXFLAGS = -fast -acc -ta=tesla:cc75
+	#LDFLAGS = -lpgf90 -lpgf90rtl
+	LDFLAGS = -Mnomain
 else ifeq ($(COMPILER),intel)
   FFLAGS = -O3
   CXXFLAGS = -O3
+	LDFLAGS = -nofor-main -cxxlib
 endif
 
 # debugging flags
@@ -70,8 +79,8 @@ ifeq ($(DEBUG),yes)
     FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
     CXXFLAGS = -O0 -fno-lto -g -fbacktrace
   else ifeq ($(COMPILER),pgi)
-    FFLAGS    = -O0 -g -c -traceback -Minfo
-    CXXFLAGS  = -g -Minfo
+    FFLAGS    = -O0 -g -traceback -Minfo -acc -ta=tesla:cc75
+    CXXFLAGS  = -g -Minfo -acc -ta=tesla:cc75
   else ifeq ($(COMPILER),intel)
     FFLAGS    = -O0 -g -traceback -check all -check bounds -debug all
     CXXFLAGS  = -g

@@ -102,7 +102,7 @@ MODULE SCARFLIB_AUX
 
       ALLOCATE(LIST(3, N3 * 5))
 
-      LIST = 0
+      LIST(:,:) = 0
 
       ! LOOP OVER FACTORISED PROCESSES
       DO L = 1, N3
@@ -180,6 +180,8 @@ MODULE SCARFLIB_AUX
         INTEGER(IPP)                             :: I
 
         !---------------------------------------------------------------------------------------------------------------------------
+
+        MATCH = .FALSE.
 
         DO I = 1, IMAX
           MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))
