@@ -88,13 +88,15 @@ int main(){
     }
   }
 
+  const int npts = dims[0] * dims[1] * dims[2];
+
   fpp stats[8];
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const fpp cl[3] = {500., 500., 500.};
+  const fpp cl[3] = {1000., 1000., 1000.};
 
   // standard deviation
   const fpp sigma = 0.05;
@@ -123,14 +125,14 @@ int main(){
     if (world_rank == 0){
       std::cout << "" << std::endl;
       std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                : " << (int) stats[1]   << std::endl;
-      std::cout << "Grid-step too large?             : " << (int) stats[2]   << std::endl;
-      std::cout << "Standard deviation               : " << (float) stats[3] << std::endl;
-      std::cout << "Mean value                       : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for spectrum              : " << (float) stats[5] << std::endl;
-      std::cout << "Timing for symmetry              : " << (float) stats[6] << std::endl;
-      std::cout << "Timing for IFFT                  : " << (float) stats[7] << std::endl;
-      std::cout << "Timing for interpolation         : " << (float) stats[8] << std::endl;
+      std::cout << "Domain too small?                : " << (int) stats[0]   << std::endl;
+      std::cout << "Grid-step too large?             : " << (int) stats[1]   << std::endl;
+      std::cout << "Standard deviation               : " << (float) stats[2] << std::endl;
+      std::cout << "Mean value                       : " << (float) stats[3] << std::endl;
+      std::cout << "Timing for spectrum              : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for symmetry              : " << (float) stats[5] << std::endl;
+      std::cout << "Timing for IFFT                  : " << (float) stats[6] << std::endl;
+      std::cout << "Timing for interpolation         : " << (float) stats[7] << std::endl;
     }
 
     // IO
@@ -141,7 +143,7 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Slice(s) written in                : " << (float) tictoc << std::endl;
+      std::cout << "Slice(s) written in              : " << (float) tictoc << std::endl;
     };
 
     int nwriters[1] = {3};
@@ -151,15 +153,15 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Whole file written in              : " << (float) tictoc << std::endl;
+      std::cout << "Whole file written in            : " << (float) tictoc << std::endl;
     };
 
     // call destructor explicitly
-    S.~Initialize();
+    //S.~Initialize();
   }
 
   {
-    Scarf3D::Initialize<fft> S(dims, x, y, z, ds, acf, cl, sigma, hurst);
+    Scarf3D::Initialize<fft> S(npts, x, y, z, ds, acf, cl, sigma, hurst);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -168,18 +170,18 @@ int main(){
     if (world_rank == 0){
       std::cout << "" << std::endl;
       std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                  : " << (int) stats[1]   << std::endl;
-      std::cout << "Grid-step too large?               : " << (int) stats[2]   << std::endl;
-      std::cout << "Standard deviation                 : " << (float) stats[3] << std::endl;
-      std::cout << "Mean value                         : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for spectrum                : " << (float) stats[5] << std::endl;
-      std::cout << "Timing for symmetry                : " << (float) stats[6] << std::endl;
-      std::cout << "Timing for IFFT                    : " << (float) stats[7] << std::endl;
-      std::cout << "Timing for interpolation           : " << (float) stats[8] << std::endl;
+      std::cout << "Domain too small?                  : " << (int) stats[0]   << std::endl;
+      std::cout << "Grid-step too large?               : " << (int) stats[1]   << std::endl;
+      std::cout << "Standard deviation                 : " << (float) stats[2] << std::endl;
+      std::cout << "Mean value                         : " << (float) stats[3] << std::endl;
+      std::cout << "Timing for spectrum                : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for symmetry                : " << (float) stats[5] << std::endl;
+      std::cout << "Timing for IFFT                    : " << (float) stats[6] << std::endl;
+      std::cout << "Timing for interpolation           : " << (float) stats[7] << std::endl;
     }
 
     // call destructor explicitly
-    S.~Initialize();
+    //S.~Initialize();
   }
 
   // ===========================================================================
@@ -200,12 +202,12 @@ int main(){
     if (world_rank == 0){
       std::cout << "" << std::endl;
       std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                : " << (int) stats[1]   << std::endl;
-      std::cout << "Grid-step too large?             : " << (int) stats[2]   << std::endl;
-      std::cout << "Standard deviation               : " << (float) stats[3] << std::endl;
-      std::cout << "Mean value                       : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for CPU execution         : " << (float) stats[5] << std::endl;
-      std::cout << "Timing for GPU execution         : " << (float) stats[6] << std::endl;
+      std::cout << "Domain too small?                : " << (int) stats[0]   << std::endl;
+      std::cout << "Grid-step too large?             : " << (int) stats[1]   << std::endl;
+      std::cout << "Standard deviation               : " << (float) stats[2] << std::endl;
+      std::cout << "Mean value                       : " << (float) stats[3] << std::endl;
+      std::cout << "Timing for CPU execution         : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for GPU execution         : " << (float) stats[5] << std::endl;
     }
 
     // IO
@@ -243,12 +245,12 @@ int main(){
     if (world_rank == 0){
       std::cout << "" << std::endl;
       std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                  : " << (int) stats[1]   << std::endl;
-      std::cout << "Grid-step too large?               : " << (int) stats[2]   << std::endl;
-      std::cout << "Standard deviation                 : " << (float) stats[3] << std::endl;
-      std::cout << "Mean value                         : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for CPU execution           : " << (float) stats[5] << std::endl;
-      std::cout << "Timing for GPU execution           : " << (float) stats[6] << std::endl;
+      std::cout << "Domain too small?                  : " << (int) stats[0]   << std::endl;
+      std::cout << "Grid-step too large?               : " << (int) stats[1]   << std::endl;
+      std::cout << "Standard deviation                 : " << (float) stats[2] << std::endl;
+      std::cout << "Mean value                         : " << (float) stats[3] << std::endl;
+      std::cout << "Timing for CPU execution           : " << (float) stats[4] << std::endl;
+      std::cout << "Timing for GPU execution           : " << (float) stats[5] << std::endl;
     }
 
     // call destructor explicitly
@@ -261,6 +263,8 @@ int main(){
    delete[] y;
    delete[] z;
    delete[] field;
+
+   MPI_Barrier(MPI_COMM_WORLD);
 
    MPI_Finalize();
 

@@ -39,12 +39,12 @@ void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const
 
 }
 
-void scarf_unstruct_initialize(const int npts[], const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
+void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
                                const int* solver, const fpp* hurst, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,
                                const int* rescale, const int* pad){
 
    // call FORTRAN subroutine
-   unstruct_initialize(npts, x, y, z, &dh, &acf, cl, &sigma, solver, hurst, poi, npoi, mute, taper, rescale, pad);
+   unstruct_initialize(&npts, x, y, z, &dh, &acf, cl, &sigma, solver, hurst, poi, npoi, mute, taper, rescale, pad);
 
 }
 

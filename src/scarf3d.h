@@ -29,12 +29,12 @@ extern "C"{
 //
 // extern void io_slice(const int* npts, const int* direction, const int* plane, const fpp** field, const char fname[]);
 
-// declar C functions
+// declare C functions
 void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const int acf, const fpp cl[], const fpp sigma,
                              const int* solver, const fpp* hurst, const fpp* dh, const fpp* poi, const int* npoi, const fpp* mute,
                              const fpp* taper, const int* rescale, const int* pad);
 
-void scarf_unstruct_initialize(const int npts[], const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
+void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
                                const int* solver, const fpp* hurst, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,
                                const int* rescale, const int* pad);
 
@@ -42,9 +42,9 @@ void scarf_execute(const int seed, fpp* field, fpp stats[]);
 
 void scarf_finalize();
 
-void io_one(const int* npts, const fpp* field, const char fname[], const int* nwriters);
+void scarf_io_one(const int* npts, const fpp* field, const char fname[], const int* nwriters);
 
-void io_slice(const int* npts, const int direction, const int plane, const fpp* field, const char fname[]);
+void scarf_io_slice(const int* npts, const int direction, const int plane, const fpp* field, const char fname[]);
 
 #ifdef __cplusplus
 }
@@ -77,7 +77,7 @@ namespace Scarf3D
       };
 
       // constructor unstructured mesh
-      Initialize(const int npts[], const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
+      Initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
                  const fpp* hurst = nullptr, const fpp* poi = nullptr, const int* npoi = nullptr, const fpp* mute = nullptr,
                  const fpp* taper = nullptr, const int* rescale = nullptr, const int* pad = nullptr)
       {
@@ -105,13 +105,13 @@ namespace Scarf3D
       // IO whole model
       void io(const int npts[], const fpp* field, const char fname[], const int* nwriters = nullptr)
       {
-        io_one(npts, field, fname, nwriters);
+        scarf_io_one(npts, field, fname, nwriters);
       };
 
       // IO model slice
       void io(const int npts[], const int direction, const int plane, const fpp* field, const char fname[])
       {
-        io_slice(npts, direction, plane, field, fname);
+        scarf_io_slice(npts, direction, plane, field, fname);
       };
 
   };

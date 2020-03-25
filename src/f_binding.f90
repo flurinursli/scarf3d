@@ -31,34 +31,17 @@ MODULE SCARF3D_C_BINDING
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: METHOD
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: HURST
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: DH
-      !REAL(C_FPP),    DIMENSION(3,NP), OPTIONAL, INTENT(IN) :: POI
       TYPE(C_PTR),                     OPTIONAL, INTENT(IN) :: POI
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: NP
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
-
-      ! INTEGER(C_INT),                 POINTER            :: F_METHOD, F_RESCALE, F_PAD, F_NPOI
-      ! REAL(C_FPP),                    POINTER            :: F_HURST, F_DH, F_MUTE, F_TAPER
-      ! REAL(C_FPP),    DIMENSION(:),   POINTER            :: F_X, F_Y, F_Z
-      REAL(C_FPP),    DIMENSION(:,:), POINTER               :: PTR
+      REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       STRUCTURED = 1
 
       DIMS(:) = FE(:) - FS(:) + 1
-
-      ! NULLIFY(F_METHOD, F_HURST, F_DH, F_POI, F_NPOI, F_MUTE, F_TAPER, F_RESCALE, F_PAD)
-      !
-      ! IF (C_ASSOCIATED(METHOD))  CALL C_F_POINTER(METHOD, F_METHOD)
-      ! IF (C_ASSOCIATED(HURST))   CALL C_F_POINTER(HURST, F_HURST)
-      ! IF (C_ASSOCIATED(DH))      CALL C_F_POINTER(DH, F_DH)
-      ! IF (C_ASSOCIATED(NPOI))    CALL C_F_POINTER(NPOI, F_NPOI)
-      ! IF (C_ASSOCIATED(POI))     CALL C_F_POINTER(POI, F_POI, [3, F_NPOI])
-      ! IF (C_ASSOCIATED(MUTE))    CALL C_F_POINTER(MUTE, F_MUTE)
-      ! IF (C_ASSOCIATED(TAPER))   CALL C_F_POINTER(TAPER, F_TAPER)
-      ! IF (C_ASSOCIATED(RESCALE)) CALL C_F_POINTER(RESCALE, F_RESCALE)
-      ! IF (C_ASSOCIATED(PAD))     CALL C_F_POINTER(PAD, F_PAD)
 
       NULLIFY(PTR)
 
@@ -85,15 +68,11 @@ MODULE SCARF3D_C_BINDING
       REAL(C_FPP),                               INTENT(IN) :: SIGMA
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: METHOD
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: HURST
-      !REAL(C_FPP),    DIMENSION(3,NP), OPTIONAL, INTENT(IN) :: POI
       TYPE(C_PTR),                     OPTIONAL, INTENT(IN) :: POI
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: NP
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      ! INTEGER(C_INT),                 POINTER            :: F_METHOD, F_RESCALE, F_PAD, F_NPOI
-      ! REAL(C_FPP),                    POINTER            :: F_HURST, F_MUTE, F_TAPER
-      ! REAL(C_FPP),    DIMENSION(:),   POINTER            :: F_X, F_Y, F_Z
-      REAL(C_FPP),    DIMENSION(:,:), POINTER            :: PTR
+      REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -101,20 +80,7 @@ MODULE SCARF3D_C_BINDING
 
       N = NPTS
 
-      ! CALL C_F_POINTER(X, F_X, [NPTS])
-      ! CALL C_F_POINTER(Y, F_Y, [NPTS])
-      ! CALL C_F_POINTER(Z, F_Z, [NPTS])
-      !
-      ! NULLIFY(F_METHOD, F_HURST, F_POI, F_NPOI, F_MUTE, F_TAPER, F_RESCALE, F_PAD)
-      !
-      ! IF (C_ASSOCIATED(METHOD))  CALL C_F_POINTER(METHOD, F_METHOD)
-      ! IF (C_ASSOCIATED(HURST))   CALL C_F_POINTER(HURST, F_HURST)
-      ! IF (C_ASSOCIATED(NPOI))    CALL C_F_POINTER(NPOI, F_NPOI)
-      ! IF (C_ASSOCIATED(POI))     CALL C_F_POINTER(POI, F_POI, [3, F_NPOI])
-      ! IF (C_ASSOCIATED(MUTE))    CALL C_F_POINTER(MUTE, F_MUTE)
-      ! IF (C_ASSOCIATED(TAPER))   CALL C_F_POINTER(TAPER, F_TAPER)
-      ! IF (C_ASSOCIATED(RESCALE)) CALL C_F_POINTER(RESCALE, F_RESCALE)
-      ! IF (C_ASSOCIATED(PAD))     CALL C_F_POINTER(PAD, F_PAD)
+      NULLIFY(PTR)
 
       IF (PRESENT(POI)) CALL C_F_POINTER(POI, PTR, [3, NP])
 
@@ -138,18 +104,13 @@ MODULE SCARF3D_C_BINDING
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-
-print*, 'f_binding.f90 - execute ', SEED, STRUCTURED, DIMS, N
-
       IF (STRUCTURED .EQ. 0) THEN
         CALL C_F_POINTER(FIELD, F_UNSTRUCT, [N])
         CALL SCARF_EXECUTE(SEED, F_UNSTRUCT, STATS)
-print*, 'f_binding.f90 - execute ', MINVAL(F_UNSTRUCT), MAXVAL(F_UNSTRUCT), STATS
         NULLIFY(F_UNSTRUCT)
       ELSE
         CALL C_F_POINTER(FIELD, F_STRUCT, [DIMS])
         CALL SCARF_EXECUTE(SEED, F_STRUCT, STATS)
-print*, 'f_binding.f90 - execute ', MINVAL(F_STRUCT), MAXVAL(F_STRUCT), STATS
         NULLIFY(F_STRUCT)
       ENDIF
 
@@ -171,9 +132,9 @@ print*, 'f_binding.f90 - execute ', MINVAL(F_STRUCT), MAXVAL(F_STRUCT), STATS
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE IO_ONE(N, FIELD, FOUT, NWRITERS) BIND(C, NAME="io_one")
+    SUBROUTINE IO_ONE(NPTS, FIELD, FOUT, NWRITERS) BIND(C, NAME="io_one")
 
-      INTEGER(C_INT),                DIMENSION(3),               INTENT(IN) :: N
+      INTEGER(C_INT),                DIMENSION(3),               INTENT(IN) :: NPTS
       TYPE(C_PTR),                                               INTENT(IN) :: FIELD
       CHARACTER(C_CHAR),             DIMENSION(*),               INTENT(IN) :: FOUT
       INTEGER(C_INT),                                  OPTIONAL, INTENT(IN) :: NWRITERS
@@ -183,7 +144,7 @@ print*, 'f_binding.f90 - execute ', MINVAL(F_STRUCT), MAXVAL(F_STRUCT), STATS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL C_F_POINTER(FIELD, PTR, [N])
+      CALL C_F_POINTER(FIELD, PTR, [DIMS])
 
       I = 1
 
@@ -194,7 +155,7 @@ print*, 'f_binding.f90 - execute ', MINVAL(F_STRUCT), MAXVAL(F_STRUCT), STATS
         I        = I + 1
       ENDDO
 
-      CALL SCARF_IO(N, PTR, FILENAME, NWRITERS)
+      CALL SCARF_IO(NPTS, PTR, FILENAME, NWRITERS)
 
       NULLIFY(PTR)
 
@@ -217,7 +178,7 @@ print*, 'f_binding.f90 - execute ', MINVAL(F_STRUCT), MAXVAL(F_STRUCT), STATS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL C_F_POINTER(FIELD, PTR, [N])
+      CALL C_F_POINTER(FIELD, PTR, [DIMS])
 
       I = 1
 

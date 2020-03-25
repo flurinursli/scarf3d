@@ -182,12 +182,16 @@ MODULE SCARFLIB
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
+print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad
+
         CALL SCARF3D_FFT(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE, OBJ%TAPER,  &
                          OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
 
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
+
+print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
 
         CALL SCARF3D_SPEC(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE, OBJ%TAPER, &
                           FIELD, OBJ%STATS)
@@ -210,31 +214,11 @@ MODULE SCARFLIB
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-print*, 'scarflib.f90 '
-print*, 'a ', obj%acf, obj%rescale, obj%pad, obj%method, obj%fs, obj%fe
-print*, 'b ', obj%dh, obj%ds, obj%sigma, obj%hurst, obj%mute, obj%taper, obj%mute, obj%taper
-
-
-
-! INTEGER(IPP)                                       :: ACF
-! INTEGER(IPP)                                       :: RESCALE
-! INTEGER(IPP)                                       :: PAD
-! INTEGER(IPP)                                       :: METHOD
-! INTEGER(IPP),                       DIMENSION(3)   :: FS, FE
-! REAL(FPP)                                          :: DS, DH
-! REAL(FPP)                                          :: SIGMA, HURST
-! REAL(FPP)                                          :: MUTE, TAPER
-! REAL(FPP),                          DIMENSION(3)   :: CL
-! REAL(FPP),                 POINTER, DIMENSION(:)   :: X  => NULL(), Y => NULL(), Z => NULL()
-! REAL(FPP),    ALLOCATABLE,          DIMENSION(:)   :: STATS
-! REAL(FPP),    ALLOCATABLE,          DIMENSION(:,:) :: POI
-
-
-
-
       STATS = 0._FPP
 
       IF (OBJ%METHOD .EQ. 0) THEN
+
+print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad
 
         CALL SCARF3D_FFT(OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,    &
                          OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
@@ -242,6 +226,8 @@ print*, 'b ', obj%dh, obj%ds, obj%sigma, obj%hurst, obj%mute, obj%taper, obj%mut
         STATS = OBJ%STATS
 
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
+
+print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
 
         CALL SCARF3D_SPEC(OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
                           OBJ%TAPER, FIELD, OBJ%STATS)
@@ -260,8 +246,8 @@ print*, 'b ', obj%dh, obj%ds, obj%sigma, obj%hurst, obj%mute, obj%taper, obj%mut
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      DEALLOCATE(OBJ%POI)
-      DEALLOCATE(OBJ%STATS)
+      IF (ALLOCATED(OBJ%POI))   DEALLOCATE(OBJ%POI)
+      IF (ALLOCATED(OBJ%STATS)) DEALLOCATE(OBJ%STATS)
 
       NULLIFY(OBJ%X, OBJ%Y, OBJ%Z)
 

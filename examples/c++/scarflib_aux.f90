@@ -46,8 +46,6 @@ MODULE SCARFLIB_AUX
       ! SPLIT EACH AXIS AND ASSIGN POINTS TO CURRENT PROCESS
       CALL MPI_SPLIT_TASK(N, DIMS, COORDS, FS, FE)
 
-if (rank == 0) print*, 'sample_mesh f90 ', fs, ' x ', fe
-
     END SUBROUTINE SAMPLE_MESH
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
