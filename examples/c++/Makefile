@@ -25,7 +25,7 @@ OBJS += $(CPP_OBJS)
 
 # default target: link to create "driver.exe"
 c++: $(OBJS)
-	$(FC) $(CXXLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
+	$(FC) $(FFLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
 	#$(C++) $(CXXLAGS) -o driver.exe $(INCL) $(OBJS) $(LIBS)
 
 # list dependencies

@@ -221,7 +221,7 @@ int main(){
       std::cout << "Slice(s) written in                : " << (float) tictoc << std::endl;
     };
 
-    int nwriters[1] = 3;
+    int nwriters[1] = {3};
 
     watch_start(&tictoc);
     S.io(n, field, "spec_struct_whole", nwriters);
@@ -232,11 +232,11 @@ int main(){
     };
 
     // call destructor explicitly
-    S.~Initialize();
+    // S.~Initialize();
   }
 
   {
-    Scarf3D::Initialize<spec> S(dims, x, y, z, dh, acf, cl, sigma, hurst);
+    Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma, hurst);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
