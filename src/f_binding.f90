@@ -36,6 +36,7 @@ MODULE SCARF3D_C_BINDING
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
       REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
+      REAL(C_FPP),    DIMENSION(0,0),  TARGET               :: VOID
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -43,9 +44,11 @@ MODULE SCARF3D_C_BINDING
 
       DIMS(:) = FE(:) - FS(:) + 1
 
-      NULLIFY(PTR)
-
-      IF (PRESENT(POI)) CALL C_F_POINTER(POI, PTR, [3, NP])
+      IF (PRESENT(POI)) THEN
+        CALL C_F_POINTER(POI, PTR, [3, NP])
+      ELSE
+        PTR => VOID
+      ENDIF
 
       CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, PTR, MUTE, TAPER, RESCALE, PAD)
 
@@ -73,6 +76,7 @@ MODULE SCARF3D_C_BINDING
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
       REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
+      REAL(C_FPP),    DIMENSION(0,0),  TARGET               :: VOID
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -80,9 +84,11 @@ MODULE SCARF3D_C_BINDING
 
       N = NPTS
 
-      NULLIFY(PTR)
-
-      IF (PRESENT(POI)) CALL C_F_POINTER(POI, PTR, [3, NP])
+      IF (PRESENT(POI)) THEN
+        CALL C_F_POINTER(POI, PTR, [3, NP])
+      ELSE
+        PTR => VOID
+      ENDIF
 
       CALL SCARF_INITIALIZE(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, PTR, MUTE, TAPER, RESCALE, PAD)
 

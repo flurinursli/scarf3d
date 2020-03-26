@@ -9,21 +9,21 @@ F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o f_binding
 
 # compile Fortran objects
 $(F90_OBJS) : %.o : %.f90
-	$(FC) $(FFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
+	$(FC) $(FFLAGS) $(PP_FLAGS) $(INCL) -c -o $@ $<
 
 # list C++ objects
 CPP_OBJS = prng.o
 
 # compile C++ objects
 $(CPP_OBJS) : %.o : %.cpp
-	$(CXX) $(CXXFLAGS) $(INCL) -cpp $(CPP) -c -o $@ $<
+	$(C++) $(CXXFLAGS) $(PP_FLAGS) $(INCL) -c -o $@ $<
 
 # list C objects
 C_OBJS = c_binding.o
 
 # compile C objects
 $(C_OBJS) : %.o : %.c
-	$(CC) $(CXXFLAGS) -cpp $(CPP) -c -o $@ $<
+	$(CC) $(CXXFLAGS) $(PP_FLAGS) -c -o $@ $<
 
 # define list of Fortran + C objects
 OBJS = $(F90_OBJS)
@@ -63,43 +63,43 @@ INCL = -I$(TRNG_DIR)/include
 INCL += -I$(FFTW_DIR)/include
 
 # prepare preprocessor directives
-CPP =
+PP_FLAGS =
 
 ifeq ($(PRECISION),double)
-	CPP += -DDOUBLE_PREC
+	PP_FLAGS += -DDOUBLE_PREC
 endif
 
 ifeq ($(TIMING),yes)
-	CPP += -DTIMING
+	PP_FLAGS += -DTIMING
 endif
 
 ifeq ($(PFS),yes)
-  CPP += -DPFS
+  PP_FLAGS += -DPFS
 endif
 
 # optimizationflags for each compiler
 ifeq ($(COMPILER),gcc)
-  FFLAGS = -O3 -fopenacc -foffload=-lm
-  CXXFLAGS = -O3
+  FFLAGS = -O3 -funroll-loops -fopenacc -foffload=-lm -cpp
+  CXXFLAGS = -O3 -funroll-loops -cpp
 else ifeq ($(COMPILER),pgi)
-  FFLAGS = -fast -acc -ta=tesla:cc75
-  CXXFLAGS = -fast
+  FFLAGS = -fast -acc -ta=tesla:cc75 -cpp
+  CXXFLAGS = -fast -cpp
 else ifeq ($(COMPILER),intel)
-  FFLAGS = -O3
-  CXXFLAGS = -O3
+  FFLAGS = -O3 -unroll-aggressive -qopt-prefetch -cpp
+  CXXFLAGS = -O3 -unroll-aggressive -qopt-prefetch
 endif
 
 # debugging flags
 ifeq ($(DEBUG),yes)
   ifeq ($(COMPILER),gcc)
-    FFLAGS = -O0 -fno-lto -g -fcheck=all -fbacktrace
-    CXXFLAGS = -O0 -fno-lto -g -fbacktrace
+    FFLAGS = -Og -fno-lto -g -fcheck=all -fbacktrace -fimplicit-none -Wall -cpp
+    CXXFLAGS = -Og -fno-lto -g -fstack-check -cpp
   else ifeq ($(COMPILER),pgi)
-    FFLAGS    = -O0 -g -traceback -Minfo
-    CXXFLAGS  = -g -Minfo
+    FFLAGS    = -O0 -g -traceback -Minfo -cpp
+    CXXFLAGS  = -O0 -g -Minfo
   else ifeq ($(COMPILER),intel)
-    FFLAGS    = -O0 -g -traceback -check all -check bounds -debug all
-    CXXFLAGS  = -g
+    FFLAGS    = -O0 -g -traceback -check all -check bounds -cpp
+    CXXFLAGS  = -O0 -g -traceback
   endif
 endif
 

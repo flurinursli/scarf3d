@@ -1,33 +1,16 @@
 #include <mpi.h>
 #include <iostream>
 #include "scarf3d.h"
-#include "aux.h"
 
-// #ifdef DOUBLE_PREC
-//   typedef double fpp;
-//   //using fpp = double;
-// #else
-//   typedef float fpp;
-//   //using fpp = float;
-// #endif
-
-//extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
-
-void watch_start(double* t){
-
-  MPI_Barrier(MPI_COMM_WORLD);
-
-  *t = MPI_Wtime();
-
+// FORTRAN subroutine prototype
+extern "C"{
+  extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
 }
 
-void watch_stop(double* t){
+// timing functions
+inline void watch_start(double* t){MPI_Barrier(MPI_COMM_WORLD); *t = MPI_Wtime();}
+inline void watch_stop(double* t){MPI_Barrier(MPI_COMM_WORLD); *t = MPI_Wtime() - *t;}
 
-  MPI_Barrier(MPI_COMM_WORLD);
-
-  *t = MPI_Wtime() - *t;
-
-}
 
 int main(){
 
@@ -144,7 +127,7 @@ int main(){
 
     if (world_rank == 0) {
       std::cout << "Slice(s) written in              : " << (float) tictoc << std::endl;
-    };
+    }
 
     int nwriters[1] = {3};
 
@@ -154,7 +137,7 @@ int main(){
 
     if (world_rank == 0) {
       std::cout << "Whole file written in            : " << (float) tictoc << std::endl;
-    };
+    }
 
     // call destructor explicitly
     //S.~Initialize();
@@ -218,8 +201,8 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Slice(s) written in                : " << (float) tictoc << std::endl;
-    };
+      std::cout << "Slice(s) written in              : " << (float) tictoc << std::endl;
+    }
 
     int nwriters[1] = {3};
 
@@ -228,8 +211,8 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Whole file written in              : " << (float) tictoc << std::endl;
-    };
+      std::cout << "Whole file written in            : " << (float) tictoc << std::endl;
+    }
 
     // call destructor explicitly
     // S.~Initialize();

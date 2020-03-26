@@ -11,23 +11,23 @@ F90_OBJS = scarflib_aux.o
 $(F90_OBJS) : %.o : %.f90
 	$(FC) $(FFLAGS) $(INCL) -c -o $@ $<
 
-# list C++ objects
-CPP_OBJS = driver.o
+# list C objects
+C_OBJS = driver.o
 
-# compile C++ objects
-$(CPP_OBJS) : %.o : %.cpp
-	$(C++) $(CXXFLAGS) $(PP_FLAGS) $(INCL) -c -o $@ $<
+# compile C objects
+$(C_OBJS) : %.o : %.c
+	$(CC) $(CFLAGS) $(PP_FLAGS) $(INCL) -c -o $@ $<
 
 # define list of Fortran + C objects
 OBJS = $(F90_OBJS)
-OBJS += $(CPP_OBJS)
+OBJS += $(C_OBJS)
 
 MPI_LINK_FLAGS = $(shell $(FC) --showme:link)
 
 # default target: link to create "driver.exe"
-c++: $(OBJS)
+c: $(OBJS)
 #	$(FC) $(FFLAGS) -o driver.exe $(OBJS) $(LIB_LINK_FLAGS) $(LDFLAGS)
-	$(C++) $(CXXFLAGS) $(PP_FLAGS) -o driver.exe $(OBJS) $(LIB_LINK_FLAGS) $(MPI_LINK_FLAGS) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(PP_FLAGS) -o driver.exe $(OBJS) $(LIB_LINK_FLAGS) $(MPI_LINK_FLAGS) $(LDFLAGS)
 
 
 # list dependencies
@@ -57,16 +57,16 @@ endif
 # optimizationflags for each compiler
 ifeq ($(COMPILER),gcc)
   FFLAGS = -O3 -funroll-loops -fopenacc -foffload=-lm -cpp
-  CXXFLAGS = -O3 -funroll-loops -fopenacc -cpp
-	LDFLAGS = -lgfortran
+  CFLAGS = -O3 -funroll-loops -fopenacc -cpp
+	LDFLAGS = -lgfortran -lm
 else ifeq ($(COMPILER),pgi)
   FFLAGS = -fast -acc -ta=tesla:cc75 -cpp
-  CXXFLAGS = -fast -acc -ta=tesla:cc75 -cpp
+  CFLAGS = -fast -acc -ta=tesla:cc75 -cpp
 	LDFLAGS = -lpgf90 -lpgf90rtl
 	#LDFLAGS = -Mnomain
 else ifeq ($(COMPILER),intel)
   FFLAGS = -O3 -unroll-aggressive -qopt-prefetch -cpp
-  CXXFLAGS = -O3 -unroll-aggressive -qopt-prefetch
+  CFLAGS = -O3 -unroll-aggressive -qopt-prefetch
 	LDFLAGS = -lifcore
 	#LDFLAGS = -nofor-main -cxxlib
 endif
@@ -75,12 +75,12 @@ endif
 ifeq ($(DEBUG),yes)
   ifeq ($(COMPILER),gcc)
     FFLAGS = -Og -fno-lto -g -fcheck=all -fbacktrace -fimplicit-none -Wall -cpp
-    CXXFLAGS = -Og -fno-lto -g -fstack-check -cpp
+    CFLAGS = -Og -fno-lto -g -fstack-check -cpp
   else ifeq ($(COMPILER),pgi)
     FFLAGS    = -O0 -g -traceback -Minfo -acc -ta=tesla:cc75 -cpp
-    CXXFLAGS  = -g -Minfo -acc -ta=tesla:cc75 -cpp
+    CFLAGS  = -g -Minfo -acc -ta=tesla:cc75 -cpp
   else ifeq ($(COMPILER),intel)
     FFLAGS    = -O0 -g -traceback -check all -check bounds -cpp
-    CXXFLAGS  = -O0 -g -traceback
+    CFLAGS  = -O0 -g -traceback
   endif
 endif

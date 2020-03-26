@@ -3,11 +3,12 @@
 ################################################################################
 
 # choose COMPILER wrapper
-FC = mpif90
+FC  = mpif90
 C++ = mpic++
+CC  = mpicc
 
 # choose COMPILER vendor
-COMPILER = pgi
+COMPILER = $(VENDOR)
 
 # compile library in single or double precision
 PRECISION = single
