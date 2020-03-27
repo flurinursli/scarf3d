@@ -199,13 +199,12 @@ MODULE SCARFLIB_SPEC
       ! UPDATE SELECTED VARIABLES IN GPU MEMORY
       !$ACC UPDATE DEVICE(A, B, V1, V2, V3)
 
-      !$ACC KERNELS ASYNC
-      !$ACC LOOP INDEPENDENT PRIVATE(ARG)
+      !$ACC PARALLEL LOOP PRIVATE(ARG) ASYNC
       DO I = 1, NPTS
         ARG = V1 * X(I) + V2 * Y(I) + V3 * Z(I)
         FIELD(I) = FIELD(I) + A * SIN(ARG) + B * COS(ARG)
       ENDDO
-      !$ACC END KERNELS
+      !$ACC END PARALLEL LOOP
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
@@ -219,12 +218,11 @@ MODULE SCARFLIB_SPEC
     !$ACC WAIT
 
     ! NORMALISE RANDOM FIELD
-    !$ACC KERNELS
-    !$ACC LOOP INDEPENDENT
+    !$ACC PARALLEL LOOP
     DO I = 1, NPTS
       FIELD(I) = FIELD(I) * SCALING
     ENDDO
-    !$ACC END KERNELS
+    !$ACC END PARALLEL LOOP
 
     ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
     !$ACC END DATA
@@ -427,20 +425,19 @@ MODULE SCARFLIB_SPEC
       ! UPDATE SELECTED VARIABLES IN GPU MEMORY
       !$ACC UPDATE DEVICE(A, B, V1, V2, V3)
 
-      !$ACC KERNELS ASYNC
-      !$ACC LOOP INDEPENDENT PRIVATE(X, Y, Z, ARG)
+      !$ACC PARALLEL LOOP PRIVATE(X, Y, Z, ARG) COLLAPSE(3) ASYNC
       DO K = 1, NPTS(3)
-        Z = (K + FS(3) - 2) * DS
         DO J = 1, NPTS(2)
-          Y = (J + FS(2) - 2) * DS
           DO I = 1, NPTS(1)
             X              = (I + FS(1) - 2) * DS
+            Y              = (J + FS(2) - 2) * DS
+            Z              = (K + FS(3) - 2) * DS
             ARG            = V1 * X + V2 * Y + V3 * Z
             FIELD(I, J, K) = FIELD(I, J, K) + A * SIN(ARG) + B * COS(ARG)
           ENDDO
         ENDDO
       ENDDO
-      !$ACC END KERNELS
+!      !$ACC END PARALLEL LOOP
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
@@ -454,8 +451,7 @@ MODULE SCARFLIB_SPEC
     !$ACC WAIT
 
     ! NORMALISE RANDOM FIELD
-    !$ACC KERNELS
-    !$ACC LOOP INDEPENDENT
+    !$ACC PARALLEL LOOP COLLAPSE(3)
     DO K = 1, NPTS(3)
       DO J = 1, NPTS(2)
         DO I = 1, NPTS(1)
@@ -463,7 +459,7 @@ MODULE SCARFLIB_SPEC
         ENDDO
       ENDDO
     ENDDO
-    !$ACC END KERNELS
+!    !$ACC END PARALLEL LOOP
 
     ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
     !$ACC END DATA

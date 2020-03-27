@@ -56,8 +56,8 @@ endif
 
 # optimizationflags for each compiler
 ifeq ($(COMPILER),gcc)
-  FFLAGS = -O3 -funroll-loops -fopenacc -foffload=-lm -cpp
-  CXXFLAGS = -O3 -funroll-loops -fopenacc -cpp
+  FFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
+  CXXFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
 	LDFLAGS = -lgfortran
 else ifeq ($(COMPILER),pgi)
   FFLAGS = -fast -acc -ta=tesla:cc75 -cpp
