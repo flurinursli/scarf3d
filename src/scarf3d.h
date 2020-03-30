@@ -1,3 +1,7 @@
+#ifndef SCARF3D_H_
+
+#define SCARF3D_H_
+
 enum algorithm {fft, spec};
 
 #ifdef DOUBLE_PREC
@@ -117,4 +121,6 @@ namespace Scarf3D
   };
 
 }
+#endif
+
 #endif

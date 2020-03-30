@@ -313,7 +313,8 @@ MODULE SCARFLIB_COMMON
           ENDIF
 
           SUBSIZES(:) = GE(:, RCVRANK) - GS(:, RCVRANK) + 1
-          STARTS(:)   = GS(:, RCVRANK) - 1
+          !STARTS(:)   = GS(:, RCVRANK) - 1
+          STARTS(:)   = GS(:, RCVRANK) - MINVAL(GS, DIM = 2)
 
           CALL MPI_TYPE_CREATE_SUBARRAY(3, NPTS, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
 
@@ -463,7 +464,7 @@ MODULE SCARFLIB_COMMON
         BOOL = (PLANE .GE. GS(1, WORLD_RANK)) .AND. (PLANE .LE. GE(1, WORLD_RANK))
 
         SUBSIZES = [SIZE(V, 2), SIZE(V, 3)]
-        STARTS   = [GS(2, WORLD_RANK) - 1, GS(3, WORLD_RANK) - 1]
+        STARTS   = [GS(2, WORLD_RANK) - MINVAL(GS(2, :)), GS(3, WORLD_RANK) - MINVAL(GS(3, :))]
 
         DIMS = [NPTS(2), NPTS(3)]
 
@@ -475,7 +476,8 @@ MODULE SCARFLIB_COMMON
         BOOL = (PLANE .GE. GS(2, WORLD_RANK)) .AND. (PLANE .LE. GE(2, WORLD_RANK))
 
         SUBSIZES = [SIZE(V, 1), SIZE(V, 3)]
-        STARTS   = [GS(1, WORLD_RANK) - 1, GS(3, WORLD_RANK) - 1]
+        !STARTS   = [GS(1, WORLD_RANK) - 1, GS(3, WORLD_RANK) - 1]
+        STARTS   = [GS(1, WORLD_RANK) - MINVAL(GS(1, :)), GS(3, WORLD_RANK) - MINVAL(GS(2, :))]
 
         DIMS = [NPTS(1), NPTS(3)]
 
@@ -487,7 +489,8 @@ MODULE SCARFLIB_COMMON
         BOOL = (PLANE .GE. GS(3, WORLD_RANK)) .AND. (PLANE .LE. GE(3, WORLD_RANK))
 
         SUBSIZES = [SIZE(V, 1), SIZE(V, 2)]
-        STARTS   = [GS(1, WORLD_RANK) - 1, GS(2, WORLD_RANK) - 1]
+        !STARTS   = [GS(1, WORLD_RANK) - 1, GS(2, WORLD_RANK) - 1]
+        STARTS   = [GS(1, WORLD_RANK) - MINVAL(GS(1, :)), GS(2, WORLD_RANK) - MINVAL(GS(2, :))]
 
         DIMS = [NPTS(1), NPTS(2)]
 
