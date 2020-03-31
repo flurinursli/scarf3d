@@ -245,7 +245,7 @@ MODULE SCARFLIB_FFT
       ALLOCATE(SPEC(M(1), M(2), M(3)))
 
       ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
-      CALL COMPUTE_SPECTRUM(LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
+      CALL COMPUTE_SPECTRUM(DH, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
 
 #ifdef TIMING
       INFO(5:6) = ET
@@ -439,6 +439,8 @@ MODULE SCARFLIB_FFT
         ! THE EXTRA EXTENSION TO HANDLE FFT PERIODICITY IS NOT DESIRED.
         NPTS(I) = NINT( (MAX_EXTENT(I) + DH * 0.5_FPP - MIN_EXTENT(I) + DH * 0.5_FPP) / DH) + 1
 
+print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
+
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH)
 
@@ -477,7 +479,7 @@ MODULE SCARFLIB_FFT
       CALL BEST_CONFIG(DIMS)
 
       ! TEMPORARY MESSAGE
-      !IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS, ' -- ', NPTS
+      IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS, ' -- ', NPTS
 
       ! CREATE TOPOLOGY
       CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
@@ -525,7 +527,7 @@ MODULE SCARFLIB_FFT
       ALLOCATE(SPEC(M(1), M(2), M(3)))
 
       ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
-      CALL COMPUTE_SPECTRUM(LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
+      CALL COMPUTE_SPECTRUM(DS, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
 
 #ifdef TIMING
       INFO(5:6) = ET
@@ -1861,11 +1863,12 @@ MODULE SCARFLIB_FFT
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE COMPUTE_SPECTRUM(LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, TIME)
+    SUBROUTINE COMPUTE_SPECTRUM(DS, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, TIME)
 
       ! COMPUTE THE SPECTRUM OF A RANDOM FIELD CHARACTERISED BY A SPECIFIC AUTOCORRELATION FUNCTION, CORRELATION LENGTH, STANDARD DEVIATION,
       ! AND HURST EXPONENT (NOT USED FOR GAUSSIAN FIELDS). BASED ON THE FOURIER INTEGRAL METHOD OF PARDO-IGUZQUIZA AND CHICA-OLMO.
 
+      REAL(FPP),                                                        INTENT(IN)  :: DS
       INTEGER(IPP),     DIMENSION(3),                                   INTENT(IN)  :: LS, LE                !< GLOBAL INDICES
       REAL(FPP),                                                        INTENT(IN)  :: DH                    !< GRID-STEP
       INTEGER(IPP),                                                     INTENT(IN)  :: ACF                   !< AUTOCORRELATION FUNCTION
@@ -1877,7 +1880,7 @@ MODULE SCARFLIB_FFT
       REAL(FPP),        DIMENSION(2),                                   INTENT(OUT) :: TIME                  !< ELAPSED TIME
       INTEGER(IPP)                                                                  :: I, J, K               !< INDICES
       REAL(FPP)                                                                     :: BUTTER, NUM, AMP      !< USED TO COMPUTE SPECTRUM
-      REAL(FPP)                                                                     :: KNYQ, KC, KR          !< USED TO COMPUTE SPECTRUM
+      REAL(FPP)                                                                     :: KC, KR                !< USED TO COMPUTE SPECTRUM
       !REAL(FPP)                                                                     :: R
       REAL(REAL64)                                                                  :: TICTOC                !< USED FOR TIMING
       REAL(FPP),        DIMENSION(3)                                                :: DK                    !< RESOLUTION IN WAVENUMBER DOMAIN
@@ -1904,10 +1907,10 @@ MODULE SCARFLIB_FFT
       ENDDO
 
       ! NYQUIST WAVENUMBER
-      KNYQ = PI / DH
+      !KNYQ = PI / DH
 
-      ! CORNER WAVENUMBER FOR SPECTRUM TAPERING TO AVOID ALIASING IS HALF NYQUIST WAVENUMBER
-      KC = KNYQ / 2._FPP
+      ! CORNER WAVENUMBER FOR FILTERING SPECTRUM
+      KC = 2._FPP * PI / DS 
 
       ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
       KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]
@@ -1938,10 +1941,10 @@ MODULE SCARFLIB_FFT
           DO I = LS(1), LE(1)
 
             ! RADIAL WAVENUMBER
-            !KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
+            KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
 
             ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
-            !BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
+            BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
 
             ! NOW "KR" IS THE PRODUCT "K * CL"
             KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2
@@ -1950,7 +1953,7 @@ MODULE SCARFLIB_FFT
             AMP = SQRT(NUM / FUN(KR, HURST))
 
             ! APPLY FILTER
-            !AMP = AMP * BUTTER
+            AMP = AMP * BUTTER
 
             !R = HARVEST(I - LS(1) + 1, J - LS(2) + 1, K - LS(3) + 1) * 2._FPP * PI
             HARVEST(I, J, K) = HARVEST(I, J, K) * 2._FPP * PI

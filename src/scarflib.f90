@@ -82,7 +82,7 @@ MODULE SCARFLIB
       OBJ%FE  = FE
       OBJ%DS  = DS
 
-      OBJ%DH    = DS                      !< DEFAULT MAXIMUM GRID-STEP TO ACTUAL ONE
+      OBJ%DH    = 0.5_FPP * DS            !< DEFAULT FFT GRID-STEP TO HALF MESH GRID-STEP
       OBJ%ACF   = ACF
       OBJ%CL    = CL
       OBJ%SIGMA = SIGMA
