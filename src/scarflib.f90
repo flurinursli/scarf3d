@@ -120,7 +120,7 @@ MODULE SCARFLIB
     SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, MUTE, TAPER, RESCALE, PAD)
 
       REAL(FPP),      DIMENSION(:),   TARGET,           INTENT(IN) :: X, Y, Z
-      REAL(FPP),                                        INTENT(IN) :: DH                 !< MAXIMUM GRID-STEP (CONTROLS MAX WAVENUMBER)
+      REAL(FPP),                                        INTENT(IN) :: DH                 !< FFT GRID-STEP (CONTROLS MAX WAVENUMBER)
       INTEGER(IPP),                                     INTENT(IN) :: ACF
       REAL(FPP),      DIMENSION(3),                     INTENT(IN) :: CL
       REAL(FPP),                                        INTENT(IN) :: SIGMA
@@ -140,6 +140,10 @@ MODULE SCARFLIB
       OBJ%ACF   = ACF
       OBJ%CL    = CL
       OBJ%SIGMA = SIGMA
+
+      ! SET "DS" AS TWICE FFT GRID-STEP: THIS IS EQUIVALENT TO STRUCTURED MESH CASE AND GUARANTEES THAT SPECTRUM IS LP-FILTERED AT
+      ! "2*PI/DS"
+      OBJ%DS = DH * 2._FPP
 
       OBJ%METHOD = 0                      !< DEFAULT IS FFT METHOD
 
@@ -184,8 +188,8 @@ MODULE SCARFLIB
 
 print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad
 
-        CALL SCARF3D_FFT(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE, OBJ%TAPER,  &
-                         OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
+        CALL SCARF3D_FFT(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
+                         OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
 
