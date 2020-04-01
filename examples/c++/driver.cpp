@@ -30,7 +30,7 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {500, 500, 500};
+  const int n[3] = {501, 501, 501};
 
   // grid-step
   const fpp ds = 100.;
@@ -79,7 +79,7 @@ int main(){
   const int acf = 0;
 
   // correlation length
-  const fpp cl[3] = {1000., 1000., 1000.};
+  const fpp cl[3] = {5000., 5000., 5000.};
 
   // standard deviation
   const fpp sigma = 0.05;
@@ -87,7 +87,7 @@ int main(){
   // seed number
   const int seed = 1235;
 
-  const fpp hurst[1] = {0.5};
+  const fpp hurst[1] = {0.2};
 
   double tictoc;
 

@@ -32,7 +32,7 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {500, 500, 500};
+  const int n[3] = {501, 501, 501};
 
   // grid-step
   const fpp ds = 100.;
@@ -41,7 +41,7 @@ int main(){
   const int acf = 0;
 
   // correlation length
-  const fpp cl[3] = {1000., 1000., 1000.};
+  const fpp cl[3] = {5000., 5000., 5000.};
 
   // standard deviation
   const fpp sigma = 0.05;
@@ -53,7 +53,7 @@ int main(){
   // ---------------------------------------------------------------------------
   // Add extra parameters
 
-  const fpp hurst[1] = {0.5};
+  const fpp hurst[1] = {0.2};
 
   const int pad[1] = {1};
 
@@ -143,7 +143,7 @@ int main(){
   scarf_finalize();
 
 
-  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, NULL, hurst, NULL, NULL, NULL, NULL, NULL, NULL);
+  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, NULL, hurst, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -210,7 +210,7 @@ int main(){
 
   scarf_finalize();
 
-  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, method, hurst, NULL, NULL, NULL, NULL, NULL, NULL);
+  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, method, hurst, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);

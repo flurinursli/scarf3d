@@ -39,7 +39,7 @@ void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const
                              const fpp* taper, const int* rescale, const int* pad);
 
 void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
-                               const int* solver, const fpp* hurst, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,
+                               const int* solver, const fpp* hurst, const fpp* ds, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,
                                const int* rescale, const int* pad);
 
 void scarf_execute(const int seed, fpp* field, fpp stats[]);
@@ -82,7 +82,7 @@ namespace Scarf3D
 
       // constructor unstructured mesh
       Initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma,
-                 const fpp* hurst = nullptr, const fpp* poi = nullptr, const int* npoi = nullptr, const fpp* mute = nullptr,
+                 const fpp* hurst = nullptr, const fpp* ds = nullptr, const fpp* poi = nullptr, const int* npoi = nullptr, const fpp* mute = nullptr,
                  const fpp* taper = nullptr, const int* rescale = nullptr, const int* pad = nullptr)
       {
 
@@ -90,7 +90,7 @@ namespace Scarf3D
 
         const int* solver = &flag;
 
-        scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, solver, hurst, poi, npoi, mute, taper, rescale, pad);
+        scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, solver, hurst, ds, poi, npoi, mute, taper, rescale, pad);
 
       };
 

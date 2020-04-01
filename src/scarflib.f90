@@ -82,7 +82,7 @@ MODULE SCARFLIB
       OBJ%FE  = FE
       OBJ%DS  = DS
 
-      OBJ%DH    = 0.5_FPP * DS            !< DEFAULT FFT GRID-STEP TO HALF MESH GRID-STEP
+      OBJ%DH    = DS                      !< DEFAULT FFT GRID-STEP EQUALS HALF MESH GRID-STEP
       OBJ%ACF   = ACF
       OBJ%CL    = CL
       OBJ%SIGMA = SIGMA
@@ -117,7 +117,7 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, POI, MUTE, TAPER, RESCALE, PAD)
+    SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, MUTE, TAPER, RESCALE, PAD)
 
       REAL(FPP),      DIMENSION(:),   TARGET,           INTENT(IN) :: X, Y, Z
       REAL(FPP),                                        INTENT(IN) :: DH                 !< FFT GRID-STEP (CONTROLS MAX WAVENUMBER)
@@ -126,6 +126,7 @@ MODULE SCARFLIB
       REAL(FPP),                                        INTENT(IN) :: SIGMA
       INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: METHOD
       REAL(FPP),                              OPTIONAL, INTENT(IN) :: HURST
+      REAL(FPP),                              OPTIONAL, INTENT(IN) :: DS
       REAL(FPP),      DIMENSION(:,:),         OPTIONAL, INTENT(IN) :: POI
       REAL(FPP),                              OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: RESCALE, PAD
@@ -141,9 +142,7 @@ MODULE SCARFLIB
       OBJ%CL    = CL
       OBJ%SIGMA = SIGMA
 
-      ! SET "DS" AS TWICE FFT GRID-STEP: THIS IS EQUIVALENT TO STRUCTURED MESH CASE AND GUARANTEES THAT SPECTRUM IS LP-FILTERED AT
-      ! "2*PI/DS"
-      OBJ%DS = DH * 2._FPP
+      OBJ%DS     = DH                     !< DEFAULT MESH GRID-STEP EQUALS FFT GRID-STEP
 
       OBJ%METHOD = 0                      !< DEFAULT IS FFT METHOD
 
@@ -156,6 +155,7 @@ MODULE SCARFLIB
 
       IF (PRESENT(METHOD))  OBJ%METHOD  = METHOD
       IF (PRESENT(HURST))   OBJ%HURST   = HURST
+      IF (PRESENT(DS))      OBJ%DS      = DS
       IF (PRESENT(MUTE))    OBJ%MUTE    = MUTE
       IF (PRESENT(TAPER))   OBJ%TAPER   = TAPER
       IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
@@ -188,7 +188,7 @@ MODULE SCARFLIB
 
 print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad
 
-        CALL SCARF3D_FFT(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
+        CALL SCARF3D_FFT(OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
                          OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
@@ -197,8 +197,8 @@ print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
 
 print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
 
-        CALL SCARF3D_SPEC(OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE, OBJ%TAPER, &
-                          FIELD, OBJ%STATS)
+        CALL SCARF3D_SPEC(OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,  &
+                          OBJ%TAPER, FIELD, OBJ%STATS)
 
         STATS(1:6) = OBJ%STATS(:)
 

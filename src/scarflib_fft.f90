@@ -88,13 +88,14 @@ MODULE SCARFLIB_FFT
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_UNSTRUCTURED_FFT(X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, FIELD, INFO)
+    SUBROUTINE SCARF3D_UNSTRUCTURED_FFT(DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, FIELD, INFO)
 
       ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
       ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
       ! "SEED" AND NUMBER OF POINTS "NPTS" SHOULD BE THE SAME TO GUARANTEE SAME RANDOM FIELD
 
+      REAL(FPP),                                       INTENT(IN)  :: DS                   !< THIS SET MAXIMUM RESOLVABLE WAVENUMBER
       REAL(FPP),                     DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
       REAL(FPP),                                       INTENT(IN)  :: DH                   !< GRID-STEP
       INTEGER(IPP),                                    INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: 0=VK, 1=GAUSS
@@ -245,7 +246,7 @@ MODULE SCARFLIB_FFT
       ALLOCATE(SPEC(M(1), M(2), M(3)))
 
       ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
-      CALL COMPUTE_SPECTRUM(DH, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
+      CALL COMPUTE_SPECTRUM(DS, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
 
 #ifdef TIMING
       INFO(5:6) = ET
@@ -1909,8 +1910,8 @@ print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
       ! NYQUIST WAVENUMBER
       !KNYQ = PI / DH
 
-      ! CORNER WAVENUMBER FOR FILTERING SPECTRUM: HALF NYQUIST WAVENUMBER
-      KC = PI / (DS * 2._FPP)
+      ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
+      KC = PI / (DS) * SQRT(3._FPP)
 
       ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
       KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]
@@ -1944,7 +1945,11 @@ print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
             KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
 
             ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
-            BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
+            !BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
+
+            BUTTER = 1._FPP
+
+            IF (KR .GT. KC) BUTTER = 0._FPP
 
             ! NOW "KR" IS THE PRODUCT "K * CL"
             KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2

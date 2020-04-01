@@ -82,7 +82,7 @@ ifeq ($(COMPILER),gcc)
   FFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
   CXXFLAGS = -O3 -funroll-loops -cpp
 else ifeq ($(COMPILER),pgi)
-  FFLAGS = -fast -acc -ta=tesla:cc75 -Minfo -cpp
+  FFLAGS = -fast -acc -ta=tesla:cc75 -cpp
   CXXFLAGS = -fast -cpp
 else ifeq ($(COMPILER),intel)
   FFLAGS = -O3 -unroll-aggressive -qopt-prefetch -cpp

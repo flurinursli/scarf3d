@@ -56,11 +56,12 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
+  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
 
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
+    REAL(FPP),                                   INTENT(IN)  :: DS
     REAL(FPP),                   DIMENSION(:),   INTENT(IN)  :: X, Y, Z              !< POSITION OF GRID POINTS ALONG X, Y, Z
     REAL(FPP),                                   INTENT(IN)  :: DH                   !< MAX DISTANCE BETWEEN GRID POINTS
     INTEGER(IPP),                                INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
@@ -79,7 +80,7 @@ MODULE SCARFLIB_SPEC
     INTEGER(C_INT)                                           :: C_SEED
     INTEGER(IPP),  ALLOCATABLE,  DIMENSION(:)                :: NPOINTS
     REAL(FPP)                                                :: SCALING
-    REAL(FPP)                                                :: KMAX, KMIN
+    REAL(FPP)                                                :: KMAX, KMIN, KC
     REAL(FPP)                                                :: K, D                 !< USED TO COMPUTE THE COVARIANCE FUNCTION
     REAL(FPP)                                                :: PHI, THETA
     REAL(FPP)                                                :: V1, V2, V3
@@ -111,7 +112,10 @@ MODULE SCARFLIB_SPEC
 
     KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
 
-    KMAX = PI / DH * MINVAL(CL)
+    KMAX = PI / DS * MINVAL(CL)
+
+    ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
+    KC = PI / DS * MINVAL(CL) * SQRT(3._FPP)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
@@ -168,6 +172,9 @@ MODULE SCARFLIB_SPEC
         IF (R(2) .LT. D) EXIT
 
       ENDDO
+
+      ! NEGLECT CONTRIBUTION OF CURRENT HARMONIC IF WAVENUMBER "U" WAS LARGER THAN CORNER WAVENUMBER "KC"
+      IF (K .GT. KC) CYCLE
 
       ! SECOND SET OF RANDOM NUMBERS
       CALL SRNG(R)
@@ -304,7 +311,7 @@ MODULE SCARFLIB_SPEC
     INTEGER(IPP),                DIMENSION(3)                  :: NPTS
     INTEGER(IPP),  ALLOCATABLE,  DIMENSION(:)                  :: NPOINTS
     REAL(FPP)                                                  :: SCALING
-    REAL(FPP)                                                  :: KMAX, KMIN
+    REAL(FPP)                                                  :: KMAX, KMIN, KC
     REAL(FPP)                                                  :: U, D                 !< USED TO COMPUTE THE COVARIANCE FUNCTION
     REAL(FPP)                                                  :: PHI, THETA
     REAL(FPP)                                                  :: V1, V2, V3
@@ -338,6 +345,9 @@ MODULE SCARFLIB_SPEC
     KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
 
     KMAX = PI / DH * MINVAL(CL)
+
+    ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
+    KC = PI / DS * MINVAL(CL) * SQRT(3._FPP)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
@@ -397,6 +407,9 @@ MODULE SCARFLIB_SPEC
 
       ! SECOND SET OF RANDOM NUMBERS
       CALL SRNG(R)
+
+      ! NEGLECT CONTRIBUTION OF CURRENT HARMONIC IF WAVENUMBER "U" WAS LARGER THAN CORNER WAVENUMBER "KC"
+      IF (U .GT. KC) CYCLE
 
       ! COMPUTE AZIMUTH AND POLAR ANGLES
       PHI   = R(1) * 2._FPP * PI
