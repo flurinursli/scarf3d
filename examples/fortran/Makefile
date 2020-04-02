@@ -4,6 +4,12 @@
 
 include ../../Makefile.inc
 
+ifeq ($(PRECISION),double)
+	LIB_NAME = scarf3d
+else
+	LIB_NAME = scarf3df
+endif
+
 # list Fortran objects
 OBJS = driver.o scarflib_aux.o
 
@@ -24,7 +30,7 @@ clean:
 # flags
 INCL = -I../../include
 
-LIB_LINK_FLAGS  = -L../../lib -lscarf3d
+LIB_LINK_FLAGS  = -L../../lib -l$(LIB_NAME)
 LIB_LINK_FLAGS += -L$(TRNG_DIR)/lib -ltrng4 -lstdc++
 LIB_LINK_FLAGS += -L$(FFTW_DIR)/lib -lfftw3 -lfftw3f
 

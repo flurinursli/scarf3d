@@ -4,6 +4,12 @@
 
 include ../Makefile.inc
 
+ifeq ($(PRECISION),double)
+	LIB_NAME = libscarf3d.a
+else
+	LIB_NAME = libscarf3df.a
+endif
+
 # list Fortran objects
 F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o f_binding.o
 
@@ -31,20 +37,22 @@ OBJS += $(CPP_OBJS)
 OBJS += $(C_OBJS)
 
 # default rule: create library, move *.mod files and the move library
-lib: includes libscarf3d.a install_dir
-	mv libscarf3d.a ../lib
+#lib: includes libscarf3d.a install_dir
+lib: includes $(LIB_NAME) install_dir
+	mv $(LIB_NAME) ../lib
 
 install_dir:
 	mkdir -p ../lib
 	mkdir -p ../include
 
 # move *.mod files
-includes: libscarf3d.a install_dir
+includes: $(LIB_NAME) install_dir
 	cp *.mod ../include
 	cp *.h ../include
 
 # compress all objects into (static) library
-libscarf3d.a: $(OBJS)
+#libscarf3d.a: $(OBJS)
+$(LIB_NAME): $(OBJS)
 	ar qc $@ $(OBJS)
 
 clean:
