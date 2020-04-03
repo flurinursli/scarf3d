@@ -53,7 +53,7 @@ PROGRAM DRIVER
 
   ! NUMBER OF POINTS FOR WHOLE MODEL
   !N = [2000*2, 3200*2, 1200*2]
-  N = [500, 500, 500] / 1._FP + 1
+  N = [500, 500, 500] / 1._FP 
 
   ! GRID STEP
   DS = 100._FP * 1._FP

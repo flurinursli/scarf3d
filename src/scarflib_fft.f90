@@ -1921,7 +1921,8 @@ print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
       !KNYQ = PI / DH
 
       ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-      KC = PI / (DS) * SQRT(3._FPP)
+      ! KC = PI / (DS) * SQRT(3._FPP)
+      KC = PI / DS 
 
       ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
       KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]

@@ -30,11 +30,22 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {501, 501, 501};
+  int n[3] = {600, 600, 600};
 
   // grid-step
-  const fpp ds = 100.;
+  fpp ds = 100.;
 
+  fpp x0[3], x1[3];
+
+  for (int i = 0; i < 3; i++){
+    x0[i] = 0;
+    x1[i] = (n[i] - 1) * ds;
+  }
+
+  fpp dh = ds;
+
+  for (int i = 0; i < 3; i++) n[i] = n[i] / 4;
+  ds = ds * 4;
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
@@ -100,7 +111,13 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.1;
+    Scarf3D::hurst = 0.75;
+    Scarf3D::dh = dh;
+
+    for (int i = 0; i < 3; i++){
+      Scarf3D::nc[i] = x0[i];
+      Scarf3D::fc[i] = x1[i];
+    }
 
     Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma);
 
@@ -123,9 +140,9 @@ int main(){
 
     // IO
     watch_start(&tictoc);
-    S.io(n, 1, 400, field, "fft_struct_xslice");
-    S.io(n, 2, 250, field, "fft_struct_yslice");
-    S.io(n, 3, 100, field, "fft_struct_zslice");
+    S.io(n, 1, n[0]/2, field, "fft_struct_xslice");
+    S.io(n, 2, n[1]/2, field, "fft_struct_yslice");
+    S.io(n, 3, n[2]/2, field, "fft_struct_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -148,9 +165,15 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.1;
+    Scarf3D::hurst = 0.75;
+    Scarf3D::ds = ds;
 
-    Scarf3D::Initialize<fft> S(npts, x, y, z, ds, acf, cl, sigma);
+    for (int i = 0; i < 3; i++){
+      Scarf3D::nc[i] = x0[i];
+      Scarf3D::fc[i] = x1[i];
+    }
+
+    Scarf3D::Initialize<fft> S(npts, x, y, z, dh, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -183,7 +206,8 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.1;
+    Scarf3D::hurst = 0.25;
+    Scarf3D::nc = {};
 
     Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma);
 
