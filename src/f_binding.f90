@@ -20,7 +20,7 @@ MODULE SCARF3D_C_BINDING
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE STRUCT_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, NP, MUTE, TAPER, RESCALE, PAD)  &
+    SUBROUTINE STRUCT_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, NP, MUTE, TAPER, RESCALE, PAD, NC, FC)  &
     BIND(C, NAME="struct_initialize")
 
       INTEGER(C_INT), DIMENSION(3),              INTENT(IN) :: FS, FE
@@ -35,6 +35,7 @@ MODULE SCARF3D_C_BINDING
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: NP
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
+      REAL(C_FPP),    DIMENSION(3),    OPTIONAL, INTENT(IN) :: NC, FC
       REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
       REAL(C_FPP),    DIMENSION(0,0),  TARGET               :: VOID
 
@@ -50,7 +51,7 @@ MODULE SCARF3D_C_BINDING
         PTR => VOID
       ENDIF
 
-      CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, PTR, MUTE, TAPER, RESCALE, PAD)
+      CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, PTR, MUTE, TAPER, RESCALE, PAD, NC, FC)
 
       NULLIFY(PTR)
 
@@ -60,8 +61,8 @@ MODULE SCARF3D_C_BINDING
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE UNSTRUCT_INITIALIZE(NPTS, X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, NP, MUTE, TAPER, RESCALE, PAD)  &
-    BIND(C, NAME="unstruct_initialize")
+    SUBROUTINE UNSTRUCT_INITIALIZE(NPTS, X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, NP, MUTE, TAPER, RESCALE, PAD, NC,  &
+                                   FC) BIND(C, NAME="unstruct_initialize")
 
       INTEGER(C_INT),                            INTENT(IN) :: NPTS
       REAL(C_FPP),    DIMENSION(NPTS),           INTENT(IN) :: X, Y, Z
@@ -76,6 +77,7 @@ MODULE SCARF3D_C_BINDING
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: NP
       REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
+      REAL(C_FPP),    DIMENSION(3),    OPTIONAL, INTENT(IN) :: NC, FC
       REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
       REAL(C_FPP),    DIMENSION(0,0),  TARGET               :: VOID
 
@@ -91,7 +93,7 @@ MODULE SCARF3D_C_BINDING
         PTR => VOID
       ENDIF
 
-      CALL SCARF_INITIALIZE(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, PTR, MUTE, TAPER, RESCALE, PAD)
+      CALL SCARF_INITIALIZE(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, PTR, MUTE, TAPER, RESCALE, PAD, NC, FC)
 
       NULLIFY(PTR)
 

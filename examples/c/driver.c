@@ -100,7 +100,17 @@ int main(){
   // ---------------------------------------------------------------------------
   // FFT method test
 
-  scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, NULL, hurst, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+
+  struct scarf_opt options;
+
+  scarf_opt_init(&options);
+
+  options.hurst = 0.1;
+  //options.nc = ;
+  //option.fc = ;
+
+
+  scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -143,7 +153,7 @@ int main(){
   scarf_finalize();
 
 
-  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, NULL, hurst, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -170,9 +180,11 @@ int main(){
 
 #ifdef SPECTRAL
 
-  int method[1] = {1};
+  scarf_opt_init(&options);
 
-  scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+  options.solver = 1;
+
+  scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -210,7 +222,7 @@ int main(){
 
   scarf_finalize();
 
-  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, method, hurst, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);

@@ -99,7 +99,10 @@ int main(){
   // ===========================================================================
 
   {
-    Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma, hurst);
+
+    Scarf3D::hurst = 0.1;
+
+    Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -144,7 +147,10 @@ int main(){
   }
 
   {
-    Scarf3D::Initialize<fft> S(npts, x, y, z, ds, acf, cl, sigma, hurst);
+
+    Scarf3D::hurst = 0.1;
+
+    Scarf3D::Initialize<fft> S(npts, x, y, z, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -176,7 +182,10 @@ int main(){
 #ifdef SPECTRAL
 
   {
-    Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma, hurst);
+
+    Scarf3D::hurst = 0.1;
+
+    Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -219,7 +228,10 @@ int main(){
   }
 
   {
-    Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma, hurst);
+
+    Scarf3D::hurst = 0.1;
+
+    Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);

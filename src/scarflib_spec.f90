@@ -56,14 +56,15 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
+  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(NC, FC, DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
 
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
+    REAL(FPP),                   DIMENSION(3),   INTENT(IN)  :: NC, FC
     REAL(FPP),                                   INTENT(IN)  :: DS
     REAL(FPP),                   DIMENSION(:),   INTENT(IN)  :: X, Y, Z              !< POSITION OF GRID POINTS ALONG X, Y, Z
-    REAL(FPP),                                   INTENT(IN)  :: DH                   !< MAX DISTANCE BETWEEN GRID POINTS
+    REAL(FPP),                                   INTENT(IN)  :: DH                   !< MIN DISTANCE BETWEEN GRID POINTS
     INTEGER(IPP),                                INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
     REAL(FPP),                   DIMENSION(3),   INTENT(IN)  :: CL                   !< CORRELATION LENGTH
     REAL(FPP),                                   INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
@@ -88,6 +89,7 @@ MODULE SCARFLIB_SPEC
     REAL(REAL64)                                             :: TICTOC
     REAL(C_FPP),                 DIMENSION(2)                :: R
     REAL(FPP),                   DIMENSION(3)                :: SPAN
+    REAL(FPP),                   DIMENSION(3)                :: MIN_EXTENT, MAX_EXTENT
     REAL(FPP),      ALLOCATABLE, DIMENSION(:)                :: MU, VAR
 
     !-------------------------------------------------------------------------------------------------------------------------------
@@ -107,12 +109,19 @@ MODULE SCARFLIB_SPEC
     ! BECAUSE THE RADIAL AVENUMBER "K" IS DIVIDED BY "CL" (SEE .EQ. 8 OF RAESS ET AL., 2019)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! DISTANCE SPANNED BY INPUT GRID ALONG EACH DIMENSION
-    SPAN = [MAXVAL(X) - MINVAL(X), MAXVAL(Y) - MINVAL(Y), MAXVAL(Z) - MINVAL(Y)]
+    MIN_EXTENT = NC
+    MAX_EXTENT = FC
+
+    ! (GLOBAL) MODEL LIMITS
+    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
+    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+    ! GLOBAL EFFECTIVE GRID SIZE
+    SPAN = MAX_EXTENT - MIN_EXTENT
 
     KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
 
-    KMAX = PI / DS * MINVAL(CL)
+    KMAX = PI / DH * MINVAL(CL)
 
     ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
     KC = PI / DS * MINVAL(CL) * SQRT(3._FPP)
@@ -120,12 +129,12 @@ MODULE SCARFLIB_SPEC
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
     ! 1) KMIN < 1/CL
-    ! 2) KMAX > 1/CL, OR DH <= CL / 2 (FRENJE & JUHLIN, 2000)
+    ! 2) KMAX > 1/CL, OR DS <= CL / 2 (FRENJE & JUHLIN, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     IF (ANY(2._FPP * PI / SPAN .GE. 1._FPP / CL)) STATS(1) = 1._FPP
 
-    IF (ANY(DH .GT. CL / 2._FPP)) STATS(2) = 1._FPP
+    IF (ANY(DS .GT. CL / 2._FPP)) STATS(2) = 1._FPP
 
     !IF (WORLD_RANK == 0) PRINT*, 'KMAX ', KMIN, KMAX
 
@@ -287,14 +296,15 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_STRUCTURED_SPEC(DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
+  SUBROUTINE SCARF3D_STRUCTURED_SPEC(NC, FC, DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
 
     ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
     ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
+    REAL(FPP),                   DIMENSION(3),     INTENT(IN)  :: NC, FC
     REAL(FPP),                                     INTENT(IN)  :: DS                   !< STRUCTURED GRID-STEP
     INTEGER(IPP),                DIMENSION(3),     INTENT(IN)  :: FS, FE               !< FIRST/LAST STRUCTURED GRID INDICES
-    REAL(FPP),                                     INTENT(IN)  :: DH                   !< MAXIMUM GRID-STEP
+    REAL(FPP),                                     INTENT(IN)  :: DH                   !< MIN GRID-STEP
     INTEGER(IPP),                                  INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
     REAL(FPP),                   DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
     REAL(FPP),                                     INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
@@ -320,6 +330,7 @@ MODULE SCARFLIB_SPEC
     REAL(REAL64)                                               :: TICTOC
     REAL(C_FPP),                 DIMENSION(2)                  :: R
     REAL(FPP),                   DIMENSION(3)                  :: SPAN
+    REAL(FPP),                   DIMENSION(3)                  :: MIN_EXTENT, MAX_EXTENT
     REAL(FPP),      ALLOCATABLE, DIMENSION(:)                  :: MU, VAR
 
     !-------------------------------------------------------------------------------------------------------------------------------
@@ -339,8 +350,15 @@ MODULE SCARFLIB_SPEC
     ! BECAUSE THE RADIAL AVENUMBER "K" IS DIVIDED BY "CL" (SEE .EQ. 8 OF RAESS ET AL., 2019)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! DISTANCE SPANNED BY INPUT GRID ALONG EACH DIMENSION
-    SPAN = (FE - FS) * DS
+    MIN_EXTENT = NC
+    MAX_EXTENT = FC
+
+    ! (GLOBAL) MODEL LIMITS
+    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
+    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
+
+    ! GLOBAL EFFECTIVE GRID SIZE
+    SPAN = MAX_EXTENT - MIN_EXTENT
 
     KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
 
@@ -352,7 +370,7 @@ MODULE SCARFLIB_SPEC
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
     ! 1) KMIN < 1/CL
-    ! 2) KMAX > 1/CL, OR DH <= CL / 2 (FRENJE & JUHLIN, 2000)
+    ! 2) KMAX > 1/CL, OR DS <= CL / 2 (FRENJE & JUHLIN, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     IF (ANY(2._FPP * PI / SPAN .GE. 1._FPP / CL)) STATS(1) = 1._FPP

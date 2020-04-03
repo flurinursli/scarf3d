@@ -46,6 +46,7 @@ MODULE SCARFLIB
     REAL(FPP)                                          :: SIGMA, HURST
     REAL(FPP)                                          :: MUTE, TAPER
     REAL(FPP),                          DIMENSION(3)   :: CL
+    REAL(FPP),                          DIMENSION(3)   :: NC, FC
     REAL(FPP),                 POINTER, DIMENSION(:)   :: X  => NULL(), Y => NULL(), Z => NULL()
     REAL(FPP),    ALLOCATABLE,          DIMENSION(:)   :: STATS
     REAL(FPP),    ALLOCATABLE,          DIMENSION(:,:) :: POI
@@ -62,7 +63,7 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INITIALIZE_STRUCTURED(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, MUTE, TAPER, RESCALE, PAD)
+    SUBROUTINE INITIALIZE_STRUCTURED(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, MUTE, TAPER, RESCALE, PAD, NC, FC)
 
       INTEGER(IPP),   DIMENSION(3),             INTENT(IN) :: FS, FE
       REAL(FPP),                                INTENT(IN) :: DS
@@ -75,6 +76,7 @@ MODULE SCARFLIB
       REAL(FPP),      DIMENSION(:,:), OPTIONAL, INTENT(IN) :: POI
       REAL(FPP),                      OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(IPP),                   OPTIONAL, INTENT(IN) :: RESCALE, PAD
+      REAL(FPP),      DIMENSION(3),   OPTIONAL, INTENT(IN) :: NC, FC                !< NEAR CORNER, FAR CORNER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -89,10 +91,15 @@ MODULE SCARFLIB
 
       OBJ%METHOD = 0                      !< DEFAULT IS FFT METHOD
 
+      OBJ%HURST = 0._FPP
+
       OBJ%MUTE    = -999._FPP
       OBJ%TAPER   = -999._FPP
       OBJ%RESCALE = 0
       OBJ%PAD     = 0
+
+      OBJ%NC      = (FS - 1) * DS          !< DEFAULT "NC" AND "FC" COINCIDE WITH MESH
+      OBJ%FC      = (FE - 1) * DS
 
       ALLOCATE(OBJ%POI(0,0))
 
@@ -104,6 +111,8 @@ MODULE SCARFLIB
       IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
       IF (PRESENT(PAD))     OBJ%PAD     = PAD
       IF (PRESENT(POI))     OBJ%POI     = POI
+      IF (PRESENT(NC))      OBJ%NC      = NC
+      IF (PRESENT(FC))      OBJ%FC      = FC
 
       IF (OBJ%METHOD .EQ. 0) THEN
         ALLOCATE(OBJ%STATS(8))
@@ -117,7 +126,7 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, MUTE, TAPER, RESCALE, PAD)
+    SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, MUTE, TAPER, RESCALE, PAD, NC, FC)
 
       REAL(FPP),      DIMENSION(:),   TARGET,           INTENT(IN) :: X, Y, Z
       REAL(FPP),                                        INTENT(IN) :: DH                 !< FFT GRID-STEP (CONTROLS MAX WAVENUMBER)
@@ -130,6 +139,7 @@ MODULE SCARFLIB
       REAL(FPP),      DIMENSION(:,:),         OPTIONAL, INTENT(IN) :: POI
       REAL(FPP),                              OPTIONAL, INTENT(IN) :: MUTE, TAPER
       INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: RESCALE, PAD
+      REAL(FPP),      DIMENSION(3),           OPTIONAL, INTENT(IN) :: NC, FC             !< NEAR CORNER, FAR CORNER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -146,10 +156,15 @@ MODULE SCARFLIB
 
       OBJ%METHOD = 0                      !< DEFAULT IS FFT METHOD
 
+      OBJ%HURST = 0._FPP
+
       OBJ%MUTE    = -999._FPP
       OBJ%TAPER   = -999._FPP
       OBJ%RESCALE = 0
       OBJ%PAD     = 0
+
+      OBJ%NC      = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]        !< DEFAULT "NC" AND "FC" COINCIDE WITH MESH
+      OBJ%FC      = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
 
       ALLOCATE(OBJ%POI(0,0))
 
@@ -161,6 +176,8 @@ MODULE SCARFLIB
       IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
       IF (PRESENT(PAD))     OBJ%PAD     = PAD
       IF (PRESENT(POI))     OBJ%POI     = POI
+      IF (PRESENT(NC))      OBJ%NC      = NC
+      IF (PRESENT(FC))      OBJ%FC      = FC
 
       IF (OBJ%METHOD .EQ. 0) THEN
         ALLOCATE(OBJ%STATS(8))
@@ -186,19 +203,19 @@ MODULE SCARFLIB
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
-print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad
+print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad, obj%nc, obj%fc
 
-        CALL SCARF3D_FFT(OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
-                         OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
+        CALL SCARF3D_FFT(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED,   &
+                         OBJ%POI, OBJ%MUTE, OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
 
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
 
-print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
+print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%nc, obj%fc
 
-        CALL SCARF3D_SPEC(OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,  &
-                          OBJ%TAPER, FIELD, OBJ%STATS)
+        CALL SCARF3D_SPEC(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED,  &
+                          OBJ%POI, OBJ%MUTE, OBJ%TAPER, FIELD, OBJ%STATS)
 
         STATS(1:6) = OBJ%STATS(:)
 
@@ -222,19 +239,20 @@ print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
-print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad
+print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad, &
+        obj%nc, obj%fc
 
-        CALL SCARF3D_FFT(OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,    &
-                         OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
+        CALL SCARF3D_FFT(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, &
+                         OBJ%MUTE, OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
 
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
 
-print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
+print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%nc, obj%fc
 
-        CALL SCARF3D_SPEC(OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, OBJ%MUTE,   &
-                          OBJ%TAPER, FIELD, OBJ%STATS)
+        CALL SCARF3D_SPEC(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, &
+                          OBJ%MUTE, OBJ%TAPER, FIELD, OBJ%STATS)
 
         STATS(1:6) = OBJ%STATS(:)
 

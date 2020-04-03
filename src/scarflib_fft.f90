@@ -88,13 +88,15 @@ MODULE SCARFLIB_FFT
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_UNSTRUCTURED_FFT(DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, FIELD, INFO)
+    SUBROUTINE SCARF3D_UNSTRUCTURED_FFT(NC, FC, DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, &
+                                        FIELD, INFO)
 
       ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
       ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
       ! "SEED" AND NUMBER OF POINTS "NPTS" SHOULD BE THE SAME TO GUARANTEE SAME RANDOM FIELD
 
+      REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: NC, FC               !< MIN/MAX EXTENT
       REAL(FPP),                                       INTENT(IN)  :: DS                   !< THIS SET MAXIMUM RESOLVABLE WAVENUMBER
       REAL(FPP),                     DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
       REAL(FPP),                                       INTENT(IN)  :: DH                   !< GRID-STEP
@@ -140,8 +142,10 @@ MODULE SCARFLIB_FFT
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
 
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
-      MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
-      MAX_EXTENT = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
+      ! MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
+      ! MAX_EXTENT = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
+      MIN_EXTENT = NC
+      MAX_EXTENT = FC
 
       ! (GLOBAL) MODEL LIMITS
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
@@ -155,6 +159,8 @@ MODULE SCARFLIB_FFT
         ! SLIGHTLY LARGER THAN NECESSARY (HALF GRID-STEP) IN EACH DIRECTION, IN ORDER TO AVOID SIDE-EFFECTS DUE TO INTERPOLATION WHEN
         ! THE EXTRA EXTENSION TO HANDLE FFT PERIODICITY IS NOT DESIRED.
         NPTS(I) = NINT( (MAX_EXTENT(I) + DH * 0.5_FPP - MIN_EXTENT(I) + DH * 0.5_FPP) / DH) + 1
+
+print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
 
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH)
@@ -372,13 +378,15 @@ MODULE SCARFLIB_FFT
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_STRUCTURED_FFT(DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, FIELD, INFO)
+    SUBROUTINE SCARF3D_STRUCTURED_FFT(NC, FC, DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, FIELD, &
+                                      INFO)
 
       ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
       ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
 
       ! "SEED" AND NUMBER OF POINTS "NPTS" SHOULD BE THE SAME TO GUARANTEE SAME RANDOM FIELD
 
+      REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: NC, FC
       REAL(FPP),                                       INTENT(IN)  :: DS                   !< STRUCTURED GRID-STEP
       INTEGER(IPP),                  DIMENSION(3),     INTENT(IN)  :: FS, FE               !< FIRST/LAST STRUCTURED GRID INDICES
       REAL(FPP),                                       INTENT(IN)  :: DH                   !< GRID-STEP
@@ -424,8 +432,10 @@ MODULE SCARFLIB_FFT
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
 
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
-      MIN_EXTENT = (FS - 1) * DS
-      MAX_EXTENT = (FE - 1) * DS
+      ! MIN_EXTENT = (FS - 1) * DS
+      ! MAX_EXTENT = (FE - 1) * DS
+      MIN_EXTENT = NC
+      MAX_EXTENT = FC
 
       ! (GLOBAL) MODEL LIMITS
       CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
