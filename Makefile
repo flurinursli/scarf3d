@@ -28,6 +28,7 @@ install: all
 	mkdir -p $(prefix)/include
 	mkdir -p $(prefix)/lib
 	cp $(SCARF3D_DIR)/include/*.mod $(prefix)/include
+	cp $(SCARF3D_DIR)/include/*.h $(prefix)/include
 	cp $(SCARF3D_DIR)/lib/lib*.a $(prefix)/lib
 
 .PHONY : lib examples clean install

@@ -44,8 +44,8 @@ struct scarf_opt{
   fpp taper;
   int rescale;
   int pad;
-  fpp nc[3];
-  fpp fc[3];
+  fpp* nc;
+  fpp* fc;
 };
 
 // declare C functions
@@ -73,29 +73,12 @@ void scarf_io_slice(const int* npts, const int direction, const int plane, const
 namespace Scarf3D
 {
 
-  fpp hurst   = 0;
-  fpp dh      = 0;
-  fpp ds      = 0;
-  fpp* poi    = nullptr;
-  int npoi    = 0;
-  fpp mute    = 0;
-  fpp taper   = 0;
-  int rescale = 0;
-  int pad     = 0;
-  fpp nc[3]   = {0, 0, 0};
-  fpp fc[3]   = {0, 0, 0};
-
-  //enum algorithm {fft, spec};
+  scarf_opt options {0, 0, 0, 0, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr};
 
   template <algorithm method> class Initialize
   {
 
     private:
-
-      // variable used to define desired algorithm
-      int flag = 0;
-
-      struct scarf_opt var;
 
     public:
 
@@ -103,25 +86,9 @@ namespace Scarf3D
       Initialize(const int fs[], const int fe[], const fpp ds, const int acf, const fpp cl[], const fpp sigma)
       {
 
-        if (method == spec) flag = 1;
+        if (method == spec) options.solver = 1;
 
-        var.solver = flag;
-        var.hurst = hurst;
-        var.dh = dh;
-        var.poi = poi;
-        var.npoi = npoi;
-        var.mute = mute;
-        var.taper = taper;
-        var.rescale = rescale;
-        var.pad = pad;
-        var.nc[0] = nc[0];
-        var.nc[1] = nc[1];
-        var.nc[2] = nc[2];
-        var.fc[0] = fc[0];
-        var.fc[1] = fc[1];
-        var.fc[2] = fc[2];
-
-        scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &var);
+        scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
 
       };
 
@@ -129,25 +96,9 @@ namespace Scarf3D
       Initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma)
       {
 
-        if (method == spec) flag = 1;
+        if (method == spec) options.solver = 1;
 
-        var.solver = flag;
-        var.hurst = hurst;
-        var.ds = ds;
-        var.poi = poi;
-        var.npoi = npoi;
-        var.mute = mute;
-        var.taper = taper;
-        var.rescale = rescale;
-        var.pad = pad;
-        var.nc[0] = nc[0];
-        var.nc[1] = nc[1];
-        var.nc[2] = nc[2];
-        var.fc[0] = fc[0];
-        var.fc[1] = fc[1];
-        var.fc[2] = fc[2];
-
-        scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, &var);
+        scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, &options);
 
       };
 
@@ -155,6 +106,7 @@ namespace Scarf3D
       ~Initialize()
       {
         scarf_finalize();
+        options = {0, 0, 0, 0, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr};
       };
 
       // simulate random field

@@ -203,16 +203,12 @@ MODULE SCARFLIB
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
-print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad, obj%nc, obj%fc
-
         CALL SCARF3D_FFT(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED,   &
                          OBJ%POI, OBJ%MUTE, OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
 
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
-
-print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%nc, obj%fc
 
         CALL SCARF3D_SPEC(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED,  &
                           OBJ%POI, OBJ%MUTE, OBJ%TAPER, FIELD, OBJ%STATS)
@@ -239,17 +235,12 @@ print*, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper
 
       IF (OBJ%METHOD .EQ. 0) THEN
 
-print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%rescale, obj%pad, &
-        obj%nc, obj%fc
-
         CALL SCARF3D_FFT(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, &
                          OBJ%MUTE, OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
 
         STATS = OBJ%STATS
 
       ELSEIF (OBJ%METHOD .EQ. 1) THEN
-
-print*, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%mute, obj%taper, obj%nc, obj%fc
 
         CALL SCARF3D_SPEC(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, &
                           OBJ%MUTE, OBJ%TAPER, FIELD, OBJ%STATS)

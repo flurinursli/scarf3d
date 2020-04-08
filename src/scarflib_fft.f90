@@ -431,6 +431,27 @@ print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
       ! GET AVAILABLE MPI PROCESSES
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
 
+      if (world_rank == 0) then
+        print*, 'input params @ STRUCTURED-FFT'
+        print*, 'NC ', nc
+        print*, 'FC ', fc
+        print*, 'DS ', ds
+        print*, 'FS ', fs
+        print*, 'FE ', fe
+        print*, 'DH ', dh
+        print*, 'ACF ', acf
+        print*, 'CL ', cl
+        print*, 'SIGMA ', sigma
+        print*, 'HURST ', hurst
+        print*, 'SEED ', seed
+        print*, 'POI ', size(poi)
+        print*, 'MUTE ', mute
+        print*, 'TAPER ', taper
+        print*, 'RESCALE ', rescale
+        print*, 'PAD ', pad
+      endif
+      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
       ! MIN_EXTENT = (FS - 1) * DS
       ! MAX_EXTENT = (FE - 1) * DS
@@ -450,7 +471,7 @@ print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
         ! THE EXTRA EXTENSION TO HANDLE FFT PERIODICITY IS NOT DESIRED.
         NPTS(I) = NINT( (MAX_EXTENT(I) + DH * 0.5_FPP - MIN_EXTENT(I) + DH * 0.5_FPP) / DH) + 1
 
-print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
+if (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', MIN_EXTENT, ' ', MAX_EXTENT
 
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH)
@@ -1922,7 +1943,7 @@ print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
 
       ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
       ! KC = PI / (DS) * SQRT(3._FPP)
-      KC = PI / DS 
+      KC = PI / DS
 
       ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
       KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]

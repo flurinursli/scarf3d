@@ -111,13 +111,11 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.75;
-    Scarf3D::dh = dh;
+    Scarf3D::options.hurst = 0.75;
+    Scarf3D::options.dh    = dh;
 
-    for (int i = 0; i < 3; i++){
-      Scarf3D::nc[i] = x0[i];
-      Scarf3D::fc[i] = x1[i];
-    }
+    Scarf3D::options.nc = x0;
+    Scarf3D::options.fc = x1;
 
     Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma);
 
@@ -165,13 +163,11 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.75;
-    Scarf3D::ds = ds;
+    Scarf3D::options.hurst = 0.75;
+    Scarf3D::options.ds    = ds;
 
-    for (int i = 0; i < 3; i++){
-      Scarf3D::nc[i] = x0[i];
-      Scarf3D::fc[i] = x1[i];
-    }
+    Scarf3D::options.nc = x0;
+    Scarf3D::options.fc = x1;
 
     Scarf3D::Initialize<fft> S(npts, x, y, z, dh, acf, cl, sigma);
 
@@ -206,8 +202,7 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.25;
-    Scarf3D::nc = {};
+    Scarf3D::options.hurst = 0.2;
 
     Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma);
 
@@ -253,7 +248,7 @@ int main(){
 
   {
 
-    Scarf3D::hurst = 0.1;
+    Scarf3D::options.hurst = 0.75;
 
     Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma);
 
