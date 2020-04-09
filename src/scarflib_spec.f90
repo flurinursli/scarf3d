@@ -404,7 +404,7 @@ MODULE SCARFLIB_SPEC
     KMAX = PI / DH * MINVAL(CL)
 
     ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-    KC = PI / DS * MINVAL(CL) !* SQRT(3._FPP)
+    KC = PI / DS * MINVAL(CL) * SQRT(3._FPP)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
@@ -477,10 +477,17 @@ MODULE SCARFLIB_SPEC
       V3 = U * COS(THETA)            / CL(3)
 
       ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      CALL NORMDIST(R)
+      !CALL NORMDIST(R)
 
-      A = R(1)
-      B = R(2)
+      !A = R(1)
+      !B = R(2)
+
+      CALL SRNG(R)
+      A = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+
+      CALL SRNG(R)
+      B = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
