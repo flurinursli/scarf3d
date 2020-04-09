@@ -97,6 +97,25 @@ MODULE SCARFLIB_SPEC
     CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
     CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
 
+    if (world_rank == 0) then
+      print*, 'input params @ UNSTRUCTURED-SPEC'
+      print*, 'NC ', nc
+      print*, 'FC ', fc
+      print*, 'DS ', ds
+      print*, 'X ', size(x)
+      print*, 'Z ', size(z)
+      print*, 'DH ', dh
+      print*, 'ACF ', acf
+      print*, 'CL ', cl
+      print*, 'SIGMA ', sigma
+      print*, 'HURST ', hurst
+      print*, 'SEED ', seed
+      print*, 'POI ', size(poi)
+      print*, 'MUTE ', mute
+      print*, 'TAPER ', taper
+    endif
+    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+
     STATS = 0._FPP
 
     ! INITIALISE RANDOM GENERATOR
@@ -124,7 +143,7 @@ MODULE SCARFLIB_SPEC
     KMAX = PI / DH * MINVAL(CL)
 
     ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-    KC = PI / DS * MINVAL(CL) * SQRT(3._FPP)
+    KC = PI / DS * MINVAL(CL) !* SQRT(3._FPP)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
@@ -182,11 +201,11 @@ MODULE SCARFLIB_SPEC
 
       ENDDO
 
-      ! NEGLECT CONTRIBUTION OF CURRENT HARMONIC IF WAVENUMBER "U" WAS LARGER THAN CORNER WAVENUMBER "KC"
-      IF (K .GT. KC) CYCLE
-
       ! SECOND SET OF RANDOM NUMBERS
       CALL SRNG(R)
+
+      ! NEGLECT CONTRIBUTION OF CURRENT HARMONIC IF WAVENUMBER "U" WAS LARGER THAN CORNER WAVENUMBER "KC"
+      IF (K .GT. KC) CYCLE
 
       ! COMPUTE AZIMUTH AND POLAR ANGLES
       PHI   = R(1) * 2._FPP * PI
@@ -338,6 +357,26 @@ MODULE SCARFLIB_SPEC
     CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
     CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
 
+    if (world_rank == 0) then
+      print*, 'input params @ STRUCTURED-SPEC'
+      print*, 'NC ', nc
+      print*, 'FC ', fc
+      print*, 'DS ', ds
+      print*, 'FS ', fs
+      print*, 'FE ', fe
+      print*, 'DH ', dh
+      print*, 'ACF ', acf
+      print*, 'CL ', cl
+      print*, 'SIGMA ', sigma
+      print*, 'HURST ', hurst
+      print*, 'SEED ', seed
+      print*, 'POI ', size(poi)
+      print*, 'MUTE ', mute
+      print*, 'TAPER ', taper
+    endif
+    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+
+
     STATS = 0._FPP
 
     ! INITIALISE RANDOM GENERATOR
@@ -365,7 +404,7 @@ MODULE SCARFLIB_SPEC
     KMAX = PI / DH * MINVAL(CL)
 
     ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-    KC = PI / DS * MINVAL(CL) * SQRT(3._FPP)
+    KC = PI / DS * MINVAL(CL) !* SQRT(3._FPP)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
@@ -468,7 +507,7 @@ MODULE SCARFLIB_SPEC
           ENDDO
         ENDDO
       ENDDO
-!      !$ACC END PARALLEL LOOP
+      !$ACC END PARALLEL LOOP
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)

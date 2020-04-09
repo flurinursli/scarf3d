@@ -141,6 +141,29 @@ MODULE SCARFLIB_FFT
       ! GET AVAILABLE MPI PROCESSES
       CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
 
+      if (world_rank == 0) then
+        print*, 'input params @ UNSTRUCTURED-FFT'
+        print*, 'NC ', nc
+        print*, 'FC ', fc
+        print*, 'DS ', ds
+        print*, 'X ', size(x)
+        print*, 'Z ', size(z)
+        print*, 'DH ', dh
+        print*, 'ACF ', acf
+        print*, 'CL ', cl
+        print*, 'SIGMA ', sigma
+        print*, 'HURST ', hurst
+        print*, 'SEED ', seed
+        print*, 'POI ', size(poi)
+        print*, 'MUTE ', mute
+        print*, 'TAPER ', taper
+        print*, 'RESCALE ', rescale
+        print*, 'PAD ', pad
+      endif
+      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+
+
+
       ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
       ! MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
       ! MAX_EXTENT = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
@@ -160,7 +183,7 @@ MODULE SCARFLIB_FFT
         ! THE EXTRA EXTENSION TO HANDLE FFT PERIODICITY IS NOT DESIRED.
         NPTS(I) = NINT( (MAX_EXTENT(I) + DH * 0.5_FPP - MIN_EXTENT(I) + DH * 0.5_FPP) / DH) + 1
 
-print*, 'npts ', npts(i), ' - ', MAX_EXTENT, ' ', MIN_EXTENT
+if (world_rank == 0) print*, 'npts ', npts(i), ' - ', MIN_EXTENT, ' ', MAX_EXTENT
 
         ! POINTS FOR ONE CORRELATION LENGTH
         OFFSET = NINT(CL(I) / DH)
