@@ -140,7 +140,7 @@ void normdist(float* x)
 #endif
 {
 
-  trng::normal_dist<> u(1., 0.);
+  trng::normal_dist<> u(0., 1.);
 
   for (int i = 0; i < 2; i++){
     x[i] = u(r);
