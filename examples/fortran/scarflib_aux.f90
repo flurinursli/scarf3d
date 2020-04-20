@@ -100,7 +100,7 @@ MODULE SCARFLIB_AUX
 
       N3 = SIZE(FACT3, 2)
 
-      ALLOCATE(LIST(3, N3 * 5))
+      ALLOCATE(LIST(3, N3 * 10))
 
       LIST(:,:) = 0
 

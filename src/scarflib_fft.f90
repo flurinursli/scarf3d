@@ -2709,7 +2709,7 @@ if (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', MIN_EXTEN
 
       N3 = SIZE(FACT3, 2)
 
-      ALLOCATE(LIST(3, N3 * 5))
+      ALLOCATE(LIST(3, N3 * 10))
 
       LIST(:,:) = 0
 
