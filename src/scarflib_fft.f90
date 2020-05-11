@@ -2004,7 +2004,7 @@ if (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', MIN_EXTEN
 
             BUTTER = 1._FPP
 
-            IF (KR .GT. KC) BUTTER = 0._FPP
+            !!!!IF (KR .GT. KC) BUTTER = 0._FPP
 
             ! NOW "KR" IS THE PRODUCT "K * CL"
             KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2

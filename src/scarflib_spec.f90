@@ -56,10 +56,16 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC(NC, FC, DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
+  SUBROUTINE scarf3d_unstructured_spec(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, field, stats)
 
-    ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
-    ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
+    ! Purpose:
+    !   To compute a random field on structured/unstructured meshes based on the spectral representation method.
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   11/05/20                  Original version
+    !
 
     REAL(FPP),                   DIMENSION(3),   INTENT(IN)  :: NC, FC
     REAL(FPP),                                   INTENT(IN)  :: DS
@@ -94,33 +100,33 @@ MODULE SCARFLIB_SPEC
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
-    CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
+    CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
+    CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
-    if (world_rank == 0) then
-      print*, 'input params @ UNSTRUCTURED-SPEC'
-      print*, 'NC ', nc
-      print*, 'FC ', fc
-      print*, 'DS ', ds
-      print*, 'X ', size(x)
-      print*, 'Z ', size(z)
-      print*, 'DH ', dh
-      print*, 'ACF ', acf
-      print*, 'CL ', cl
-      print*, 'SIGMA ', sigma
-      print*, 'HURST ', hurst
-      print*, 'SEED ', seed
-      print*, 'POI ', size(poi)
-      print*, 'MUTE ', mute
-      print*, 'TAPER ', taper
-    endif
-    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+    IF (world_rank == 0) THEN
+      PRINT*, 'INPUT PARAMS @ UNSTRUCTURED-SPEC'
+      PRINT*, 'NC ', NC
+      PRINT*, 'FC ', FC
+      PRINT*, 'DS ', DS
+      PRINT*, 'X ', SIZE(X)
+      PRINT*, 'Z ', SIZE(Z)
+      PRINT*, 'DH ', DH
+      PRINT*, 'ACF ', ACF
+      PRINT*, 'CL ', CL
+      PRINT*, 'SIGMA ', SIGMA
+      PRINT*, 'HURST ', HURST
+      PRINT*, 'SEED ', SEED
+      PRINT*, 'POI ', SIZE(POI)
+      PRINT*, 'MUTE ', MUTE
+      PRINT*, 'TAPER ', TAPER
+    ENDIF
+    CALL mpi_barrier(mpi_comm_world, ierr)
 
     STATS = 0._FPP
 
     ! INITIALISE RANDOM GENERATOR
-    C_SEED = SEED
-    CALL SET_SEED(C_SEED)
+    c_seed = seed
+    CALL set_seed(c_seed)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! SET MIN/MAX RADIAL WAVENUMBER SUCH THAT "V1", "V2", "V3" BELOW ARE IN THE RANGE ["KMIN" "KMAX"] WHEN THE TRIGONOMETRIC TERMS
@@ -138,7 +144,7 @@ MODULE SCARFLIB_SPEC
     ! GLOBAL EFFECTIVE GRID SIZE
     SPAN = MAX_EXTENT - MIN_EXTENT
 
-    KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
+    KMIN = 2._fpp * PI * MAXVAL(CL / SPAN)
 
     KMAX = PI / DH * MINVAL(CL)
 
@@ -216,10 +222,18 @@ MODULE SCARFLIB_SPEC
       V3 = K * COS(THETA)            / CL(3)
 
       ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      CALL NORMDIST(R)
+      ! CALL NORMDIST(R)
+      !
+      ! A = R(1)
+      ! B = R(2)
 
-      A = R(1)
-      B = R(2)
+      ! BOX-MUELLER TRANSFORM
+      CALL SRNG(R)
+      A = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+
+      CALL SRNG(R)
+      B = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
@@ -234,12 +248,21 @@ MODULE SCARFLIB_SPEC
       ! UPDATE SELECTED VARIABLES IN GPU MEMORY
       !$ACC UPDATE DEVICE(A, B, V1, V2, V3)
 
-      !$ACC PARALLEL LOOP PRIVATE(ARG) ASYNC
+      ! !$ACC PARALLEL LOOP PRIVATE(ARG) ASYNC
+      ! DO I = 1, NPTS
+      !   ARG = V1 * X(I) + V2 * Y(I) + V3 * Z(I)
+      !   FIELD(I) = FIELD(I) + A * SIN(ARG) + B * COS(ARG)
+      ! ENDDO
+      ! !$ACC END PARALLEL LOOP
+
+      !$ACC KERNELS ASYNC
+      !$ACC LOOP INDEPENDENT PRIVATE(ARG)
       DO I = 1, NPTS
         ARG = V1 * X(I) + V2 * Y(I) + V3 * Z(I)
         FIELD(I) = FIELD(I) + A * SIN(ARG) + B * COS(ARG)
       ENDDO
-      !$ACC END PARALLEL LOOP
+      !$ACC END KERNELS
+
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
@@ -250,17 +273,34 @@ MODULE SCARFLIB_SPEC
     ENDDO
     ! END LOOP OVER HARMONICS
 
+#ifdef TIMING
+    CALL WATCH_START(TICTOC, MPI_COMM_SELF)
+#endif
+
     !$ACC WAIT
 
     ! NORMALISE RANDOM FIELD
-    !$ACC PARALLEL LOOP
+    ! !$ACC PARALLEL LOOP
+    ! DO I = 1, NPTS
+    !   FIELD(I) = FIELD(I) * SCALING
+    ! ENDDO
+    ! !$ACC END PARALLEL LOOP
+
+    !$ACC KERNELS
+    !$ACC LOOP INDEPENDENT
     DO I = 1, NPTS
       FIELD(I) = FIELD(I) * SCALING
     ENDDO
-    !$ACC END PARALLEL LOOP
+    !$ACC END KERNELS
 
     ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
     !$ACC END DATA
+
+#ifdef TIMING
+    CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+
+    STATS(6) = STATS(6) + TICTOC
+#endif
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD. IF DESIRED, REMOVE MEAN AND SET ACTUAL STANDARD DEVIATION TO DESIRED VALUE.
@@ -477,10 +517,18 @@ MODULE SCARFLIB_SPEC
       V3 = U * COS(THETA)            / CL(3)
 
       ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      CALL NORMDIST(R)
+      ! CALL NORMDIST(R)
+      !
+      ! A = R(1)
+      ! B = R(2)
 
-      A = R(1)
-      B = R(2)
+      ! BOX-MUELLER TRANSFORM
+      CALL SRNG(R)
+      A = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+
+      CALL SRNG(R)
+      B = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+
 
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
@@ -509,6 +557,22 @@ MODULE SCARFLIB_SPEC
       ENDDO
       !$ACC END PARALLEL LOOP
 
+      ! !$ACC KERNELS ASYNC
+      ! !$ACC LOOP INDEPENDENT PRIVATE(X, Y, Z, ARG)
+      ! DO K = 1, NPTS(3)
+      !  Z = (K + FS(3) - 2) * DS
+      !  DO J = 1, NPTS(2)
+      !    Y = (J + FS(2) - 2) * DS
+      !    DO I = 1, NPTS(1)
+      !      X              = (I + FS(1) - 2) * DS
+      !      ARG            = V1 * X + V2 * Y + V3 * Z
+      !      FIELD(I, J, K) = FIELD(I, J, K) + A * SIN(ARG) + B * COS(ARG)
+      !    ENDDO
+      !  ENDDO
+      ! ENDDO
+      ! !$ACC END KERNELS
+
+
 #ifdef TIMING
       CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
 
@@ -517,6 +581,10 @@ MODULE SCARFLIB_SPEC
 
     ENDDO
     ! END LOOP OVER HARMONICS
+
+#ifdef TIMING
+    CALL WATCH_START(TICTOC, MPI_COMM_SELF)
+#endif
 
     !$ACC WAIT
 
@@ -531,8 +599,25 @@ MODULE SCARFLIB_SPEC
     ENDDO
     !$ACC END PARALLEL LOOP
 
+    ! !$ACC KERNELS
+    ! !$ACC LOOP INDEPENDENT
+    ! DO K = 1, NPTS(3)
+    !  DO J = 1, NPTS(2)
+    !    DO I = 1, NPTS(1)
+    !      FIELD(I, J, K) = FIELD(I, J, K) * SCALING
+    !    ENDDO
+    !  ENDDO
+    ! ENDDO
+    ! !$ACC END KERNELS
+
     ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
     !$ACC END DATA
+
+#ifdef TIMING
+    CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+
+    STATS(6) = STATS(6) + TICTOC
+#endif
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD. IF DESIRED, REMOVE MEAN AND SET ACTUAL STANDARD DEVIATION TO DESIRED VALUE.

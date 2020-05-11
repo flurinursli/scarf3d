@@ -1,5 +1,15 @@
 MODULE SCARFLIB_COMMON
 
+  ! Purpose:
+  !   To define constants and subprograms common within the SCARF3D library.
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  Original version
+  !   11/05/20                  Updated macro for double-precision
+  !
+
   USE, INTRINSIC     :: ISO_FORTRAN_ENV
   USE, INTRINSIC     :: ISO_C_BINDING
   USE, NON_INTRINSIC :: MPI
