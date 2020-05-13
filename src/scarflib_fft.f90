@@ -1,84 +1,104 @@
-MODULE SCARFLIB_FFT
+MODULE m_scarflib_fim
 
-  ! ALL VARIABLES AND SUBMODULE PROCEDURES ARE GLOBAL WITHIN THE SUBMODULE, BUT LIMITED TO IT.
+  ! Purpose:
+  !   To compute a random field according to the Fourier Integral Method (FIM). Subprograms rely on the FFTW (version 3) library to
+  !   compute the fast Fourier transform.
+  !   Subroutines 'scarf3d_unstructured_fim' and 'scarf3d_structured_fim' are virtually indentical, with only few differences sparse
+  !   at different points in the code (this inhibits somehow the use of 'include' statements to handle a single code)
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !   11/05/20                  updated macro for double-precision
+  !
 
-  ! mpif90 -O3 scarflib_fft2.f90 scarflib_spec.f90 scarflib.f90 driver.f90 *.f -I/home/walter/Backedup/Software/fftw-3.3.8/include
-  ! -L/home/walter/Backedup/Software/fftw-3.3.8/lib -lfftw3 -fcheck=all -fbacktrace -fopenacc
+  ! mpif90 -o3 scarflib_fft2.f90 scarflib_spec.f90 scarflib.f90 driver.f90 *.f -i/home/walter/backedup/software/FFTW-3.3.8/INCLUDE
+  ! -l/home/walter/backedup/software/FFTW-3.3.8/lib -lfftw3 -fcheck=ALL -fbacktrace -fopenacc
 
-  USE, NON_INTRINSIC :: SCARFLIB_COMMON
+  ! import mpi library and intrinsic modules, data types and subprograms
+  USE, NON_INTRINSIC :: m_scarflib_common
 
-  IMPLICIT NONE
+  IMPLICIT none
 
+  ! include FFTW interface
   INCLUDE 'fftw3.f03'
 
   PRIVATE
 
-  PUBLIC :: SCARF3D_FFT !, BEST_CONFIG
+  ! make only generic interface accessible
+  PUBLIC :: scarf3d_fim
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTERFACE SCARF3D_FFT
-    MODULE PROCEDURE SCARF3D_UNSTRUCTURED_FFT, SCARF3D_STRUCTURED_FFT
+  INTERFACE scarf3d_fim
+    MODULE PROCEDURE scarf3d_unstructured_fim, scarf3d_structured_fim
+  END INTERFACE
+
+  INTERFACE grid_mapping
+    MODULE PROCEDURE grid_mapping_unstruct, grid_mapping_struct
+  END INTERFACE
+
+  INTERFACE order_points
+    MODULE PROCEDURE order_points_unstruct, order_points_struct
   END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  ! PROCEDURE POINTERS
-  PROCEDURE(VK_PSDF), POINTER :: FUN
+  ! define a procedure pointer to compute spectrum according to selected ACF
+  PROCEDURE(vk_psdf), POINTER :: fun
 
-  ! INTERFACE TO C++ FUNCTIONS/SUBROUTINES
+  ! interface to C++ functions/subroutines
   INTERFACE
 
-    FUNCTION PRNG(SEED, LS, LE, NPTS) BIND(C, NAME="prng")
-      USE, INTRINSIC :: ISO_C_BINDING
-      IMPLICIT NONE
-      INTEGER(C_INT),                           VALUE :: SEED
-      INTEGER(C_INT),  DIMENSION(3), INTENT(IN)       :: LS, LE
-      INTEGER(C_INT),  DIMENSION(3), INTENT(IN)       :: NPTS
-      TYPE(C_PTR)                                     :: PRNG
-    END FUNCTION PRNG
+    FUNCTION prng(seed, ls, le, npts) BIND(c, name="prng")
+      USE, INTRINSIC :: iso_c_binding
+      IMPLICIT none
+      INTEGER(c_int),                          VALUE :: seed
+      INTEGER(c_int), DIMENSION(3), INTENT(IN)       :: ls, le
+      INTEGER(c_int), DIMENSION(3), INTENT(IN)       :: npts
+      TYPE(c_ptr)                                    :: prng
+    END FUNCTION prng
 
-    SUBROUTINE FREE_MEM(PTR) BIND(C, NAME="free_mem")
-      USE, INTRINSIC :: ISO_C_BINDING
-      IMPLICIT NONE
-      TYPE(C_PTR), VALUE, INTENT(IN) :: PTR
-    END SUBROUTINE FREE_MEM
+    SUBROUTINE free_mem(ptr) BIND(c, name="free_mem")
+      USE, INTRINSIC :: iso_c_binding
+      IMPLICIT none
+      TYPE(c_ptr), VALUE, INTENT(IN) :: ptr
+    END SUBROUTINE free_mem
 
   END INTERFACE
 
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-  ! CARTESIAN GRID MUST BE 3-DIMENSIONAL
-  INTEGER(IPP),                             PARAMETER :: NDIMS = 3
+  ! work with 3D cartesian grids
+  INTEGER(f_int),                            PARAMETER  :: ndims = 3
 
-  ! MIN/MAX INDEX OF INPUT POINTS WHEN PROJECTED ONTO COMPUTATIONAL GRID
-  !INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)           :: PS, PE
+  ! mask to determine if i-th process has points falling inside domain of calling process (0=no, 1=yes)
+  INTEGER(f_int), ALLOCATABLE, DIMENSION(:)             :: points_world2rank
 
-  ! MASK TO DETERMINE IF I-TH PROCESS HAS POINTS FALLING INSIDE DOMAIN OF CALLING PROCESS (0=NO, 1=YES)
-  INTEGER(IPP), ALLOCATABLE, DIMENSION(:)             :: POINTS_WORLD2RANK
+  ! mask to determine if calling process has points falling inside domain of i-th process (0=no, 1=yes)
+  INTEGER(f_int), ALLOCATABLE, DIMENSION(:)             :: points_rank2world
 
-  ! MASK TO DETERMINE IF CALLING PROCESS HAS POINTS FALLING INSIDE DOMAIN OF I-TH PROCESS (0=NO, 1=YES)
-  INTEGER(IPP), ALLOCATABLE, DIMENSION(:)             :: POINTS_RANK2WORLD
+  ! allow grid re-ordering
+  LOGICAL,                                   PARAMETER  :: reorder = .true.
 
-  ! ALLOW GRID RE-ORDERING
-  LOGICAL,                                  PARAMETER :: REORDER = .TRUE.
+  ! set cartesian grid periodicity
+  LOGICAL,                     DIMENSION(3), PARAMETER  :: isperiodic = [.false., .false., .false.]
 
-  ! SET CARTESIAN GRID PERIODICITY
-  LOGICAL,                   DIMENSION(3),  PARAMETER :: ISPERIODIC = [.FALSE., .FALSE., .FALSE.]
+  ! set a very large number
+  REAL(f_real),                              PARAMETER  :: big = HUGE(1._f_real)
 
-  REAL(FPP),                                PARAMETER :: BIG = HUGE(1._FPP)
+  ! absolute position of model's first point
+  REAL(f_real),                DIMENSION(3)             :: off_axis
 
-  ! ABSOLUTE POSITION OF MODEL'S FIRST POINT
-  REAL(FPP),                 DIMENSION(3)             :: OFF_AXIS
+  ! pointer for fourier transform
+  COMPLEX(c_cplx),             DIMENSION(:), POINTER    :: cdum => NULL()
 
-  ! POINTER FOR FOURIER TRANSFORM
-  COMPLEX(C_CPP),            DIMENSION(:),  POINTER   :: CDUM => NULL()
+  ! pointer for fourier transform
+  REAL(c_real),                DIMENSION(:), POINTER    :: rdum => NULL()
 
-  ! POINTER FOR FOURIER TRANSFORM
-  REAL(C_FPP),               DIMENSION(:),  POINTER   :: RDUM => NULL()
-
-  ! POINTER TO FFTW PLAN
-  TYPE(C_PTR)                                         :: PC
+  ! pointer to FFTW plan
+  TYPE(c_ptr)                                           :: pc
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -88,1204 +108,1240 @@ MODULE SCARFLIB_FFT
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_UNSTRUCTURED_FFT(NC, FC, DS, X, Y, Z, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, &
-                                        FIELD, INFO)
+    SUBROUTINE scarf3d_unstructured_fim(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, pad, &
+                                        field, info)
 
-      ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
-      ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
+      ! Purpose:
+      ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
+      ! heterogeneity depends on number points of the internal (FFT) grid and the seed number. The former may be influenced by optional
+      ! padding (to avoid wrap-around correlation effects). The internal grid is determined by the near-corner 'nc', far-corner 'fc'
+      ! and the grid-step 'dh'. The spectrum will be filtered according to 'ds' (grid-step external grid) if the latter is not equal
+      ! to 'dh'.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      ! "SEED" AND NUMBER OF POINTS "NPTS" SHOULD BE THE SAME TO GUARANTEE SAME RANDOM FIELD
-
-      REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: NC, FC               !< MIN/MAX EXTENT
-      REAL(FPP),                                       INTENT(IN)  :: DS                   !< THIS SET MAXIMUM RESOLVABLE WAVENUMBER
-      REAL(FPP),                     DIMENSION(:),     INTENT(IN)  :: X, Y, Z              !< POSITION OF POINTS ALONG X, Y, Z
-      REAL(FPP),                                       INTENT(IN)  :: DH                   !< GRID-STEP
-      INTEGER(IPP),                                    INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: 0=VK, 1=GAUSS
-      REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
-      REAL(FPP),                                       INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
-      REAL(FPP),                                       INTENT(IN)  :: HURST                !< HURST EXPONENT
-      INTEGER(IPP),                                    INTENT(IN)  :: SEED                 !< SEED NUMBER
-      REAL(FPP),                     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-      REAL(FPP),                                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-      REAL(FPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-      INTEGER(IPP),                                    INTENT(IN)  :: RESCALE              !< FLAG FOR RESCALING RANDOM FIELD TO DESIRED SIGMA
-      INTEGER(IPP),                                    INTENT(IN)  :: PAD                  !< FLAG FOR HANDLE FFT PERIODICITY
-      REAL(FPP),                     DIMENSION(:),     INTENT(OUT) :: FIELD                !< RANDOM FIELD AT X,Y,Z LOCATION
-      REAL(FPP),                     DIMENSION(8),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
-      COMPLEX(FPP),     ALLOCATABLE, DIMENSION(:,:,:)              :: SPEC                 !< SPECTRUM/RANDOM FIELD
-      INTEGER(IPP)                                                 :: IERR                 !< MPI STUFF
-      INTEGER(IPP)                                                 :: I, J, K              !< COUNTERS
-      INTEGER(IPP)                                                 :: CARTOPO
-      INTEGER(IPP)                                                 :: OFFSET               !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
-      INTEGER(IPP),                  DIMENSION(3)                  :: M                    !< POINTS FOR CALLING PROCESS
-      INTEGER(IPP),                  DIMENSION(3)                  :: LS, LE               !< FIRST/LAST INDEX ALONG X, Y, Z
-      INTEGER(IPP),                  DIMENSION(3)                  :: COORDS
-      INTEGER(IPP),                  DIMENSION(3)                  :: DIMS
-      INTEGER(IPP),                  DIMENSION(3)                  :: PS, PE
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NPOINTS              !< NUMBER OF INPUT POINTS FOR EACH PROCESS
-      LOGICAL,                       DIMENSION(3)                  :: BOOL
-      REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
-      REAL(REAL64)                                                 :: TICTOC               !< TIMING
-      REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
-      REAL(FPP),                     DIMENSION(3)                  :: MIN_EXTENT           !< LOWER MODEL LIMITS (GLOBAL)
-      REAL(FPP),                     DIMENSION(3)                  :: MAX_EXTENT           !< UPPER MODEL LIMITS (GLOBAL)
-      REAL(FPP),                     DIMENSION(3)                  :: PT
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:)                  :: VAR, MU              !< STATISTICS: VARIANCE AND AVERAGE
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: DELTA, BUFFER        !< RANDOM PERTURBATIONS ON COMPUTATIONAL GRID
+      REAL(f_real),                 DIMENSION(3),    INTENT(IN)  :: nc, fc       !< min/max extent of input grid (m or km)
+      REAL(f_real),                                  INTENT(IN)  :: ds           !< grid-step external grid, control max resolvable wavenumber
+      REAL(f_real),                 DIMENSION(:),    INTENT(IN)  :: x, y, z      !< position of points along x, y, z
+      REAL(f_real),                                  INTENT(IN)  :: dh           !< grid-step of internal (FFT) grid
+      INTEGER(f_int),                                INTENT(IN)  :: acf          !< autocorrelation FUNCTION: 0=vk, 1=gauss
+      REAL(f_real),                 DIMENSION(3),    INTENT(IN)  :: cl           !< correlation length
+      REAL(f_real),                                  INTENT(IN)  :: sigma        !< standard deviation
+      REAL(f_real),                                  INTENT(IN)  :: hurst        !< hurst exponent
+      INTEGER(f_int),                                INTENT(IN)  :: seed         !< seed number
+      REAL(f_real),                 DIMENSION(:,:),  INTENT(IN)  :: poi          !< location of point(s)-of-interest where muting/tapering is applied
+      REAL(f_real),                                  INTENT(IN)  :: mute         !< radius for muting
+      REAL(f_real),                                  INTENT(IN)  :: taper        !< radius for tapering
+      INTEGER(f_int),                                INTENT(IN)  :: rescale      !< flag for rescaling random field to desired sigma
+      INTEGER(f_int),                                INTENT(IN)  :: pad          !< flag for handle fft periodicity (grid padding)
+      REAL(f_real),                 DIMENSION(:),    INTENT(OUT) :: field        !< random field at x,y,z location
+      REAL(f_real),                 DIMENSION(8),    INTENT(OUT) :: info         !< errors flags and timing for performance analysis
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)             :: spec
+      INTEGER(f_int)                                             :: ierr
+      INTEGER(f_int)                                             :: i, j, k
+      INTEGER(f_int)                                             :: cartopo
+      INTEGER(f_int)                                             :: offset
+      INTEGER(f_int),               DIMENSION(3)                 :: m
+      INTEGER(f_int),               DIMENSION(3)                 :: ls, le
+      INTEGER(f_int),               DIMENSION(3)                 :: coords
+      INTEGER(f_int),               DIMENSION(3)                 :: dims
+      INTEGER(f_int),               DIMENSION(3)                 :: ps, pe
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                 :: npoints
+      LOGICAL,                      DIMENSION(3)                 :: bool
+      REAL(f_real)                                               :: scaling
+      REAL(f_dble)                                               :: tictoc
+      REAL(f_real),                 DIMENSION(2)                 :: et
+      REAL(f_real),                 DIMENSION(3)                 :: min_extent
+      REAL(f_real),                 DIMENSION(3)                 :: max_extent
+      REAL(f_real),                 DIMENSION(3)                 :: pt
+      REAL(f_real),    ALLOCATABLE, DIMENSION(:)                 :: var, mu
+      REAL(f_real),    ALLOCATABLE, DIMENSION(:,:,:)             :: delta, buffer
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! GET RANK NUMBER
-      CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
+      ! get rank number
+      CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
-      ! GET AVAILABLE MPI PROCESSES
-      CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
+      ! get available mpi processes
+      CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
 
-      if (world_rank == 0) then
-        print*, 'input params @ UNSTRUCTURED-FFT'
-        print*, 'NC ', nc
-        print*, 'FC ', fc
-        print*, 'DS ', ds
-        print*, 'X ', size(x)
-        print*, 'Z ', size(z)
-        print*, 'DH ', dh
-        print*, 'ACF ', acf
-        print*, 'CL ', cl
-        print*, 'SIGMA ', sigma
-        print*, 'HURST ', hurst
-        print*, 'SEED ', seed
-        print*, 'POI ', size(poi)
-        print*, 'MUTE ', mute
-        print*, 'TAPER ', taper
-        print*, 'RESCALE ', rescale
-        print*, 'PAD ', pad
-      endif
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      ! initialise variables
+      info(:) = 0._f_real
+
+      IF (world_rank == 0) THEN
+        print*, 'input params @ unstructured-fft'
+        print*, 'nc ', nc
+        print*, 'fc ', fc
+        print*, 'ds ', ds
+        print*, 'x ', SIZE(x)
+        print*, 'z ', SIZE(z)
+        print*, 'dh ', dh
+        print*, 'acf ', acf
+        print*, 'cl ', cl
+        print*, 'sigma ', sigma
+        print*, 'hurst ', hurst
+        print*, 'seed ', seed
+        print*, 'poi ', SIZE(poi)
+        print*, 'mute ', mute
+        print*, 'taper ', taper
+        print*, 'rescale ', rescale
+        print*, 'pad ', pad
+      ENDIF
+      CALL mpi_barrier(mpi_comm_world, ierr)
 
 
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! determine internal (FFT) grid size
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
-      ! MIN_EXTENT = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]
-      ! MAX_EXTENT = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
-      MIN_EXTENT = NC
-      MAX_EXTENT = FC
+      ! model limits (for each process) along each axis
+      min_extent = nc
+      max_extent = fc
 
-      ! (GLOBAL) MODEL LIMITS
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
+      ! (global) model limits
+      CALL mpi_allreduce(mpi_in_place, min_extent, 3, f_real, mpi_min, mpi_comm_world, ierr)
+      CALL mpi_allreduce(mpi_in_place, max_extent, 3, f_real, mpi_max, mpi_comm_world, ierr)
 
-      ! CYCLE OVER THE THREE MAIN DIRECTIONS TO DETERMINE THE NECESSARY MODEL SIZE (IN NUMBER OF POINTS) AND THE ABSOLUTE POSITION OF
-      ! OF THE FIRST POINT TO COUNTERACT FFT PERIODICITY
-      DO I = 1, 3
+      ! CYCLE over the three main directions to determine the necessary model size (in number of points) and the absolute position
+      ! of the first point to counteract fft periodicity
+      DO i = 1, 3
 
-        ! MINIMUM NUMBER OF POINTS SUCH THAT RANDOM FIELD COVERS THE WHOLE DOMAIN. IN PRACTICE, WE DEFINE THE RANDOM FIELD ON A GRID
-        ! SLIGHTLY LARGER THAN NECESSARY (HALF GRID-STEP) IN EACH DIRECTION, IN ORDER TO AVOID SIDE-EFFECTS DUE TO INTERPOLATION WHEN
-        ! THE EXTRA EXTENSION TO HANDLE FFT PERIODICITY IS NOT DESIRED.
-        NPTS(I) = NINT( (MAX_EXTENT(I) + DH * 0.5_FPP - MIN_EXTENT(I) + DH * 0.5_FPP) / DH) + 1
+        ! minimum number of points such that random field covers the whole domain. In practice, we define the random field on a grid
+        ! slightly larger than necessary (half grid-step) in each direction to avoid side-effects due to interpolation (useful when
+        ! the extra extension to handle fft periodicity is not desired)
+        npts(i) = NINT( (max_extent(i) + dh * 0.5_f_real - min_extent(i) + dh * 0.5_f_real) / dh) + 1
 
-if (world_rank == 0) print*, 'npts ', npts(i), ' - ', MIN_EXTENT, ' ', MAX_EXTENT
+        IF (world_rank == 0) print*, 'npts ', npts(i), ' - ', min_extent, ' ', max_extent
 
-        ! POINTS FOR ONE CORRELATION LENGTH
-        OFFSET = NINT(CL(I) / DH)
+        ! padding depends on correlation length
+        offset = NINT(cl(i) / dh)
 
-        ! DO NOT EXTEND MODEL UNLESS DESIRED
-        IF (PAD .NE. 1) OFFSET = 0
+        ! do not pad model unless desired
+        IF (pad .ne. 1) offset = 0
 
-        ! EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
-        NPTS(I) = NPTS(I) + 2 * OFFSET
+        ! new model size including padding
+        npts(i) = npts(i) + 2 * offset
 
-        ! MAKE SURE WE HAVE EVEN NUMBER OF POINTS
-        IF (MOD(NPTS(I), 2) .NE. 0) NPTS(I) = NPTS(I) + 1
+        ! make sure we have even number of points (allow to handle Nyquist frequency explicitly)
+        IF (MOD(npts(i), 2) .ne. 0) npts(i) = npts(i) + 1
 
-        ! ABSOLUTE POSITION OF FIRST POINT (IT COULD BE NEGATIVE)
-        ! OFF_AXIS(I) = MIN_EXTENT(I) - OFFSET * DH
-        OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET + 0.5_FPP) * DH
+        ! absolute position of first point (it could be negative)
+        off_axis(i) = min_extent(i) - (offset + 0.5_f_real) * dh
 
       ENDDO
 
-      INFO(:) = 0._FPP
+      ! check if model is large enough to catch the lower part of the spectrum (low wavenumbers)...
+      IF (ANY(npts .le. NINT(2._f_real * pi * cl / dh))) info(1) = 1._f_real
 
-      ! HERE WE CHECK IF THE MODEL IS LARGE ENOUGH TO CATCH THE LOWER PART OF THE SPECTRUM (LOW WAVENUMBERS)...
-      IF (ANY(NPTS .LE. NINT(2._FPP * PI * CL / DH))) INFO(1) = 1._FPP
+      ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
+      IF (ANY(dh .gt. cl / 2._f_real)) info(2) = 1._f_real
 
-      ! ...AND HERE IF THE GRID-STEP IS SMALL ENOUGH TO CATCH THE UPPER PART OF THE SPECTRUM (HIGH WAVENUMBERS)
-      IF (ANY(DH .GT. CL / 2._FPP)) INFO(2) = 1._FPP
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
+      ! on the external one
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! [ANOTHER WAY TO CHECK HOW CLOSE THE DISCRETE AND CONTINUOUS SPECTRA ARE, IS TO COMPARE THE RESPECTIVE STANDARD DEVIATIONS]
+      ! "gs"/"ge" are specified in "m_scarflib_common" and store first/last global index along each direction for all processes
+      ALLOCATE(gs(3, 0:world_size-1), ge(3, 0:world_size-1))
 
-      ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
-      ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE PROCESS
+      ! return processors grid
+      CALL best_config(dims)
 
-      ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
-      ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
+      ! create topology
+      CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
 
-      ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
-      CALL BEST_CONFIG(DIMS)
+      ! return process coordinates in current topology
+      CALL mpi_cart_coords(cartopo, world_rank, ndims, coords, ierr)
 
-      ! TEMPORARY MESSAGE
-      !IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS
+      ! return first/last index ("ls"/"le") along each direction for the calling process. Note: first point has "ls = 1".
+      CALL coords2index(npts, dims, coords, ls, le)
 
-      ! CREATE TOPOLOGY
-      CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
+      gs(:, world_rank) = ls
+      ge(:, world_rank) = le
 
-      ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
-      CALL MPI_CART_COORDS(CARTOPO, WORLD_RANK, NDIMS, COORDS, IERR)
+      ! make all processes aware of global indices
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
 
-      ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
-      CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! determine if calling process has any external grid point belonging to other processes and which processes have external grid
+      ! points belonging to calling process. These info are needed to define communicator groups when interpolating data.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      GS(:, WORLD_RANK) = LS
-      GE(:, WORLD_RANK) = LE
+      ALLOCATE(points_world2rank(0:world_size - 1), points_rank2world(0:world_size - 1))
 
-      ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! min/max internal grid index containing input points
+      ps(1) = FLOOR((MINVAL(x, dim = 1) - off_axis(1)) / dh) + 1
+      pe(1) = FLOOR((MAXVAL(x, dim = 1) - off_axis(1)) / dh) + 1
+      ps(2) = FLOOR((MINVAL(y, dim = 1) - off_axis(2)) / dh) + 1
+      pe(2) = FLOOR((MAXVAL(y, dim = 1) - off_axis(2)) / dh) + 1
+      ps(3) = FLOOR((MINVAL(z, dim = 1) - off_axis(3)) / dh) + 1
+      pe(3) = FLOOR((MAXVAL(z, dim = 1) - off_axis(3)) / dh) + 1
 
-      ALLOCATE(POINTS_WORLD2RANK(0:WORLD_SIZE - 1), POINTS_RANK2WORLD(0:WORLD_SIZE - 1))
+      points_rank2world = 0
 
-      ! MIN/MAX COMPUTATIONAL GRID INDICES CONTAINING INPUT POINTS
-      PS(1) = FLOOR((MINVAL(X, DIM = 1) - OFF_AXIS(1)) / DH) + 1
-      PE(1) = FLOOR((MAXVAL(X, DIM = 1) - OFF_AXIS(1)) / DH) + 1
-      PS(2) = FLOOR((MINVAL(Y, DIM = 1) - OFF_AXIS(2)) / DH) + 1
-      PE(2) = FLOOR((MAXVAL(Y, DIM = 1) - OFF_AXIS(2)) / DH) + 1
-      PS(3) = FLOOR((MINVAL(Z, DIM = 1) - OFF_AXIS(3)) / DH) + 1
-      PE(3) = FLOOR((MAXVAL(Z, DIM = 1) - OFF_AXIS(3)) / DH) + 1
-
-      POINTS_RANK2WORLD = 0
-
-      ! DETERMINE IF CALLING PROCESS HAS AT LEAST ONE POINT FALLING INSIDE DOMAIN OF "I-TH" PROCESS
-      DO I = 0, WORLD_SIZE - 1
-        DO J = 1, 3
-          BOOL(J) = ( (PS(J) .LT. GE(J, I)) .AND. (PS(J) .GE. (GS(J, I) - 1)) ) .OR.     &
-                    ( (PE(J) .LT. GE(J, I)) .AND. (PE(J) .GE. (GS(J, I) - 1)) ) .OR.     &
-                    ( (PE(J) .GE. GE(J, I)) .AND. (PS(J) .LT. (GS(J, I) - 1)) )
+      ! determine if calling process has at least one point falling inside domain of "i-th" process
+      DO i = 0, world_size - 1
+        DO j = 1, 3
+          bool(j) = ( (ps(j) .lt. ge(j, i)) .and. (ps(j) .ge. (gs(j, i) - 1)) ) .or.     &
+                    ( (pe(j) .lt. ge(j, i)) .and. (pe(j) .ge. (gs(j, i) - 1)) ) .or.     &
+                    ( (pe(j) .ge. ge(j, i)) .and. (ps(j) .lt. (gs(j, i) - 1)) )
         ENDDO
-        IF (ALL(BOOL .EQV. .TRUE.)) POINTS_RANK2WORLD(I) = 1
+        IF (ALL(bool .eqv. .true.)) points_rank2world(i) = 1
       ENDDO
 
-      ! DETERMINE IF PROCESS "I" HAS AT LEAST ONE POINT FALLING INSIDE DOMAIN OF CALLING PROCESS
-      CALL MPI_ALLTOALL(POINTS_RANK2WORLD, 1, MPI_INTEGER, POINTS_WORLD2RANK, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! determine if process "i" has at least one point falling inside domain of calling process
+      CALL mpi_alltoall(points_rank2world, 1, mpi_integer, points_world2rank, 1, mpi_integer, mpi_comm_world, ierr)
 
-      ! NUMBER OF POINTS FOR CALLING PROCESS
-      DO I = 1, 3
-        M(I) = LE(I) - LS(I) + 1
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! compute power spectrum and inverse FFT
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! number of points for calling process
+      DO i = 1, 3
+        m(i) = le(i) - ls(i) + 1
       ENDDO
 
-      ! ALLOCATE MEMORY FOR SPECTRUM
-      ALLOCATE(SPEC(M(1), M(2), M(3)))
+      ! allocate resources to hold spectrum
+      ALLOCATE(spec(m(1), m(2), m(3)))
 
-      ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
-      CALL COMPUTE_SPECTRUM(DS, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
-
-#ifdef TIMING
-      INFO(5:6) = ET
-
-      ! START TIMER
-      CALL WATCH_START(TICTOC)
-#endif
-
-      ! TRANSFORM ALONG EACH DIRECTION
-      CALL TRANSFORM_ALONG_Z(SPEC)
-      CALL TRANSFORM_ALONG_Y(SPEC)
-      CALL TRANSFORM_ALONG_X(SPEC)
+      ! compute spectrum and apply hermitian symmetry
+      CALL compute_spectrum(ds, ls, le, dh, acf, cl, sigma, hurst, seed, spec, et)
 
 #ifdef TIMING
-      CALL WATCH_STOP(TICTOC)
+      info(5:6) = et
 
-      INFO(7) = TICTOC
+      ! start timer
+      CALL watch_start(tictoc)
 #endif
 
-      ! SCALING PARAMETER
-      SCALING = 1._FPP / SQRT(REAL(NPTS(1), FPP) * REAL(NPTS(2), FPP) * REAL(NPTS(3), FPP) * DH**3)
+      ! (inverse) transform along each direction
+      CALL transform_along_z(spec)
+      CALL transform_along_y(spec)
+      CALL transform_along_x(spec)
 
-      ALLOCATE(BUFFER(M(1), M(2), M(3)))
+#ifdef TIMING
+      CALL watch_stop(tictoc)
 
-      ! SCALE IFFT
-      DO K = 1, M(3)
-        DO J = 1, M(2)
-          DO I = 1, M(1)
-            BUFFER(I, J, K) = REAL(SPEC(I, J, K), FPP) * SCALING
+      info(7) = tictoc
+#endif
+
+      ! define scaling factor
+      scaling = 1._f_real / SQRT(REAL(npts(1), f_real) * REAL(npts(2), f_real) * REAL(npts(3), f_real) * dh**3)
+
+      ALLOCATE(buffer(m(1), m(2), m(3)))
+
+      ! scale field
+      DO k = 1, m(3)
+        DO j = 1, m(2)
+          DO i = 1, m(1)
+            buffer(i, j, k) = REAL(spec(i, j, k), f_real) * scaling
           ENDDO
         ENDDO
       ENDDO
 
-      DEALLOCATE(SPEC)
+      DEALLOCATE(spec)
 
-      ALLOCATE(VAR(0:WORLD_SIZE - 1), MU(0:WORLD_SIZE - 1), NPOINTS(0:WORLD_SIZE - 1))
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! compute mean and variance of the whole random field. Then rescale, if desired, discrete std. dev. to its continuous counterpart
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD FOR EACH SINGLE PROCESS
-      VAR(WORLD_RANK) = VARIANCE(BUFFER)
-      MU(WORLD_RANK)  = MEAN(BUFFER)
+      ALLOCATE(var(0:world_size - 1), mu(0:world_size - 1), npoints(0:world_size - 1))
 
-      ! NUMBER OF GRID POINTS PER PROCESS
-      NPOINTS(WORLD_RANK) = PRODUCT(M)
+      ! variance and mean for each single process
+      var(world_rank) = variance(buffer)
+      mu(world_rank)  = mean(buffer)
 
-      ! SHARE RESULTS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, VAR, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, MU, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! number of grid points per process
+      npoints(world_rank) = PRODUCT(m)
 
-      ! COMPUTE TOTAL VARIANCE ("INFO(3)") AND MEAN ("INFO(4)")
-      CALL PARALLEL_VARIANCE(VAR, MU, NPOINTS, INFO(3), INFO(4))
+      ! share results
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, f_real, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, f_real, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
-      ! RETURN STANDARD DEVIATION
-      INFO(3) = SQRT(INFO(3))
+      ! return total variance in "info(3)" and mean in "info(4)"
+      CALL parallel_variance(var, mu, npoints, info(3), info(4))
 
-      ! DO WE NEED TO RESCALE THE RANDOM FIELD TO DESIRED (I.E. CONTINUOUS) STANDARD DEVIATION?
-      IF (RESCALE .EQ. 1) THEN
+      ! we want standard deviation
+      info(3) = SQRT(info(3))
 
-        SCALING = SIGMA / INFO(3)
+      IF (rescale .eq. 1) THEN
 
-        DO K = 1, M(3)
-          DO J = 1, M(2)
-            DO I = 1, M(1)
-              BUFFER(I, J, K) = BUFFER(I, J, K) * SCALING - INFO(4)
+        scaling = sigma / info(3)
+
+        DO k = 1, m(3)
+          DO j = 1, m(2)
+            DO i = 1, m(1)
+              buffer(i, j, k) = buffer(i, j, k) * scaling - info(4)
             ENDDO
           ENDDO
         ENDDO
 
       ENDIF
 
-      DEALLOCATE(VAR, MU, NPOINTS)
+      DEALLOCATE(var, mu, npoints)
 
-      ! APPLY TAPER/MUTE
-      DO I = 1, SIZE(POI, 2)
-        PT(:) = POI(:, I) - OFF_AXIS(:)
-        CALL TAPERING(DH, LS, LE, BUFFER, PT, MUTE, TAPER)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! taper/mute random field at desired locations.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      DO i = 1, SIZE(poi, 2)
+        pt(:) = poi(:, i) - off_axis(:)                         !< update "poi" according to coordinates of internal grid
+        CALL tapering(dh, ls, le, buffer, pt, mute, taper)
       ENDDO
 
-      ! COPY RANDOM FIELD TO ARRAY WITH HALO
-      ALLOCATE(DELTA(0:M(1), 0:M(2), 0:M(3)))
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! each process exchange data with neighbors to define halos to be used during interpolation
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      DELTA = 0._FPP
+      ! copy random field to array with halo
+      ALLOCATE(delta(0:m(1), 0:m(2), 0:m(3)))
 
-      ! SCALE IFFT
-      DO K = 1, M(3)
-        DO J = 1, M(2)
-          DO I = 1, M(1)
-            DELTA(I, J, K) = BUFFER(I, J, K)
+      delta = 0._f_real
+
+      ! copy field
+      DO k = 1, m(3)
+        DO j = 1, m(2)
+          DO i = 1, m(1)
+            delta(i, j, k) = buffer(i, j, k)
           ENDDO
         ENDDO
       ENDDO
 
-      DEALLOCATE(BUFFER)
+      DEALLOCATE(buffer)
 
 #ifdef TIMING
-      CALL WATCH_START(TICTOC)
+      CALL watch_start(tictoc)
 #endif
 
-      ! EXCHANGE HALO
-      CALL EXCHANGE_HALO(CARTOPO, DELTA)
+      ! exchange halo
+      CALL exchange_halo(cartopo, delta)
 
-      ! INTERPOLATE RANDOM FIELD VALUES AT DESIRED OUTPUT LOCATIONS
-      CALL GRID_MAPPING(DH, DELTA, X, Y, Z, FIELD)
+      ! interpolate random field values at desired output locations
+      CALL grid_mapping(dh, delta, x, y, z, field)
 
 #ifdef TIMING
-      CALL WATCH_STOP(TICTOC)
+      CALL watch_stop(tictoc)
 
-      INFO(8) = TICTOC
+      info(8) = tictoc
 #endif
 
-      ! RELEASE MEMORY
-      DEALLOCATE(DELTA)
-      DEALLOCATE(GS, GE)
-      DEALLOCATE(POINTS_RANK2WORLD, POINTS_WORLD2RANK)
+      ! release memory
+      DEALLOCATE(delta)
+      DEALLOCATE(gs, ge)
+      DEALLOCATE(points_rank2world, points_world2rank)
 
-      CALL MPI_COMM_FREE(CARTOPO, IERR)
+      CALL mpi_comm_free(cartopo, ierr)
 
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      CALL mpi_barrier(mpi_comm_world, ierr)
 
-    END SUBROUTINE SCARF3D_UNSTRUCTURED_FFT
+    END SUBROUTINE scarf3d_unstructured_fim
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF3D_STRUCTURED_FFT(NC, FC, DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, RESCALE, PAD, FIELD, &
-                                      INFO)
+    SUBROUTINE scarf3d_structured_fim(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, pad, field, &
+                                      info)
 
-      ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
-      ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
+      ! Purpose:
+      ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
+      ! heterogeneity depends on number points of the internal (FFT) grid and the seed number. The former may be influenced by optional
+      ! padding (to avoid wrap-around correlation effects). The internal grid is determined by the near-corner 'nc', far-corner 'fc'
+      ! and the grid-step 'dh'. The spectrum will be filtered according to 'ds' (grid-step external grid) if the latter is not equal
+      ! to 'dh'.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      ! "SEED" AND NUMBER OF POINTS "NPTS" SHOULD BE THE SAME TO GUARANTEE SAME RANDOM FIELD
-
-      REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: NC, FC
-      REAL(FPP),                                       INTENT(IN)  :: DS                   !< STRUCTURED GRID-STEP
-      INTEGER(IPP),                  DIMENSION(3),     INTENT(IN)  :: FS, FE               !< FIRST/LAST STRUCTURED GRID INDICES
-      REAL(FPP),                                       INTENT(IN)  :: DH                   !< GRID-STEP
-      INTEGER(IPP),                                    INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: 0=VK, 1=GAUSS
-      REAL(FPP),                     DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
-      REAL(FPP),                                       INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
-      REAL(FPP),                                       INTENT(IN)  :: HURST                !< HURST EXPONENT
-      INTEGER(IPP),                                    INTENT(IN)  :: SEED                 !< SEED NUMBER
-      REAL(FPP),                     DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-      REAL(FPP),                                       INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-      REAL(FPP),                                       INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-      INTEGER(IPP),                                    INTENT(IN)  :: RESCALE              !< FLAG FOR RESCALING RANDOM FIELD TO DESIRED SIGMA
-      INTEGER(IPP),                                    INTENT(IN)  :: PAD                  !< FLAG FOR HANDLE FFT PERIODICITY
-      REAL(FPP),                     DIMENSION(:,:,:), INTENT(OUT) :: FIELD                !< RANDOM FIELD AT X,Y,Z LOCATION
-      REAL(FPP),                     DIMENSION(8),     INTENT(OUT) :: INFO                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
-      COMPLEX(FPP),     ALLOCATABLE, DIMENSION(:,:,:)              :: SPEC                 !< SPECTRUM/RANDOM FIELD
-      INTEGER(IPP)                                                 :: IERR                 !< MPI STUFF
-      INTEGER(IPP)                                                 :: I, J, K              !< COUNTERS
-      INTEGER(IPP)                                                 :: CARTOPO
-      INTEGER(IPP)                                                 :: OFFSET               !< EXTRA POINTS ON EACH SIDE FOR FFT PERIODICITY
-      INTEGER(IPP),                  DIMENSION(3)                  :: M                    !< POINTS FOR CALLING PROCESS
-      INTEGER(IPP),                  DIMENSION(3)                  :: LS, LE               !< FIRST/LAST INDEX ALONG X, Y, Z
-      INTEGER(IPP),                  DIMENSION(3)                  :: COORDS
-      INTEGER(IPP),                  DIMENSION(3)                  :: DIMS
-      INTEGER(IPP),                  DIMENSION(3)                  :: PS, PE
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                  :: NPOINTS              !< NUMBER OF INPUT POINTS FOR EACH PROCESS
-      LOGICAL,                       DIMENSION(3)                  :: BOOL
-      REAL(FPP)                                                    :: SCALING              !< SCALING FACTOR
-      REAL(REAL64)                                                 :: TICTOC               !< TIMING
-      REAL(FPP),                     DIMENSION(2)                  :: ET                   !< DUMMY FOR ELAPSED TIME
-      REAL(FPP),                     DIMENSION(3)                  :: MIN_EXTENT           !< LOWER MODEL LIMITS (GLOBAL)
-      REAL(FPP),                     DIMENSION(3)                  :: MAX_EXTENT           !< UPPER MODEL LIMITS (GLOBAL)
-      REAL(FPP),                     DIMENSION(3)                  :: PT
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:)                  :: VAR, MU              !< STATISTICS: VARIANCE AND AVERAGE
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:,:)              :: DELTA, BUFFER        !< RANDOM PERTURBATIONS ON COMPUTATIONAL GRID
+      REAL(f_real),                 DIMENSION(3),     INTENT(IN)  :: nc, fc          !< min/max extent of input grid (m or km)
+      REAL(f_real),                                   INTENT(IN)  :: ds              !< grid-step external grid, control max resolvable wavenumber
+      INTEGER(f_int),               DIMENSION(3),     INTENT(IN)  :: fs, fe          !< first/last external structured grid index
+      REAL(f_real),                                   INTENT(IN)  :: dh              !< grid-step of internal (FFT) grid
+      INTEGER(f_int),                                 INTENT(IN)  :: acf             !< autocorrelation function: 0=vk, 1=gauss
+      REAL(f_real),                 DIMENSION(3),     INTENT(IN)  :: cl              !< correlation length
+      REAL(f_real),                                   INTENT(IN)  :: sigma           !< standard deviation
+      REAL(f_real),                                   INTENT(IN)  :: hurst           !< hurst exponent
+      INTEGER(f_int),                                 INTENT(IN)  :: seed            !< seed number
+      REAL(f_real),                 DIMENSION(:,:),   INTENT(IN)  :: poi             !< location of point(s)-of-interest where muting/tapering is applied
+      REAL(f_real),                                   INTENT(IN)  :: mute            !< radius for mutin
+      REAL(f_real),                                   INTENT(IN)  :: taper           !< radius for tapering
+      INTEGER(f_int),                                 INTENT(IN)  :: rescale         !< flag for rescaling random field to desired sigma
+      INTEGER(f_int),                                 INTENT(IN)  :: pad             !< flag for handle fft periodicity (grid padding)
+      REAL(f_real),                 DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
+      REAL(f_real),                 DIMENSION(8),     INTENT(OUT) :: info            !< errors flags and timing for performance analysis
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)              :: spec
+      INTEGER(f_int)                                              :: ierr
+      INTEGER(f_int)                                              :: i, j, k
+      INTEGER(f_int)                                              :: cartopo
+      INTEGER(f_int)                                              :: offset
+      INTEGER(f_int),               DIMENSION(3)                  :: m
+      INTEGER(f_int),               DIMENSION(3)                  :: ls, le
+      INTEGER(f_int),               DIMENSION(3)                  :: coords
+      INTEGER(f_int),               DIMENSION(3)                  :: dims
+      INTEGER(f_int),               DIMENSION(3)                  :: ps, pe
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                  :: npoints
+      LOGICAL,                      DIMENSION(3)                  :: bool
+      REAL(f_real)                                                :: scaling
+      REAL(f_dble)                                                :: tictoc
+      REAL(f_real),                 DIMENSION(2)                  :: et
+      REAL(f_real),                 DIMENSION(3)                  :: min_extent
+      REAL(f_real),                 DIMENSION(3)                  :: max_extent
+      REAL(f_real),                 DIMENSION(3)                  :: pt
+      REAL(f_real),    ALLOCATABLE, DIMENSION(:)                  :: var, mu
+      REAL(f_real),    ALLOCATABLE, DIMENSION(:,:,:)              :: delta, buffer
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! GET RANK NUMBER
-      CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
+      ! get rank number
+      CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
-      ! GET AVAILABLE MPI PROCESSES
-      CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
+      ! get available mpi processes
+      CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
 
-      if (world_rank == 0) then
-        print*, 'input params @ STRUCTURED-FFT'
-        print*, 'NC ', nc
-        print*, 'FC ', fc
-        print*, 'DS ', ds
-        print*, 'FS ', fs
-        print*, 'FE ', fe
-        print*, 'DH ', dh
-        print*, 'ACF ', acf
-        print*, 'CL ', cl
-        print*, 'SIGMA ', sigma
-        print*, 'HURST ', hurst
-        print*, 'SEED ', seed
-        print*, 'POI ', size(poi)
-        print*, 'MUTE ', mute
-        print*, 'TAPER ', taper
-        print*, 'RESCALE ', rescale
-        print*, 'PAD ', pad
-      endif
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      ! initialise variables
+      info(:) = 0._f_real
 
-      ! MODEL LIMITS (PROCESS-WISE) ALONG EACH AXIS
-      ! MIN_EXTENT = (FS - 1) * DS
-      ! MAX_EXTENT = (FE - 1) * DS
-      MIN_EXTENT = NC
-      MAX_EXTENT = FC
+      IF (world_rank == 0) THEN
+        print*, 'input params @ structured-fft'
+        print*, 'nc ', nc
+        print*, 'fc ', fc
+        print*, 'ds ', ds
+        print*, 'fs ', fs
+        print*, 'fe ', fe
+        print*, 'dh ', dh
+        print*, 'acf ', acf
+        print*, 'cl ', cl
+        print*, 'sigma ', sigma
+        print*, 'hurst ', hurst
+        print*, 'seed ', seed
+        print*, 'poi ', SIZE(poi)
+        print*, 'mute ', mute
+        print*, 'taper ', taper
+        print*, 'rescale ', rescale
+        print*, 'pad ', pad
+      ENDIF
+      CALL mpi_barrier(mpi_comm_world, ierr)
 
-      ! (GLOBAL) MODEL LIMITS
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! determine internal (FFT) grid size
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! CYCLE OVER THE THREE MAIN DIRECTIONS TO DETERMINE THE NECESSARY MODEL SIZE (IN NUMBER OF POINTS) AND THE ABSOLUTE POSITION OF
-      ! OF THE FIRST POINT TO COUNTERACT FFT PERIODICITY
-      DO I = 1, 3
+      ! model limits (for each process) along each axis
+      min_extent = nc
+      max_extent = fc
 
-        ! MINIMUM NUMBER OF POINTS SUCH THAT RANDOM FIELD COVERS THE WHOLE DOMAIN. IN PRACTICE, WE DEFINE THE RANDOM FIELD ON A GRID
-        ! SLIGHTLY LARGER THAN NECESSARY (HALF GRID-STEP) IN EACH DIRECTION, IN ORDER TO AVOID SIDE-EFFECTS DUE TO INTERPOLATION WHEN
-        ! THE EXTRA EXTENSION TO HANDLE FFT PERIODICITY IS NOT DESIRED.
-        NPTS(I) = NINT( (MAX_EXTENT(I) + DH * 0.5_FPP - MIN_EXTENT(I) + DH * 0.5_FPP) / DH) + 1
+      ! (global) model limits
+      CALL mpi_allreduce(mpi_in_place, min_extent, 3, f_real, mpi_min, mpi_comm_world, ierr)
+      CALL mpi_allreduce(mpi_in_place, max_extent, 3, f_real, mpi_max, mpi_comm_world, ierr)
 
-if (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', MIN_EXTENT, ' ', MAX_EXTENT
+      ! CYCLE over the three main directions to determine the necessary model size (in number of points) and the absolute position
+      ! of the first point to counteract fft periodicity
+      DO i = 1, 3
 
-        ! POINTS FOR ONE CORRELATION LENGTH
-        OFFSET = NINT(CL(I) / DH)
+        ! minimum number of points such that random field covers the whole domain. In practice, we define the random field on a grid
+        ! slightly larger than necessary (half grid-step) in each direction to avoid side-effects due to interpolation (useful when
+        ! the extra extension to handle fft periodicity is not desired)
+        npts(i) = NINT( (max_extent(i) + dh * 0.5_f_real - min_extent(i) + dh * 0.5_f_real) / dh) + 1
 
-        ! DO NOT EXTEND MODEL UNLESS DESIRED
-        IF (PAD .NE. 1) OFFSET = 0
+        IF (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', min_extent, ' ', max_extent
 
-        ! EXTEND THE MODEL BY AT LEAST ONE CORRELATION LENGTH (ON EACH SIDE) TO COUNTERACT FFT PERIODICITY
-        NPTS(I) = NPTS(I) + 2 * OFFSET
+        ! padding depends on correlation length
+        offset = NINT(cl(i) / dh)
 
-        ! MAKE SURE WE HAVE EVEN NUMBER OF POINTS
-        IF (MOD(NPTS(I), 2) .NE. 0) NPTS(I) = NPTS(I) + 1
+        ! do not pad model unless desired
+        IF (pad .ne. 1) offset = 0
 
-        ! ABSOLUTE POSITION OF FIRST POINT (IT COULD BE NEGATIVE)
-        !OFF_AXIS(I) = MIN_EXTENT(I) - OFFSET * DH
-        OFF_AXIS(I) = MIN_EXTENT(I) - (OFFSET + 0.5_FPP) * DH
+        ! new model size including padding
+        npts(i) = npts(i) + 2 * offset
+
+        ! make sure we have even number of points (allow to handle Nyquist frequency explicitly)
+        IF (MOD(npts(i), 2) .ne. 0) npts(i) = npts(i) + 1
+
+        ! absolute position of first point (it could be negative)
+        off_axis(i) = min_extent(i) - (offset + 0.5_f_real) * dh
 
       ENDDO
 
-      INFO(:) = 0._FPP
+      ! check if model is large enough to catch the lower part of the spectrum (low wavenumbers)...
+      IF (ANY(npts .le. NINT(2._f_real * pi * cl / dh))) info(1) = 1._f_real
 
-      ! HERE WE CHECK IF THE MODEL IS LARGE ENOUGH TO CATCH THE LOWER PART OF THE SPECTRUM (LOW WAVENUMBERS)...
-      IF (ANY(NPTS .LE. NINT(2._FPP * PI * CL / DH))) INFO(1) = 1._FPP
+      ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
+      IF (ANY(dh .gt. cl / 2._f_real)) info(2) = 1._f_real
 
-      ! ...AND HERE IF THE GRID-STEP IS SMALL ENOUGH TO CATCH THE UPPER PART OF THE SPECTRUM (HIGH WAVENUMBERS)
-      IF (ANY(DH .GT. CL / 2._FPP)) INFO(2) = 1._FPP
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
+      ! on the external one
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! [ANOTHER WAY TO CHECK HOW CLOSE THE DISCRETE AND CONTINUOUS SPECTRA ARE, IS TO COMPARE THE RESPECTIVE STANDARD DEVIATIONS]
+      ! "gs"/"ge" are specified in "m_scarflib_common" and store first/last global index along each direction for all processes
+      ALLOCATE(gs(3, 0:world_size-1), ge(3, 0:world_size-1))
 
-      ! HERE BELOW WE CREATE A REGULAR MESH AND A CARTESIAN TOPOLOGY. THE RANDOM FIELD WILL BE CALCULATED ON THIS MESH OF "NPTS" POINTS
-      ! AND THEN INTERPOLATED AT THOSE POINTS (POSSIBLY IRREGULARLY DISTRIBUTED) OWNED BY EACH SINGLE PROCESS
+      ! return processors grid
+      CALL best_config(dims)
 
-      ! "GS"/"GE" STORE FIRST/LAST GLOBAL INDICES ALONG EACH DIRECTION FOR ALL PROCESS
-      ALLOCATE(GS(3, 0:WORLD_SIZE-1), GE(3, 0:WORLD_SIZE-1))
+      ! create topology
+      CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
 
-      ! RETURN PROCESSORS GRID RESULTING MAXIMIZING THE NUMBER OF OVERLAPPING CALLS FOR INTERPOLATION (SEE BELOW)
-      CALL BEST_CONFIG(DIMS)
+      ! return process coordinates in current topology
+      CALL mpi_cart_coords(cartopo, world_rank, ndims, coords, ierr)
 
-      ! TEMPORARY MESSAGE
-      IF (WORLD_RANK == 0) PRINT*, 'BEST PROCESSORS GRID: ', DIMS, ' -- ', NPTS
+      ! return first/last index ("ls"/"le") along each direction for the calling process. Note: first point has "ls = 1".
+      CALL coords2index(npts, dims, coords, ls, le)
 
-      ! CREATE TOPOLOGY
-      CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
+      gs(:, world_rank) = ls
+      ge(:, world_rank) = le
 
-      ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
-      CALL MPI_CART_COORDS(CARTOPO, WORLD_RANK, NDIMS, COORDS, IERR)
+      ! make all processes aware of global indices
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
 
-      ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
-      CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! determine if calling process has any external grid point belonging to other processes and which processes have external grid
+      ! points belonging to calling process. These info are needed to define communicator groups when interpolating data.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      GS(:, WORLD_RANK) = LS
-      GE(:, WORLD_RANK) = LE
+      ALLOCATE(points_world2rank(0:world_size - 1), points_rank2world(0:world_size - 1))
 
-      ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! min/max internal grid index containing input points
+      ps = FLOOR(((fs - 1) * ds - off_axis) / dh) + 1
+      pe = FLOOR(((fe - 1) * ds - off_axis) / dh) + 1
 
-      ALLOCATE(POINTS_WORLD2RANK(0:WORLD_SIZE - 1), POINTS_RANK2WORLD(0:WORLD_SIZE - 1))
+      points_rank2world = 0
 
-      ! MIN/MAX COMPUTATIONAL GRID INDICES CONTAINING INPUT POINTS
-      PS = FLOOR(((FS - 1) * DS - OFF_AXIS) / DH) + 1
-      PE = FLOOR(((FE - 1) * DS - OFF_AXIS) / DH) + 1
-
-      POINTS_RANK2WORLD = 0
-
-      ! DETERMINE IF CALLING PROCESS HAS AT LEAST ONE POINT FALLING INSIDE DOMAIN OF "I-TH" PROCESS
-      DO I = 0, WORLD_SIZE - 1
-        DO J = 1, 3
-          BOOL(J) = ( (PS(J) .LT. GE(J, I)) .AND. (PS(J) .GE. (GS(J, I) - 1)) ) .OR.     &
-                    ( (PE(J) .LT. GE(J, I)) .AND. (PE(J) .GE. (GS(J, I) - 1)) ) .OR.     &
-                    ( (PE(J) .GE. GE(J, I)) .AND. (PS(J) .LT. (GS(J, I) - 1)) )
+      ! determine if calling process has at least one point falling inside domain of "i-th" process
+      DO i = 0, world_size - 1
+        DO j = 1, 3
+          bool(j) = ( (ps(j) .lt. ge(j, i)) .and. (ps(j) .ge. (gs(j, i) - 1)) ) .or.     &
+                    ( (pe(j) .lt. ge(j, i)) .and. (pe(j) .ge. (gs(j, i) - 1)) ) .or.     &
+                    ( (pe(j) .ge. ge(j, i)) .and. (ps(j) .lt. (gs(j, i) - 1)) )
         ENDDO
-        IF (ALL(BOOL .EQV. .TRUE.)) POINTS_RANK2WORLD(I) = 1
+        IF (ALL(bool .eqv. .true.)) points_rank2world(i) = 1
       ENDDO
 
-      ! DETERMINE IF PROCESS "I" HAS AT LEAST ONE POINT FALLING INSIDE DOMAIN OF CALLING PROCESS
-      CALL MPI_ALLTOALL(POINTS_RANK2WORLD, 1, MPI_INTEGER, POINTS_WORLD2RANK, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! determine IF process "i" has at least one point falling inside domain of calling process
+      CALL mpi_alltoall(points_rank2world, 1, mpi_integer, points_world2rank, 1, mpi_integer, mpi_comm_world, ierr)
 
-      ! NUMBER OF POINTS FOR CALLING PROCESS
-      DO I = 1, 3
-        M(I) = LE(I) - LS(I) + 1
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! compute power spectrum and inverse FFT
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! number of points for calling process
+      DO i = 1, 3
+        m(i) = le(i) - ls(i) + 1
       ENDDO
 
-      ! ALLOCATE MEMORY FOR SPECTRUM
-      ALLOCATE(SPEC(M(1), M(2), M(3)))
+      ! allocate resources to hold spectrum
+      ALLOCATE(spec(m(1), m(2), m(3)))
 
-      ! COMPUTE SPECTRUM AND APPLY HERMITIAN SYMMETRY
-      CALL COMPUTE_SPECTRUM(DS, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, ET)
-
-#ifdef TIMING
-      INFO(5:6) = ET
-
-      ! START TIMER
-      CALL WATCH_START(TICTOC)
-#endif
-
-      ! TRANSFORM ALONG EACH DIRECTION
-      CALL TRANSFORM_ALONG_Z(SPEC)
-      CALL TRANSFORM_ALONG_Y(SPEC)
-      CALL TRANSFORM_ALONG_X(SPEC)
+      ! compute spectrum and apply hermitian symmetry
+      CALL compute_spectrum(ds, ls, le, dh, acf, cl, sigma, hurst, seed, spec, et)
 
 #ifdef TIMING
-      CALL WATCH_STOP(TICTOC)
+      info(5:6) = et
 
-      INFO(7) = TICTOC
+      ! start timer
+      CALL watch_start(tictoc)
 #endif
 
-      ! SCALING PARAMETER
-      SCALING = 1._FPP / SQRT(REAL(NPTS(1), FPP) * REAL(NPTS(2), FPP) * REAL(NPTS(3), FPP) * DH**3)
+      ! (inverse) transform along each direction
+      CALL transform_along_z(spec)
+      CALL transform_along_y(spec)
+      CALL transform_along_x(spec)
 
-      ALLOCATE(BUFFER(M(1), M(2), M(3)))
+#ifdef TIMING
+      CALL watch_stop(tictoc)
 
-      ! SCALE IFFT
-      DO K = 1, M(3)
-        DO J = 1, M(2)
-          DO I = 1, M(1)
-            BUFFER(I, J, K) = REAL(SPEC(I, J, K), FPP) * SCALING
+      info(7) = tictoc
+#endif
+
+      ! define scaling factor
+      scaling = 1._f_real / SQRT(REAL(npts(1), f_real) * REAL(npts(2), f_real) * REAL(npts(3), f_real) * dh**3)
+
+      ALLOCATE(buffer(m(1), m(2), m(3)))
+
+      ! scale field
+      DO k = 1, m(3)
+        DO j = 1, m(2)
+          DO i = 1, m(1)
+            buffer(i, j, k) = REAL(spec(i, j, k), f_real) * scaling
           ENDDO
         ENDDO
       ENDDO
 
-      DEALLOCATE(SPEC)
+      DEALLOCATE(spec)
 
-      ALLOCATE(VAR(0:WORLD_SIZE - 1), MU(0:WORLD_SIZE - 1), NPOINTS(0:WORLD_SIZE - 1))
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! compute mean and variance of the whole random field. Then rescale, if desired, discrete std. dev. to its continuous counterpart
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD FOR EACH SINGLE PROCESS
-      VAR(WORLD_RANK) = VARIANCE(BUFFER)
-      MU(WORLD_RANK)  = MEAN(BUFFER)
+      ALLOCATE(var(0:world_size - 1), mu(0:world_size - 1), npoints(0:world_size - 1))
 
-      ! NUMBER OF GRID POINTS PER PROCESS
-      NPOINTS(WORLD_RANK) = PRODUCT(M)
+      ! variance and mean for each single process
+      var(world_rank) = variance(buffer)
+      mu(world_rank)  = mean(buffer)
 
-      ! SHARE RESULTS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, VAR, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, MU, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! number of grid points per process
+      npoints(world_rank) = PRODUCT(m)
 
-      ! COMPUTE TOTAL VARIANCE ("INFO(3)") AND MEAN ("INFO(4)")
-      CALL PARALLEL_VARIANCE(VAR, MU, NPOINTS, INFO(3), INFO(4))
+      ! share results
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, f_real, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, f_real, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
-      ! RETURN STANDARD DEVIATION
-      INFO(3) = SQRT(INFO(3))
+      ! return total variance in "info(3)" and mean in "info(4)"
+      CALL parallel_variance(var, mu, npoints, info(3), info(4))
 
-      ! DO WE NEED TO RESCALE THE RANDOM FIELD TO DESIRED (I.E. CONTINUOUS) STANDARD DEVIATION?
-      IF (RESCALE .EQ. 1) THEN
+      ! we want standard deviation
+      info(3) = SQRT(info(3))
 
-        SCALING = SIGMA / INFO(3)
+      IF (rescale .eq. 1) THEN
 
-        DO K = 1, M(3)
-          DO J = 1, M(2)
-            DO I = 1, M(1)
-              BUFFER(I, J, K) = BUFFER(I, J, K) * SCALING - INFO(4)
+        scaling = sigma / info(3)
+
+        DO k = 1, m(3)
+          DO j = 1, m(2)
+            DO i = 1, m(1)
+              buffer(i, j, k) = buffer(i, j, k) * scaling - info(4)
             ENDDO
           ENDDO
         ENDDO
 
       ENDIF
 
-      DEALLOCATE(VAR, MU, NPOINTS)
+      DEALLOCATE(var, mu, npoints)
 
-      ! APPLY TAPER/MUTE
-      DO I = 1, SIZE(POI, 2)
-        PT(:) = POI(:, I) - OFF_AXIS(:)
-        CALL TAPERING(DH, LS, LE, BUFFER, PT, MUTE, TAPER)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! taper/mute random field at desired locations.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      DO i = 1, SIZE(poi, 2)
+        pt(:) = poi(:, i) - off_axis(:)                           !< update "poi" according to coordinates of internal grid
+        CALL tapering(dh, ls, le, buffer, pt, mute, taper)
       ENDDO
 
-      ! COPY RANDOM FIELD TO ARRAY WITH HALO
-      ALLOCATE(DELTA(0:M(1), 0:M(2), 0:M(3)))
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! each process exchange data with neighbors to define halos to be used during interpolation
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      DELTA = 0._FPP
+      ! copy random field to array with halo
+      ALLOCATE(delta(0:m(1), 0:m(2), 0:m(3)))
 
-      ! SCALE IFFT
-      DO K = 1, M(3)
-        DO J = 1, M(2)
-          DO I = 1, M(1)
-            DELTA(I, J, K) = BUFFER(I, J, K)
+      delta = 0._f_real
+
+      ! copy field
+      DO k = 1, m(3)
+        DO j = 1, m(2)
+          DO i = 1, m(1)
+            delta(i, j, k) = buffer(i, j, k)
           ENDDO
         ENDDO
       ENDDO
 
-      DEALLOCATE(BUFFER)
+      DEALLOCATE(buffer)
 
 #ifdef TIMING
-      CALL WATCH_START(TICTOC)
+      CALL watch_start(tictoc)
 #endif
 
-      ! EXCHANGE HALO
-      CALL EXCHANGE_HALO(CARTOPO, DELTA)
+      ! exchange halo
+      CALL exchange_halo(cartopo, delta)
 
-      ! INTERPOLATE RANDOM FIELD VALUES AT DESIRED OUTPUT LOCATIONS
-      CALL GRID_MAPPING_STRUCT(DH, DELTA, DS, FS, FE, FIELD)
+      ! interpolate random field values at desired output locations
+      CALL grid_mapping(dh, delta, ds, fs, fe, field)
 
 #ifdef TIMING
-      CALL WATCH_STOP(TICTOC)
+      CALL watch_stop(tictoc)
 
-      INFO(8) = TICTOC
+      info(8) = tictoc
 #endif
 
-      ! RELEASE MEMORY
-      DEALLOCATE(DELTA)
-      DEALLOCATE(GS, GE)
-      DEALLOCATE(POINTS_RANK2WORLD, POINTS_WORLD2RANK)
+      ! release memory
+      DEALLOCATE(delta)
+      DEALLOCATE(gs, ge)
+      DEALLOCATE(points_rank2world, points_world2rank)
 
-      CALL MPI_COMM_FREE(CARTOPO, IERR)
+      CALL mpi_comm_free(cartopo, ierr)
 
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      CALL mpi_barrier(mpi_comm_world, ierr)
 
-    END SUBROUTINE SCARF3D_STRUCTURED_FFT
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE GRID_MAPPING(DH, DELTA, X, Y, Z, FIELD)
-
-      REAL(FPP),                                       INTENT(IN)    :: DH                             !< FFT GRID-STEP
-      REAL(FPP),                 DIMENSION(:,:,:),     INTENT(IN)    :: DELTA                          !< RANDOM PERTURBATIONS ON FFT GRID
-      REAL(FPP),                 DIMENSION(:),         INTENT(IN)    :: X, Y, Z                        !< POINTS LOCATION
-      REAL(FPP),                 DIMENSION(:),         INTENT(OUT)   :: FIELD
-      INTEGER(IPP)                                                   :: I, J
-      INTEGER(IPP)                                                   :: M, N, NP, NB
-      INTEGER(IPP)                                                   :: MAXWIDTH, BLOCKWIDTH, NBLOCKS
-      INTEGER(IPP)                                                   :: IERR, TRIP, REQ
-      INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS, RECVCOUNTS, SDISPLS, RDISPLS
-      INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS_N, RECVCOUNTS_N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                        :: MAP, MAP_N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                        :: P0, P1
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:)                        :: RV, SV
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)                      :: SXYZ, RXYZ, SXYZ_N
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      FIELD = 0._FPP
-
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! IN ORDER NOT TO EXCEED THE PREVIOUS MEMORY PEAK, WE COMPUTE THE SIZE OF THE MINIMUM FFT GRID BLOCK "M", THE MAXIMUM NUMBER OF
-      ! POINTS TO BE INTERPOLATED "NP" AMONGST ALL PROCESSES AND THE MAXIMUM NUMBER OF PROCESSES "NB" THAT COULD SEND POINTS TO ANOTHER
-      ! ONE. WE USE THESE QUANTITIES TO PROVIDE AN UPPER BOUND "BLOCKWIDTH" TO THE NUMBER OF POINTS THAT CAN BE HANDLED BY ANY PROCESS
-      ! AT ONCE. THIS WAY WE CAN ALLOCATE ARRAYS ONLY ONCE.
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-
-      M = HUGE(1)
-
-      ! MINIMUM COMPUTATIONAL DOMAIN SIZE
-      DO I = 0, WORLD_SIZE - 1
-        M = MIN(M, (GE(1, I) - GS(1, I) + 1) * (GE(2, I) - GS(2, I) + 1) * (GE(3, I) - GS(3, I) + 1))
-      ENDDO
-
-      ! NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS
-      NB = COUNT(POINTS_WORLD2RANK .EQ. 1)
-
-      ! MAXIMUM NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS (CONSERVATIVE ESTIMATE)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NB, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
-
-      NP = SIZE(X)
-
-      ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NP, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
-
-      ! MAX NUMBER OF POINTS THAT CAN BE HANDLED AT ONCE (*_N ARRAYS FOR NON-BLOCKING "ALLTOALLV" ARE INCLUDED)
-      MAXWIDTH = (M * 2) / (9 + 4 * NB)
-
-      BLOCKWIDTH = MAXWIDTH
-
-      ! NUMBER OF BLOCKS REQUIRED TO COVER ALL POINTS
-      NBLOCKS = NP / BLOCKWIDTH
-
-      ! ADD ONE BLOCK MORE IF "NP" IS NOT MULTIPLE OF "BLOCKWIDTH"
-      IF (MOD(NP, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
-
-      ALLOCATE(P0(NBLOCKS), P1(NBLOCKS))
-
-      ! DEFINE FIRST/LAST POINT INDEX FOR EACH BLOCK
-      DO I = 1, NBLOCKS
-        P0(I) = (I - 1) * BLOCKWIDTH + 1
-        P1(I) = I * BLOCKWIDTH
-      ENDDO
-
-      ! MAKE SURE THAT INDICES DO NOT EXCEED ACTUAL NUMBER OF POINTS IN CALLING PROCESS
-      N = SIZE(X)
-
-      ! LIMIT POINTS INDICES TO MAXIMUM NUMBER OF POINTS AVAILABLE TO CALLING PROCESS
-      DO I = 1, NBLOCKS
-        IF ( (P0(I) .LE. N) .AND. (P1(I) .GT. N) ) P1(I) = N
-        IF ( (P0(I) .GT. N) .AND. (P1(I) .GT. N) ) P1(I) = P0(I) - 1
-      ENDDO
-
-      ! THE STRATEGY IS TO ALLOCATE ONLY ONCE THESE ARRAY, EVEN IF THEY MAY RESULT LARGER THAN NECESSARY
-      ALLOCATE(SXYZ(3, BLOCKWIDTH), MAP(BLOCKWIDTH), RV(BLOCKWIDTH))
-      ALLOCATE(RXYZ(3, BLOCKWIDTH * NB), SV(BLOCKWIDTH * NB))
-      ALLOCATE(SXYZ_N(3, BLOCKWIDTH), MAP_N(BLOCKWIDTH))
-
-      CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIP, IERR)
-      CALL MPI_TYPE_COMMIT(TRIP, IERR)
-
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! FOR EACH BLOCK, WE BUILD AN ORDERED LIST OF POINTS TO BE SENT TO ALL OTHER PROCESSES AND THEIR NUMBER. THEN WE COMPUTE THE
-      ! NUMBER OF POINTS TO BE RECEIVED. THESE POINTS ARE INTERPOLATED AND SENT BACK TO THE RIGHT OWNER. SIMILARLY, POINTS INTERPOLATED
-      ! BY OTHER PROCESSES ARE COLLECTED AND STORED AT THE RIGHT LOCATION.
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-
-      ! COLLECT DATA
-      CALL ORDER_POINTS(P0(1), P1(1), DH, X, Y, Z, SXYZ, SENDCOUNTS, MAP)
-
-      ! DETERMINE NUMBER OF POINTS TO BE RECEIVED FROM EACH PROCESS
-      CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      ! SET DISPLACEMENTS
-      RDISPLS(1) = 0
-      SDISPLS(1) = 0
-
-      DO I = 2, WORLD_SIZE
-        RDISPLS(I) = RDISPLS(I - 1) + RECVCOUNTS(I - 1)
-        SDISPLS(I) = SDISPLS(I - 1) + SENDCOUNTS(I - 1)
-      ENDDO
-
-      DO J = 2, NBLOCKS
-
-        ! FORWARD POINTS REFERRED TO PREVIOUS (J - 1) ITERATION
-        CALL MPI_IALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, REQ, IERR)
-
-        ! COLLECT DATA TO BE USED IN THE NEXT (J) ITERATION
-        CALL ORDER_POINTS(P0(J), P1(J), DH, X, Y, Z, SXYZ_N, SENDCOUNTS_N, MAP_N)
-
-        CALL MPI_ALLTOALL(SENDCOUNTS_N, 1, MPI_INTEGER, RECVCOUNTS_N, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-        ! WAIT FOR DATA FROM PREVIOUS (J - 1) ITERATION
-        CALL MPI_WAIT(REQ, MPI_STATUS_IGNORE, IERR)
-
-        ! NUMBER OF POINTS RECEIVED: NEED TO INTEPOLATE ONLY THESE, NOT WHOLE "RXYZ" VECTOR
-        N = SUM(RECVCOUNTS)
-
-        ! INTERPOLATION
-        CALL INTERPOLATE(N, RXYZ, DELTA, SV)
-
-        ! COLLECT POINTS THAT HAVE BEEN INTERPOLATED BY OTHER PROCESSES
-        CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
-
-        ! COPY INTERPOLATED DATA (IF ANY) TO RIGHT LOCATION
-        DO I = 1, P1(J - 1) - P0(J - 1) + 1
-          FIELD(MAP(I)) = RV(I)
-        ENDDO
-
-        ! ASSIGN DATA TO BE SENT AT NEXT ITERATION
-        DO I = 1, BLOCKWIDTH
-          SXYZ(1, I) = SXYZ_N(1, I)
-          SXYZ(2, I) = SXYZ_N(2, I)
-          SXYZ(3, I) = SXYZ_N(3, I)
-          MAP(I)     = MAP_N(I)
-        ENDDO
-
-        RDISPLS(1) = 0
-        SDISPLS(1) = 0
-
-        SENDCOUNTS(1) = SENDCOUNTS_N(1)
-        RECVCOUNTS(1) = RECVCOUNTS_N(1)
-
-        DO I = 2, WORLD_SIZE
-          SDISPLS(I)    = SDISPLS(I - 1) + SENDCOUNTS_N(I - 1)
-          RDISPLS(I)    = RDISPLS(I - 1) + RECVCOUNTS_N(I - 1)
-          SENDCOUNTS(I) = SENDCOUNTS_N(I)
-          RECVCOUNTS(I) = RECVCOUNTS_N(I)
-        ENDDO
-
-      ENDDO
-
-      ! FORWARD DATA
-      CALL MPI_ALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, IERR)
-
-      ! NUMBER OF POINTS RECEIVED: NEED TO INTEPOLATE ONLY THESE, NOT WHOLE "RXYZ" VECTOR
-      N = SUM(RECVCOUNTS)
-
-      ! INTERPOLATION
-      CALL INTERPOLATE(N, RXYZ, DELTA, SV)
-
-      ! BACKWARD DATA
-      CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
-
-      ! COPY INTERPOLATED DATA TO RIGHT LOCATION. LIMIT THE MAXIMUM ITERATION INDEX IN CASE "NP" NOT MULTIPLE OF "BLOCKWIDTH"
-      DO I = 1, P1(NBLOCKS) - P0(NBLOCKS) + 1
-        FIELD(MAP(I)) = RV(I)
-      ENDDO
-
-      ! FREE RESOURCES
-      CALL MPI_TYPE_FREE(TRIP, IERR)
-
-      DEALLOCATE(SXYZ, RXYZ, MAP, RV, SV)
-      DEALLOCATE(SXYZ_N, MAP_N)
-      DEALLOCATE(P0, P1)
-
-    END SUBROUTINE GRID_MAPPING
+    END SUBROUTINE scarf3d_structured_fim
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE GRID_MAPPING_STRUCT(DH, DELTA, DS, FS, FE, FIELD)
+    SUBROUTINE grid_mapping_unstruct(dh, delta, x, y, z, field)
 
-      REAL(FPP),                                       INTENT(IN)    :: DH                             !< FFT GRID-STEP
-      REAL(FPP),                 DIMENSION(:,:,:),     INTENT(IN)    :: DELTA                          !< RANDOM PERTURBATIONS ON FFT GRID
-      REAL(FPP),                                       INTENT(IN)    :: DS
-      INTEGER(IPP),              DIMENSION(3),         INTENT(IN)    :: FS, FE
-      REAL(FPP),                 DIMENSION(:,:,:),     INTENT(OUT)   :: FIELD
-      INTEGER(IPP)                                                   :: I, J, C
-      INTEGER(IPP)                                                   :: M, N, NP, NB, NX, NY, NZ
-      INTEGER(IPP)                                                   :: MAXWIDTH, BLOCKWIDTH, NBLOCKS
-      INTEGER(IPP)                                                   :: IERR, TRIP, REQ
-      INTEGER(IPP),              DIMENSION(3)                        :: DUM
-      INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS, RECVCOUNTS, SDISPLS, RDISPLS
-      INTEGER(IPP),              DIMENSION(WORLD_SIZE)               :: SENDCOUNTS_N, RECVCOUNTS_N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)                      :: MAP, MAP_N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)                      :: P0, P1
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:)                        :: RV, SV
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:,:)                      :: SXYZ, RXYZ, SXYZ_N
+      ! Purpose:
+      ! To map (interpolate) the random field from the internal (FFT) grid to an external unstructured one. Take advantage of asynchronous
+      ! MPI calls to overlap communitions and calculations as much as possible
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      REAL(f_real),                                      INTENT(IN)  :: dh                             !< fft grid-step
+      REAL(f_real),                DIMENSION(:,:,:),     INTENT(IN)  :: delta                          !< random perturbations on fft grid
+      REAL(f_real),                DIMENSION(:),         INTENT(IN)  :: x, y, z                        !< points location
+      REAL(f_real),                DIMENSION(:),         INTENT(OUT) :: field                          !< random field
+      INTEGER(f_int)                                                 :: i, j
+      INTEGER(f_int)                                                 :: m, n, np, nb
+      INTEGER(f_int)                                                 :: maxwidth, blockwidth, nblocks
+      INTEGER(f_int)                                                 :: ierr, trip, req
+      INTEGER(f_int),              DIMENSION(world_size)             :: sendcounts, recvcounts, sdispls, rdispls
+      INTEGER(f_int),              DIMENSION(world_size)             :: sendcounts_n, recvcounts_n
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                      :: map, map_n
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                      :: p0, p1
+      REAL(f_real),   ALLOCATABLE, DIMENSION(:)                      :: rv, sv
+      REAL(f_real),   ALLOCATABLE, DIMENSION(:,:)                    :: sxyz, rxyz, sxyz_n
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      FIELD = 0._FPP
+      field = 0._f_real
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! IN ORDER NOT TO EXCEED THE PREVIOUS MEMORY PEAK, WE COMPUTE THE SIZE OF THE MINIMUM FFT GRID BLOCK "M", THE MAXIMUM NUMBER OF
-      ! POINTS TO BE INTERPOLATED "NP" AMONGST ALL PROCESSES AND THE MAXIMUM NUMBER OF PROCESSES "NB" THAT COULD SEND POINTS TO ANOTHER
-      ! ONE. WE USE THESE QUANTITIES TO PROVIDE AN UPPER BOUND "BLOCKWIDTH" TO THE NUMBER OF POINTS THAT CAN BE HANDLED BY ANY PROCESS
-      ! AT ONCE. THIS WAY WE CAN ALLOCATE ARRAYS ONLY ONCE.
+      ! in order not to exceed the previous memory peak, we compute the size of the minimum FFT grid block "m", the maximum number of
+      ! points to be interpolated "np" amongst all processes and the maximum number of processes "nb" that could send points to another
+      ! one. We use these quantities to provide an upper bound "blockwidth" to the number of points that can be handled by any process
+      ! at once. As a secondary benefit, this allow us to allocate arrays only once.
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      M = HUGE(1)
+      m = HUGE(1)
 
-      ! MINIMUM COMPUTATIONAL DOMAIN SIZE
-      DO I = 0, WORLD_SIZE - 1
-        M = MIN(M, (GE(1, I) - GS(1, I) + 1) * (GE(2, I) - GS(2, I) + 1) * (GE(3, I) - GS(3, I) + 1))
+      ! minimum computational domain size
+      DO i = 0, world_size - 1
+        m = MIN(m, (ge(1, i) - gs(1, i) + 1) * (ge(2, i) - gs(2, i) + 1) * (ge(3, i) - gs(3, i) + 1))
       ENDDO
 
-      ! NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS
-      NB = COUNT(POINTS_WORLD2RANK .EQ. 1)
+      ! number of processes with at least one point falling inside computational domain of calling process
+      nb = COUNT(points_world2rank .eq. 1)
 
-      ! MAXIMUM NUMBER OF PROCESSES WITH AT LEAST ONE POINT FALLING INSIDE COMPUTATIONAL DOMAIN OF CALLING PROCESS (CONSERVATIVE ESTIMATE)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NB, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+      ! maximum number of processes with at least one point falling inside computational domain of calling process (conservative estimate)
+      CALL mpi_allreduce(mpi_in_place, nb, 1, mpi_integer, mpi_max, mpi_comm_world, ierr)
 
-      NX = FE(1) - FS(1) + 1
-      NY = FE(2) - FS(2) + 1
-      NZ = FE(3) - FS(3) + 1
+      np = SIZE(x)
 
-      DUM = [NX, NY, NZ]
+      ! maximum number of points aby process could send or receive (conservative estimate)
+      CALL mpi_allreduce(mpi_in_place, np, 1, mpi_integer, mpi_max, mpi_comm_world, ierr)
 
-      ! MAXIMUM NUMBER OF POINTS ANY PROCESS COULD SEND OR RECEIVE (CONSERVATIVE ESTIMATE)
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, DUM, 3, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+      ! max number of points that can be handled at once (*_n arrays for non-blocking "alltoallv" are included)
+      maxwidth = (m * 2) / (9 + 4 * nb)
 
-      NX = DUM(1); NY = DUM(2); NZ = DUM(3)
+      blockwidth = maxwidth
 
-      !NP = NX * NY * NZ
+      ! number of blocks required to cover ALL points
+      nblocks = np / blockwidth
 
-      ! MAX NUMBER OF POINTS THAT CAN BE HANDLED AT ONCE (*_N ARRAYS FOR NON-BLOCKING "ALLTOALLV" ARE INCLUDED)
-      MAXWIDTH = (M * 2) / (9 + 4 * NB)
+      ! add one more block if "np" is not multiple of "blockwidth"
+      IF (MOD(np, blockwidth) .ne. 0) nblocks = nblocks + 1
 
-      ! NUMBER OF Z-PLANES THAT CAN BE PROCESSED AT ONCE
-      BLOCKWIDTH = MAXWIDTH / (NX * NY)
+      ALLOCATE(p0(nblocks), p1(nblocks))
 
-      ! TEMPORARY WORKAROUND IF NO Z-PLANES CAN BE PREOCESSED: THIS MAY OCCURR IF INPUT MODEL DIMENSIONS ARE VERY SMALL!
-      IF (BLOCKWIDTH .EQ. 0) THEN
-        BLOCKWIDTH = 1
-        MAXWIDTH   = NX * NY
+      ! define first/last point index for each block
+      DO i = 1, nblocks
+        p0(i) = (i - 1) * blockwidth + 1
+        p1(i) = i * blockwidth
+      ENDDO
+
+      ! make sure that indices DO not exceed actual number of points in calling process
+      n = SIZE(x)
+
+      ! limit points indices to maximum number of points available to calling process
+      DO i = 1, nblocks
+        IF ( (p0(i) .le. n) .and. (p1(i) .gt. n) ) p1(i) = n
+        IF ( (p0(i) .gt. n) .and. (p1(i) .gt. n) ) p1(i) = p0(i) - 1
+      ENDDO
+
+      ! the strategy is to allocate only once these array, even if they may result larger than necessary
+      ALLOCATE(sxyz(3, blockwidth), map(blockwidth), rv(blockwidth))
+      ALLOCATE(rxyz(3, blockwidth * nb), sv(blockwidth * nb))
+      ALLOCATE(sxyz_n(3, blockwidth), map_n(blockwidth))
+
+      CALL mpi_type_contiguous(3, f_real, trip, ierr)
+      CALL mpi_type_commit(trip, ierr)
+
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! for each block, we build an ordered list of points to be sent to all other processes and their number. Then we compute the
+      ! number of points to be received. These points are interpolated and sent back to the right owner. Similarly, points interpolated
+      ! by other processes are collected and stored at the right location.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! collect data
+      CALL order_points(p0(1), p1(1), dh, x, y, z, sxyz, sendcounts, map)
+
+      ! determine number of points to be received from each process
+      CALL mpi_alltoall(sendcounts, 1, mpi_integer, recvcounts, 1, mpi_integer, mpi_comm_world, ierr)
+
+      ! set displacements
+      rdispls(1) = 0
+      sdispls(1) = 0
+
+      DO i = 2, world_size
+        rdispls(i) = rdispls(i - 1) + recvcounts(i - 1)
+        sdispls(i) = sdispls(i - 1) + sendcounts(i - 1)
+      ENDDO
+
+      DO j = 2, nblocks
+
+        ! forward points referred to previous (j - 1) iteration
+        CALL mpi_ialltoallv(sxyz, sendcounts, sdispls, trip, rxyz, recvcounts, rdispls, trip, mpi_comm_world, req, ierr)
+
+        ! collect data to be used in the next (j) iteration
+        CALL order_points(p0(j), p1(j), dh, x, y, z, sxyz_n, sendcounts_n, map_n)
+
+        CALL mpi_alltoall(sendcounts_n, 1, mpi_integer, recvcounts_n, 1, mpi_integer, mpi_comm_world, ierr)
+
+        ! wait for data from previous (j - 1) iteration
+        CALL mpi_wait(req, mpi_status_ignore, ierr)
+
+        ! number of points received: need to intepolate only these, not whole "rxyz" vector
+        n = SUM(recvcounts)
+
+        ! interpolation
+        CALL interpolate(n, rxyz, delta, sv)
+
+        ! collect points that have been interpolated by other processes
+        CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
+
+        ! copy interpolated data (if any) to right location
+        DO i = 1, p1(j - 1) - p0(j - 1) + 1
+          field(map(i)) = rv(i)
+        ENDDO
+
+        ! assign data to be sent at next iteration
+        DO i = 1, blockwidth
+          sxyz(1, i) = sxyz_n(1, i)
+          sxyz(2, i) = sxyz_n(2, i)
+          sxyz(3, i) = sxyz_n(3, i)
+          map(i)     = map_n(i)
+        ENDDO
+
+        rdispls(1) = 0
+        sdispls(1) = 0
+
+        sendcounts(1) = sendcounts_n(1)
+        recvcounts(1) = recvcounts_n(1)
+
+        DO i = 2, world_size
+          sdispls(i)    = sdispls(i - 1) + sendcounts_n(i - 1)
+          rdispls(i)    = rdispls(i - 1) + recvcounts_n(i - 1)
+          sendcounts(i) = sendcounts_n(i)
+          recvcounts(i) = recvcounts_n(i)
+        ENDDO
+
+      ENDDO
+
+      ! forward data
+      CALL mpi_alltoallv(sxyz, sendcounts, sdispls, trip, rxyz, recvcounts, rdispls, trip, mpi_comm_world, ierr)
+
+      ! number of points received: need to intepolate only these, not whole "rxyz" vector
+      n = SUM(recvcounts)
+
+      ! interpolation
+      CALL interpolate(n, rxyz, delta, sv)
+
+      ! backward data
+      CALL mpi_alltoallv(sv, recvcounts, rdispls, f_real, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
+
+      ! copy interpolated data to right location. limit the maximum iteration index in case "np" not multiple of "blockwidth"
+      DO i = 1, p1(nblocks) - p0(nblocks) + 1
+        field(map(i)) = rv(i)
+      ENDDO
+
+      ! free resources
+      CALL mpi_type_free(trip, ierr)
+
+      DEALLOCATE(sxyz, rxyz, map, rv, sv)
+      DEALLOCATE(sxyz_n, map_n)
+      DEALLOCATE(p0, p1)
+
+    END SUBROUTINE grid_mapping_unstruct
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE grid_mapping_struct(dh, delta, ds, fs, fe, field)
+
+      ! Purpose:
+      ! To map (interpolate) the random field from the internal (FFT) grid to an external structured one. Take advantage of asynchronous
+      ! MPI calls to overlap communitions and calculations as much as possible
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      REAL(f_real),                                      INTENT(IN)  :: dh                             !< internal grid grid-step
+      REAL(f_real),                DIMENSION(:,:,:),     INTENT(IN)  :: delta                          !< random field on internal grid
+      REAL(f_real),                                      INTENT(IN)  :: ds                             !< external grid grid-step
+      INTEGER(f_int),              DIMENSION(3),         INTENT(IN)  :: fs, fe                         !< min/max external grid index
+      REAL(f_real),                DIMENSION(:,:,:),     INTENT(OUT) :: field
+      INTEGER(f_int)                                                 :: i, j, c
+      INTEGER(f_int)                                                 :: m, n, np, nb, nx, ny, nz
+      INTEGER(f_int)                                                 :: maxwidth, blockwidth, nblocks
+      INTEGER(f_int)                                                 :: ierr, trip, req
+      INTEGER(f_int),              DIMENSION(3)                      :: dum
+      INTEGER(f_int),              DIMENSION(world_size)             :: sendcounts, recvcounts, sdispls, rdispls
+      INTEGER(f_int),              DIMENSION(world_size)             :: sendcounts_n, recvcounts_n
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)                    :: map, map_n
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)                    :: p0, p1
+      REAL(f_real),   ALLOCATABLE, DIMENSION(:)                      :: rv, sv
+      REAL(f_real),   ALLOCATABLE, DIMENSION(:,:)                    :: sxyz, rxyz, sxyz_n
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      field = 0._f_real
+
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! in order not to exceed the previous memory peak, we compute the size of the minimum FFT grid block "m", the maximum number of
+      ! points to be interpolated "np" amongst all processes and the maximum number of processes "nb" that could send points to another
+      ! one. We use these quantities to provide an upper bound "blockwidth" to the number of points that can be handled by any process
+      ! at once. As a secondary benefit, this allow us to allocate arrays only once.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      m = HUGE(1)
+
+      ! minimum computational domain SIZE
+      DO i = 0, world_size - 1
+        m = MIN(m, (ge(1, i) - gs(1, i) + 1) * (ge(2, i) - gs(2, i) + 1) * (ge(3, i) - gs(3, i) + 1))
+      ENDDO
+
+      ! number of processes with at least one point falling inside computational domain of calling process
+      nb = COUNT(points_world2rank .eq. 1)
+
+      ! maximum number of processes with at least one point falling inside computational domain of calling process (conservative estimate)
+      CALL mpi_allreduce(mpi_in_place, nb, 1, mpi_integer, mpi_max, mpi_comm_world, ierr)
+
+      nx = fe(1) - fs(1) + 1
+      ny = fe(2) - fs(2) + 1
+      nz = fe(3) - fs(3) + 1
+
+      dum = [nx, ny, nz]
+
+      ! maximum number of points ANY process could send or receive (conservative estimate)
+      CALL mpi_allreduce(mpi_in_place, dum, 3, mpi_integer, mpi_max, mpi_comm_world, ierr)
+
+      nx = dum(1); ny = dum(2); nz = dum(3)
+
+      ! max number of points that can be handled at once (*_n arrays for non-blocking "alltoallv" are included)
+      maxwidth = (m * 2) / (9 + 4 * nb)
+
+      ! number of z-planes that can be processed at once
+      blockwidth = maxwidth / (nx * ny)
+
+      ! temporary workaround if no z-planes can be preocessed: this may occurr if input model dimensions are very small!
+      IF (blockwidth .eq. 0) THEN
+        blockwidth = 1
+        maxwidth   = nx * ny
       ENDIF
 
-      ! NUMBER OF BLOCKS REQUIRED TO COVER HIGHEST NUMBER OF Z-PLANES
-      NBLOCKS = NZ / BLOCKWIDTH
+      ! number of blocks required to cover highest number of z-planes
+      nblocks = nz / blockwidth
 
-      IF (MOD(NZ, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
+      IF (MOD(nz, blockwidth) .ne. 0) nblocks = nblocks + 1
 
-      ALLOCATE(P0(3, NBLOCKS), P1(3, NBLOCKS))
+      ALLOCATE(p0(3, nblocks), p1(3, nblocks))
 
-      IF (BLOCKWIDTH .GE. 1) THEN
+      ! define first/last point index for each block
+      DO i = 1, nblocks
+        p0(1, i) = 1
+        p1(1, i) = fe(1) - fs(1) + 1
+        p0(2, i) = 1
+        p1(2, i) = fe(2) - fs(2) + 1
+        p0(3, i) = (i - 1) * blockwidth + 1
+        p1(3, i) = i * blockwidth
+      ENDDO
 
-        DO I = 1, NBLOCKS
-          P0(1, I) = 1
-          P1(1, I) = FE(1) - FS(1) + 1
-          P0(2, I) = 1
-          P1(2, I) = FE(2) - FS(2) + 1
-          P0(3, I) = (I - 1) * BLOCKWIDTH + 1
-          P1(3, I) = I * BLOCKWIDTH
-        ENDDO
+      ! make sure that indices do not exceed actual number of z-planes in calling process
+      n = fe(3) - fs(3) + 1
 
-        N = FE(3) - FS(3) + 1
+      DO i = 1, nblocks
+        IF ( (p0(3, i) .le. n) .and. (p1(3, i) .gt. n) ) p1(3, i) = n
+        IF ( (p0(3, i) .gt. n) .and. (p1(3, i) .gt. n) ) p1(3, i) = p0(3, i) - 1
+      ENDDO
 
-        DO I = 1, NBLOCKS
-          IF ( (P0(3, I) .LE. N) .AND. (P1(3, I) .GT. N) ) P1(3, I) = N
-          IF ( (P0(3, I) .GT. N) .AND. (P1(3, I) .GT. N) ) P1(3, I) = P0(3, I) - 1
-        ENDDO
+      ! the strategy is to allocate only once these array, even if they may result larger than necessary
+      ALLOCATE(sxyz(3, maxwidth), map(3, maxwidth), rv(maxwidth))
+      ALLOCATE(rxyz(3, maxwidth * nb), sv(maxwidth * nb))
+      ALLOCATE(sxyz_n(3, maxwidth), map_n(3, maxwidth))
 
-      ELSE
-
-        ! THIS PART MUST BE COMPLETED
-
-        ! NUMBER OF Y-ROWS
-        ! BLOCKWIDTH = MAXWIDTH / NX
-        !
-        ! IF (WORLD_RANK == 2) PRINT*, 'NUMBER Y ROWS ', BLOCKWIDTH
-        !
-        ! ! NUMBER OF BLOCKS OF Y-ROWS
-        ! NBLOCKS = NY / BLOCKWIDTH
-        !
-        ! IF (MOD(NY, BLOCKWIDTH) .NE. 0) NBLOCKS = NBLOCKS + 1
-        !
-        ! ALLOCATE(P0(3, NBLOCKS*NZ), P1(3, NBLOCKS*NZ))
-        !
-        ! DO J = 1, NZ
-        !   DO I = 1, NBLOCKS
-        !     C        = (J - 1) * NBLOCKS + I
-        !     P0(1, C) = 1
-        !     P1(1, C) = FE(1) - FS(1) + 1
-        !     P0(2, C) = (I - 1) * BLOCKWIDTH + 1
-        !     P1(2, C) = I * BLOCKWIDTH
-        !     P0(3, C) = J
-        !     P1(3, C) = J
-        !   ENDDO
-        ! ENDDO
-        !
-        ! ! MAKE SURE WE DO NOT EXCEED INDICES
-        !
-        ! N = FE(2) - FS(2) + 1
-        !
-        ! DO J = 1, NZ
-        !   DO I = 1, NBLOCKS
-        !     C = (J - 1) * NBLOCKS + I
-        !     IF ( (P0(2, C) .LE. N) .AND. (P1(2, C) .GT. N) ) P1(2, C) = N
-        !     IF ( (P0(2, C) .GT. N) .AND. (P1(2, C) .GT. N) ) P1(2, C) = P0(2, C) - 1
-        !   ENDDO
-        ! ENDDO
-        !
-        ! N = FE(3) - FS(3) + 1
-        !
-        ! DO J = 1, NZ
-        !   DO I = 1, NBLOCKS
-        !     C = (J - 1) * NBLOCKS + I
-        !     IF ( (P0(3, C) .GT. N) .AND. (P1(3, C) .GT. N) ) P1(3, C) = P0(3, C) - 1
-        !   ENDDO
-        ! ENDDO
-        !
-        ! BLOCKWIDTH = NX * BLOCKWIDTH
-        !
-        ! NBLOCKS = NBLOCKS * NZ
-        !
-        ! IF (WORLD_RANK == 2) PRINT*, 'NUMBER OF BLOCKWIDTH (POINTS) ', BLOCKWIDTH, 'BLOCKS ', NBLOCKS, NBLOCKS/NZ
-
-      ENDIF
-
-      ! THE STRATEGY IS TO ALLOCATE ONLY ONCE THESE ARRAY, EVEN IF THEY MAY RESULT LARGER THAN NECESSARY
-      ALLOCATE(SXYZ(3, MAXWIDTH), MAP(3, MAXWIDTH), RV(MAXWIDTH))
-      ALLOCATE(RXYZ(3, MAXWIDTH * NB), SV(MAXWIDTH * NB))
-      ALLOCATE(SXYZ_N(3, MAXWIDTH), MAP_N(3, MAXWIDTH))
-
-      CALL MPI_TYPE_CONTIGUOUS(3, REAL_TYPE, TRIP, IERR)
-      CALL MPI_TYPE_COMMIT(TRIP, IERR)
+      CALL mpi_type_contiguous(3, f_real, trip, ierr)
+      CALL mpi_type_commit(trip, ierr)
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! FOR EACH BLOCK, WE BUILD AN ORDERED LIST OF POINTS TO BE SENT TO ALL OTHER PROCESSES AND THEIR NUMBER. THEN WE COMPUTE THE
-      ! NUMBER OF POINTS TO BE RECEIVED. THESE POINTS ARE INTERPOLATED AND SENT BACK TO THE RIGHT OWNER. SIMILARLY, POINTS INTERPOLATED
-      ! BY OTHER PROCESSES ARE COLLECTED AND STORED AT THE RIGHT LOCATION.
+      ! for each block, we build an ordered list of points to be sent to all other processes and their number. Then we compute the
+      ! number of points to be received. These points are interpolated and sent back to the right owner. Similarly, points interpolated
+      ! by other processes are collected and stored at the right location.
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! COLLECT DATA
-      CALL ORDER_POINTS_STRUCT(P0(:, 1), P1(:, 1), DH, FS, FE, DS, SXYZ, SENDCOUNTS, MAP)
-      CALL MPI_ALLTOALL(SENDCOUNTS, 1, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! collect data
+      CALL order_points(p0(:, 1), p1(:, 1), dh, fs, fe, ds, sxyz, sendcounts, map)
 
-      ! SET DISPLACEMENTS
-      RDISPLS(1) = 0
-      SDISPLS(1) = 0
+      ! determine number of points to be received from each process
+      CALL mpi_alltoall(sendcounts, 1, mpi_integer, recvcounts, 1, mpi_integer, mpi_comm_world, ierr)
 
-      DO I = 2, WORLD_SIZE
-        RDISPLS(I) = RDISPLS(I - 1) + RECVCOUNTS(I - 1)
-        SDISPLS(I) = SDISPLS(I - 1) + SENDCOUNTS(I - 1)
+      ! set displacements
+      rdispls(1) = 0
+      sdispls(1) = 0
+
+      DO i = 2, world_size
+        rdispls(i) = rdispls(i - 1) + recvcounts(i - 1)
+        sdispls(i) = sdispls(i - 1) + sendcounts(i - 1)
       ENDDO
 
-      DO J = 2, NBLOCKS
+      DO j = 2, nblocks
 
-        ! FORWARD OLD DATA
-        CALL MPI_IALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, REQ, IERR)
+        ! forward old data
+        CALL mpi_ialltoallv(sxyz, sendcounts, sdispls, trip, rxyz, recvcounts, rdispls, trip, mpi_comm_world, req, ierr)
 
-        ! COLLECT NEW DATA
-        CALL ORDER_POINTS_STRUCT(P0(:, J), P1(:, J), DH, FS, FE, DS, SXYZ_N, SENDCOUNTS_N, MAP_N)
-        CALL MPI_ALLTOALL(SENDCOUNTS_N, 1, MPI_INTEGER, RECVCOUNTS_N, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+        ! collect new data
+        CALL order_points_struct(p0(:, j), p1(:, j), dh, fs, fe, ds, sxyz_n, sendcounts_n, map_n)
+        CALL mpi_alltoall(sendcounts_n, 1, mpi_integer, recvcounts_n, 1, mpi_integer, mpi_comm_world, ierr)
 
-        ! WAIT FOR OLD DATA
-        CALL MPI_WAIT(REQ, MPI_STATUS_IGNORE, IERR)
+        ! wait for old data
+        CALL mpi_wait(req, mpi_status_ignore, ierr)
 
-        ! NUMBER OF POINTS RECEIVED: NEED TO INTEPOLATE ONLY THESE, NOT WHOLE "RXYZ" VECTOR
-        N = SUM(RECVCOUNTS)
+        ! number of points received: need to intepolate only these, not whole "rxyz" vector
+        n = SUM(recvcounts)
 
-        ! INTERPOLATION
-        CALL INTERPOLATE(N, RXYZ, DELTA, SV)
+        ! interpolation
+        CALL interpolate(n, rxyz, delta, sv)
 
-        ! BACKWARD DATA
-        CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
+        ! backward data
+        CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
 
-        ! COPY INTERPOLATED DATA TO RIGHT LOCATION
-        DO I = 1, PRODUCT(P1(:, J - 1) - P0(:, J - 1) + 1)
-          FIELD(MAP(1, I), MAP(2, I), MAP(3, I)) = RV(I)
+        ! copy interpolated data to right location
+        DO i = 1, PRODUCT(p1(:, j - 1) - p0(:, j - 1) + 1)
+          field(map(1, i), map(2, i), map(3, i)) = rv(i)
         ENDDO
 
-        ! ASSIGN "NEW DATA"
-        DO I = 1, PRODUCT(P1(:, J) - P0(:, J) + 1)
-          SXYZ(1, I) = SXYZ_N(1, I)
-          SXYZ(2, I) = SXYZ_N(2, I)
-          SXYZ(3, I) = SXYZ_N(3, I)
-          MAP(1, I)  = MAP_N(1, I)
-          MAP(2, I)  = MAP_N(2, I)
-          MAP(3, I)  = MAP_N(3, I)
+        ! assign data to be sent at next iteration
+        DO i = 1, PRODUCT(p1(:, j) - p0(:, j) + 1)
+          sxyz(1, i) = sxyz_n(1, i)
+          sxyz(2, i) = sxyz_n(2, i)
+          sxyz(3, i) = sxyz_n(3, i)
+          map(1, i)  = map_n(1, i)
+          map(2, i)  = map_n(2, i)
+          map(3, i)  = map_n(3, i)
         ENDDO
 
-        RDISPLS(1) = 0
-        SDISPLS(1) = 0
+        rdispls(1) = 0
+        sdispls(1) = 0
 
-        ! ASSIGN "NEW DATA"
-        SENDCOUNTS(1) = SENDCOUNTS_N(1)
-        RECVCOUNTS(1) = RECVCOUNTS_N(1)
+        sendcounts(1) = sendcounts_n(1)
+        recvcounts(1) = recvcounts_n(1)
 
-        DO I = 2, WORLD_SIZE
-          SDISPLS(I)    = SDISPLS(I - 1) + SENDCOUNTS_N(I - 1)
-          RDISPLS(I)    = RDISPLS(I - 1) + RECVCOUNTS_N(I - 1)
-          SENDCOUNTS(I) = SENDCOUNTS_N(I)
-          RECVCOUNTS(I) = RECVCOUNTS_N(I)
+        DO i = 2, world_size
+          sdispls(i)    = sdispls(i - 1) + sendcounts_n(i - 1)
+          rdispls(i)    = rdispls(i - 1) + recvcounts_n(i - 1)
+          sendcounts(i) = sendcounts_n(i)
+          recvcounts(i) = recvcounts_n(i)
         ENDDO
 
       ENDDO
 
-      ! FORWARD DATA
-      CALL MPI_ALLTOALLV(SXYZ, SENDCOUNTS, SDISPLS, TRIP, RXYZ, RECVCOUNTS, RDISPLS, TRIP, MPI_COMM_WORLD, IERR)
+      ! forward data
+      CALL mpi_alltoallv(sxyz, sendcounts, sdispls, trip, rxyz, recvcounts, rdispls, trip, mpi_comm_world, ierr)
 
-      ! NUMBER OF POINTS RECEIVED: NEED TO INTEPOLATE ONLY THESE, NOT WHOLE "RXYZ" VECTOR
-      N = SUM(RECVCOUNTS)
+      ! number of points received: need to intepolate only these, not whole "rxyz" vector
+      n = SUM(recvcounts)
 
-      ! INTERPOLATION
-      CALL INTERPOLATE(N, RXYZ, DELTA, SV)
+      ! interpolation
+      CALL interpolate(n, rxyz, delta, sv)
 
-      ! BACKWARD DATA
-      CALL MPI_ALLTOALLV(SV, RECVCOUNTS, RDISPLS, REAL_TYPE, RV, SENDCOUNTS, SDISPLS, REAL_TYPE, MPI_COMM_WORLD, IERR)
+      ! backward data
+      CALL mpi_alltoallv(sv, recvcounts, rdispls, f_real, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
 
-      ! COPY INTERPOLATED DATA TO RIGHT LOCATION. LIMIT THE MAXIMUM ITERATION INDEX IN CASE "NP" NOT MULTIPLE OF "BLOCKWIDTH"
-      DO I = 1, PRODUCT(P1(:, NBLOCKS) - P0(:, NBLOCKS) + 1)
-        FIELD(MAP(1, I), MAP(2, I), MAP(3, I)) = RV(I)
+      ! copy interpolated data to right location. Limit the maximum iteration index in case "np" not multiple of "blockwidth"
+      DO i = 1, PRODUCT(p1(:, nblocks) - p0(:, nblocks) + 1)
+        field(map(1, i), map(2, i), map(3, i)) = rv(i)
       ENDDO
 
-      ! FREE RESOURCES
-      CALL MPI_TYPE_FREE(TRIP, IERR)
+      ! free resources
+      CALL mpi_type_free(trip, ierr)
 
-      DEALLOCATE(SXYZ, RXYZ, MAP, RV, SV)
-      DEALLOCATE(SXYZ_N, MAP_N)
-      DEALLOCATE(P0, P1)
+      DEALLOCATE(sxyz, rxyz, map, rv, sv)
+      DEALLOCATE(sxyz_n, map_n)
+      DEALLOCATE(p0, p1)
 
-    END SUBROUTINE GRID_MAPPING_STRUCT
+    END SUBROUTINE grid_mapping_struct
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE ORDER_POINTS(P0, P1, DH, X, Y, Z, XYZ, SENDCOUNTS, MAP)
+    SUBROUTINE order_points_unstruct(p0, p1, dh, x, y, z, xyz, sendcounts, map)
 
-      ! RE-ORDER POINTS TO BE SENT TO EACH PROCESS IN A LIST "XYZ" CONTAINING GRID INDICES FOR THAT PROCESS. THE NUMBER OF POINTS FOR
-      ! EACH PROCESS IS STORED IN "SENDCOUNTS", WHILE THE ORIGINAL INDEX OF A POINT IS IN "MAP".
+      ! Purpose:
+      ! To reorder external grid nodes to be sent to each process in rank-increasing order, storing indices of the nearest internal
+      ! (FFT) grid nodes, to return the number of points to be sent to each process and to store the original index of the external
+      ! grid nodes.
+      ! Array 'xyz' stores floating point numbers instead of integers to speed-up interpolation algorithm if bilinear interpolation
+      ! is used.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(IPP),                 INTENT(IN)  :: P0, P1
-      REAL(FPP),                    INTENT(IN)  :: DH
-      REAL(FPP),    DIMENSION(:),   INTENT(IN)  :: X, Y, Z
-      REAL(FPP),    DIMENSION(:,:), INTENT(OUT) :: XYZ
-      INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: SENDCOUNTS
-      INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: MAP
-      INTEGER(IPP)                              :: L, P, N, C
-      INTEGER(IPP), DIMENSION(3)                :: CONST, M
-      LOGICAL                                   :: BOOL
-      REAL(FPP)                                 :: I, J, K
+      INTEGER(f_int),                 INTENT(IN)  :: p0, p1             !< first/last index of points to be sent
+      REAL(f_real),                   INTENT(IN)  :: dh                 !< grid step of internal (FFT) grid
+      REAL(f_real),   DIMENSION(:),   INTENT(IN)  :: x, y, z            !< vector of points (external grid)
+      REAL(f_real),   DIMENSION(:,:), INTENT(OUT) :: xyz                !< list with nearest internal grid nodes
+      INTEGER(f_int), DIMENSION(:),   INTENT(OUT) :: sendcounts         !< number of points to be sent to each process
+      INTEGER(f_int), DIMENSION(:),   INTENT(OUT) :: map                !< position of a point inside vector
+      INTEGER(f_int)                              :: l, p, n, c
+      INTEGER(f_int), DIMENSION(3)                :: const, m
+      LOGICAL                                     :: bool
+      REAL(f_real)                                :: i, j, k
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      SENDCOUNTS = 0
+      sendcounts(:) = 0
+      map(:)        = 0
 
-      MAP = 0
+      c = 0
 
-      C = 0
+      ! loop over processes
+      DO l = 0, world_size - 1
 
-      ! LOOP OVER PROCESSES
-      DO L = 0, WORLD_SIZE - 1
+        ! skip rest of the loop if calling process has no points falling inside domain of "l-th" process
+        IF (points_rank2world(l) .eq. 0) CYCLE
 
-        ! SKIP IF CALLING PROCESS HAS NO POINTS FALLING INSIDE CUBOID OF "L-TH" PROCESS
-        IF (POINTS_RANK2WORLD(L) .EQ. 0) CYCLE
-
-        DO P = 1, 3
-          CONST(P) = GS(P, L)
-          M(P)     = GE(P, L) - GS(P, L) + 2
+        DO p = 1, 3
+          const(p) = gs(p, l)
+          m(p)     = ge(p, l) - gs(p, l) + 2
         ENDDO
 
-        N = C
+        n = c
 
-        DO P = P0, P1
+        DO p = p0, p1
 
-          ! TRANSFORM POINT COORDINATES INTO GRID INDICES FOR L-TH PROCESS
-          I = (X(P) - OFF_AXIS(1)) / DH + 3._FPP - CONST(1)
-          J = (Y(P) - OFF_AXIS(2)) / DH + 3._FPP - CONST(2)
-          K = (Z(P) - OFF_AXIS(3)) / DH + 3._FPP - CONST(3)
+          ! transform point coordinates into grid indices for l-th process
+          i = (x(p) - off_axis(1)) / dh + 3._f_real - const(1)
+          j = (y(p) - off_axis(2)) / dh + 3._f_real - const(2)
+          k = (z(p) - off_axis(3)) / dh + 3._f_real - const(3)
 
-          ! CHECK IF POINT IS WITHIN BLOCK OF L-TH PROCESS
-          BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
+          ! check if point is within block of l-th process
+          bool = (i .ge. 1) .and. (i .lt. m(1)) .and. (j .ge. 1) .and. (j .lt. m(2)) .and. (k .ge. 1) .and. (k .lt. m(3))
 
-          IF (BOOL .EQV. .TRUE.) THEN
-            C         = C + 1
-            XYZ(:, C) = [I, J, K]
-            MAP(C)    = P
+          IF (bool .eqv. .true.) THEN
+            c         = c + 1
+            xyz(:, c) = [i, j, k]
+            map(c)    = p
           ENDIF
 
         ENDDO
 
-        ! NUMBER OF POINTS TO BE SENT TO L-TH PROCESS
-        SENDCOUNTS(L + 1) = C - N
+        ! number of points to be sent to l-th process
+        sendcounts(l + 1) = c - n
 
       ENDDO
 
-    END SUBROUTINE ORDER_POINTS
+    END SUBROUTINE order_points_unstruct
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE ORDER_POINTS_STRUCT(P0, P1, DH, FS, FE, DS, XYZ, SENDCOUNTS, MAP)
+    SUBROUTINE order_points_struct(p0, p1, dh, fs, fe, ds, xyz, sendcounts, map)
 
-      INTEGER(IPP), DIMENSION(3),   INTENT(IN)  :: P0, P1
-      REAL(FPP),                    INTENT(IN)  :: DH
-      INTEGER(IPP), DIMENSION(3),   INTENT(IN)  :: FS, FE
-      REAL(FPP),                    INTENT(IN)  :: DS
-      REAL(FPP),    DIMENSION(:,:), INTENT(OUT) :: XYZ
-      INTEGER(IPP), DIMENSION(:),   INTENT(OUT) :: SENDCOUNTS
-      INTEGER(IPP), DIMENSION(:,:), INTENT(OUT) :: MAP
-      INTEGER(IPP)                              :: L, P, N, C
-      INTEGER(IPP)                              :: NX, NXY
-      INTEGER(IPP)                              :: I0, J0, K0
-      INTEGER(IPP), DIMENSION(3)                :: CONST, M
-      LOGICAL                                   :: BOOL
-      REAL(FPP)                                 :: I, J, K
-      REAL(FPP),    DIMENSION(P0(3):P1(3))      :: Z
-      REAL(FPP),    DIMENSION(P0(2):P1(2))      :: Y
-      REAL(FPP),    DIMENSION(P0(1):P1(1))      :: X
+      ! Purpose:
+      ! To reorder external grid nodes to be sent to each process in rank-increasing order, storing indices of the nearest internal
+      ! (FFT) grid nodes, to return the number of points to be sent to each process and to store the original index of the external
+      ! grid nodes.
+      ! Array 'xyz' stores floating point numbers instead of integers to speed-up interpolation algorithm if bilinear interpolation
+      ! is used.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int), DIMENSION(3),          INTENT(IN)  :: p0, p1              !< first/last index (internal FFT grid) of points to be sent
+      REAL(f_real),                          INTENT(IN)  :: dh                  !< grid step of internal (FFT) grid
+      INTEGER(f_int), DIMENSION(3),          INTENT(IN)  :: fs, fe              !< first/last index of external grid for calling process
+      REAL(f_real),                          INTENT(IN)  :: ds                  !< grid-step external grid
+      REAL(f_real),   DIMENSION(:,:),        INTENT(OUT) :: xyz                 !< list with nearest internal grid nodes
+      INTEGER(f_int), DIMENSION(:),          INTENT(OUT) :: sendcounts          !< number of points to be sent to each process
+      INTEGER(f_int), DIMENSION(:,:),        INTENT(OUT) :: map                 !< position of a point inside vector
+      INTEGER(f_int)                                     :: l, p, n, c
+      INTEGER(f_int)                                     :: nx, nxy
+      INTEGER(f_int)                                     :: i0, j0, k0
+      INTEGER(f_int), DIMENSION(3)                       :: const, m
+      LOGICAL                                            :: bool
+      REAL(f_real)                                       :: i, j, k
+      REAL(f_real),   DIMENSION(p0(3):p1(3))             :: z
+      REAL(f_real),   DIMENSION(p0(2):p1(2))             :: y
+      REAL(f_real),   DIMENSION(p0(1):p1(1))             :: x
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      DO K0 = P0(3), P1(3)
-        Z(K0) = ((FS(3) - 1 + K0 - 1) * DS - OFF_AXIS(3)) / DH + 3._FPP
+      ! transform point coordinates into grid indices
+      DO k0 = p0(3), p1(3)
+        z(k0) = ((fs(3) - 1 + k0 - 1) * ds - off_axis(3)) / dh + 3._f_real
       ENDDO
 
-      DO J0 = P0(2), P1(2)
-        Y(J0) = ((FS(2) - 1 + J0 - 1) * DS - OFF_AXIS(2)) / DH + 3._FPP
+      DO j0 = p0(2), p1(2)
+        y(j0) = ((fs(2) - 1 + j0 - 1) * ds - off_axis(2)) / dh + 3._f_real
       ENDDO
 
-      DO I0 = P0(1), P1(1)
-        X(I0) = ((FS(1) - 1 + I0 - 1) * DS - OFF_AXIS(1)) / DH + 3._FPP
+      DO i0 = p0(1), p1(1)
+        x(i0) = ((fs(1) - 1 + i0 - 1) * ds - off_axis(1)) / dh + 3._f_real
       ENDDO
 
-      SENDCOUNTS = 0
+      sendcounts(:) = 0
+      map(:,:)      = 0
 
-      MAP = 0
+      c = 0
 
-      C = 0
+      ! loop over processes
+      DO l = 0, world_size - 1
 
-      ! LOOP OVER PROCESSES
-      DO L = 0, WORLD_SIZE - 1
+        ! skip rest of the loop if calling process has no points falling inside domain of "l-th" process
+        IF (points_rank2world(l) .eq. 0) CYCLE
 
-        ! SKIP IF CALLING PROCESS HAS NO POINTS FALLING INSIDE CUBOID OF "L-TH" PROCESS
-        IF (POINTS_RANK2WORLD(L) .EQ. 0) CYCLE
-
-        DO P = 1, 3
-          CONST(P) = GS(P, L)
-          M(P)     = GE(P, L) - GS(P, L) + 2
+        DO p = 1, 3
+          const(p) = gs(p, l)
+          m(p)     = ge(p, l) - gs(p, l) + 2
         ENDDO
 
-        N = C
+        n = c
 
-        DO K0 = P0(3), P1(3)
+        DO k0 = p0(3), p1(3)
 
-          K = Z(K0) - CONST(3)
+          k = z(k0) - const(3)
 
-          DO J0 = P0(2), P1(2)
+          DO j0 = p0(2), p1(2)
 
-            J = Y(J0) - CONST(2)
+            j = y(j0) - const(2)
 
-            DO I0 = P0(1), P1(1)
+            DO i0 = p0(1), p1(1)
 
-              I = X(I0) - CONST(1)
+              i = x(i0) - const(1)
 
-              BOOL = (I .GE. 1) .AND. (I .LT. M(1)) .AND. (J .GE. 1) .AND. (J .LT. M(2)) .AND. (K .GE. 1) .AND. (K .LT. M(3))
+              ! check if point is within block of l-th process
+              bool = (i .ge. 1) .and. (i .lt. m(1)) .and. (j .ge. 1) .and. (j .lt. m(2)) .and. (k .ge. 1) .and. (k .lt. m(3))
 
-              IF (BOOL .EQV. .TRUE.) THEN
-                C         = C + 1
-                XYZ(:, C) = [I, J, K]
-                MAP(:, C) = [I0, J0, K0]
+              IF (bool .eqv. .true.) THEN
+                c         = c + 1
+                xyz(:, c) = [i, j, k]
+                map(:, c) = [i0, j0, k0]
               ENDIF
 
             ENDDO
@@ -1294,1106 +1350,1130 @@ if (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', MIN_EXTEN
 
         ENDDO
 
-        SENDCOUNTS(L + 1) = C - N
+        ! number of points to be sent to l-th process
+        sendcounts(l + 1) = c - n
 
       ENDDO
 
-    END SUBROUTINE ORDER_POINTS_STRUCT
+    END SUBROUTINE order_points_struct
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE TRANSFORM_ALONG_Z(SPECTRUM)
-
-      ! COMPUTE MANY IN-PLACE COMPLEX-TO-COMPLEX IFFT ALONG Z-DIRECTION ON INPUT SPECTRUM. PROCESSES ARE GATHERED IN Z-ORIENTED PENCILS
-      ! BASED ON THE INPUT GEOMETRY. INSIDE EACH PENCIL, THE ALGORITHM WORKS ON Y-SLICES (TO REQUIRE AS LESS MEMORY AS POSSIBLE) TO
-      ! EXCHANGE DATA AND COMPUTE THE IFFT.
-
-      COMPLEX(FPP),              DIMENSION(:,:,:), INTENT(INOUT) :: SPECTRUM                   !< INPUT FIELD
-      COMPLEX(FPP), ALLOCATABLE, DIMENSION(:)                    :: SENDBUF, RECVBUF           !< SENDER/RECEIVER BUFFER
-      INTEGER(IPP)                                               :: I, J, K, P, C              !< COUNTERS
-      INTEGER(IPP)                                               :: RANK, NTASKS, IERR         !< MPI STUFF
-      INTEGER(IPP)                                               :: PENCIL
-      INTEGER(IPP)                                               :: NX, NY, NZ                 !< TOTAL NUMBER OF POINTS FOR PENCIL ALONG EACH AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: I0, I1                     !< LOCAL I-INDEX FOR PROCESSES BELONGING TO PENCIL
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: K0, K1                     !< LOCAL K-INDEX FOR PROCESSES BELONGING TO PENCIL
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: LX, LZ                     !< LOCAL NUMBER OF POINTS ALONG X AND Z AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SENDCOUNTS, RECVCOUNTS     !< MPI STUFF
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SDISPLS, RDISPLS           !< MPI STUFF
-      TYPE(C_PTR)                                                :: P1
-
-      !-------------------------------------------------------------------------------------------------------------------------------
-
-      ! GROUP PROCESSES IN PENCILS ORIENTED ALONG Z-AXIS. "LZ" CONTAINS NUMBER OF POINTS FOR EACH PROCESS IN "PENCIL" ALONG Z
-      CALL BUILD_PENCIL(2, PENCIL, RANK, NTASKS, LZ)
-
-      ! THIS ARRAY WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL ALONG X
-      ALLOCATE(LX(0:NTASKS-1))
-
-      ! NUMBER OF POINTS ALONG X AND Y. THESE ARE INDENTICAL FOR ALL PROCESSES IN CURRENT PENCIL.
-      NX = SIZE(SPECTRUM, 1)
-      NY = SIZE(SPECTRUM, 2)
-
-      ! TOTAL NUMBER OF POINTS ALONG Z-AXIS
-      NZ = SUM(LZ)
-
-      ALLOCATE(K0(0:NTASKS-1), K1(0:NTASKS-1))
-
-      ! FIRST/LAST K-INDEX FOR EACH PROCESS
-      DO P = 0, NTASKS - 1
-        IF (P .EQ. 0) THEN
-          K0(P) = 1
-          K1(P) = LZ(P)
-        ELSE
-          K0(P) = K1(P - 1) + 1
-          K1(P) = K1(P - 1) + LZ(P)
-        ENDIF
-      ENDDO
-
-      ALLOCATE(I0(0:NTASKS-1), I1(0:NTASKS-1))
-
-      ! DISTRIBUTE POINTS ALONG X-AXIS BETWEEN PROCESSES
-      CALL MPI_SPLIT_TASK(NX, NTASKS, I0, I1)
-
-      ! NUMBER OF POINTS ALONG X-AXIS FOR EACH PROCESS
-      DO P = 0, NTASKS - 1
-        LX(P) = I1(P) - I0(P) + 1
-      ENDDO
-
-      ALLOCATE(SENDCOUNTS(0:NTASKS-1), SDISPLS(0:NTASKS-1), RECVCOUNTS(0:NTASKS-1), RDISPLS(0:NTASKS-1))
-
-      ! SET COUNTS/DISPLACEMENT ARRAYS
-      DO P = 0, NTASKS - 1
-
-        SENDCOUNTS(P) = LZ(RANK) * LX(P)              !< POINTS SEND FROM PROCESS "RANK" TO PROCESS "P"
-        RECVCOUNTS(P) = LZ(P) * LX(RANK)              !< POINTS RECEIVED FROM PROCESS "RANK" BY PROCESS "P"
-
-        IF (P .EQ. 0) THEN
-          SDISPLS(P) = 0
-          RDISPLS(P) = 0
-        ELSE
-          SDISPLS(P) = SDISPLS(P - 1) + SENDCOUNTS(P - 1)
-          RDISPLS(P) = RDISPLS(P - 1) + RECVCOUNTS(P - 1)
-        ENDIF
-
-      ENDDO
-
-      ALLOCATE(SENDBUF(NX * LZ(RANK)))
-      ALLOCATE(RECVBUF(NZ * LX(RANK)))
-
-      ! BUFFER "CDUM" WILL BE USED FOR TRANSFORM AND IT IS ALLOCATED USING FFTW MEMORY ALLOCATION UTILITY
-#ifdef DOUBLE_PREC
-      PC = FFTW_ALLOC_COMPLEX(INT(LX(RANK) * NZ, C_SIZE_T))
-#else
-      PC = FFTWF_ALLOC_COMPLEX(INT(LX(RANK) * NZ, C_SIZE_T))
-#endif
-
-      CALL C_F_POINTER(PC, CDUM, [LX(RANK) * NZ])
-
-      ! PREPARE FFTW PLAN ALONG Z-AXIS ("LX(RANK)" TRANSFORMS, EACH HAVING "NZ" NUMBER OF POINTS)
-#ifdef DOUBLE_PREC
-      P1 = FFTW_PLAN_MANY_DFT(1, [NZ], LX(RANK), CDUM, [NZ], LX(RANK), 1, CDUM, [NZ], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
-#else
-      P1 = FFTWF_PLAN_MANY_DFT(1, [NZ], LX(RANK), CDUM, [NZ], LX(RANK), 1, CDUM, [NZ], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
-#endif
-
-      ! WORK Y-SLICES ONE BY ONE
-      DO J = 1, NY
-
-        C = 0
-
-        ! REARRANGE ELEMENTS OF "SPECTRUM"
-        DO P = 0, NTASKS - 1
-          DO K = 1, LZ(RANK)
-            DO I = I0(P), I1(P)
-              C          = C + 1
-              SENDBUF(C) = SPECTRUM(I, J, K)
-            ENDDO
-          ENDDO
-        ENDDO
-
-        ! EXCHANGE DATA
-        CALL MPI_ALLTOALLV(SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, CDUM, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, PENCIL, IERR)
-
-        ! IFFT
-#ifdef DOUBLE_PREC
-        CALL FFTW_EXECUTE_DFT(P1, CDUM, CDUM)
-#else
-        CALL FFTWF_EXECUTE_DFT(P1, CDUM, CDUM)
-#endif
-
-        C = 0
-
-        ! REARRANGE ELEMENTS OF "CDUM" INTO "RECVBUF"
-        DO P = 0, NTASKS - 1
-          DO I = 1, LX(RANK)
-            DO K = K0(P), K1(P)
-              C          = C + 1
-              RECVBUF(C) = CDUM(I + (K - 1)*LX(RANK))
-            ENDDO
-          ENDDO
-        ENDDO
-
-        ! SEND TRANSFORMED DATA BACK
-        CALL MPI_ALLTOALLV(RECVBUF, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, PENCIL, IERR)
-
-        ! REARRANGE DATA INTO ORIGINAL LAYOUT
-        DO K = 1, LZ(RANK)
-          DO I = 1, NX
-            SPECTRUM(I, J, K) = SENDBUF(K + (I - 1)*LZ(RANK))
-          ENDDO
-        ENDDO
-
-      ENDDO
-
-      ! DESTROY PLAN
-#ifdef DOUBLE_PREC
-      CALL FFTW_DESTROY_PLAN(P1)
-#else
-      CALL FFTWF_DESTROY_PLAN(P1)
-#endif
-
-      ! RELEASE MEMORY
-      NULLIFY(CDUM)
-
-#ifdef DOUBLE_PREC
-      CALL FFTW_FREE(PC)
-#else
-      CALL FFTWF_FREE(PC)
-#endif
-
-      DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
-      DEALLOCATE(I0, I1, K0, K1, LX, LZ)
-
-      ! RELEASE COMMUNICATOR
-      CALL MPI_COMM_FREE(PENCIL, IERR)
-
-    END SUBROUTINE TRANSFORM_ALONG_Z
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE TRANSFORM_ALONG_Y(SPECTRUM)
-
-      ! COMPUTE MANY IN-PLACE COMPLEX-TO-COMPLEX IFFT ALONG Y-DIRECTION ON INPUT SPECTRUM. PROCESSES ARE GATHERED IN Y-ORIENTED PENCILS
-      ! BASED ON THE INPUT GEOMETRY. INSIDE EACH PENCIL, THE ALGORITHM WORKS ON Z-SLICES (TO REQUIRE AS LESS MEMORY AS POSSIBLE) TO
-      ! EXCHANGE DATA AND COMPUTE THE IFFT.
-
-      COMPLEX(FPP),              DIMENSION(:,:,:), INTENT(INOUT) :: SPECTRUM                   !< INPUT FIELD
-      COMPLEX(FPP), ALLOCATABLE, DIMENSION(:)                 :: SENDBUF, RECVBUF           !< SENDER/RECEIVER BUFFER
-      INTEGER(IPP)                                            :: I, J, K, P, C              !< COUNTERS
-      INTEGER(IPP)                                            :: RANK, NTASKS, IERR         !< MPI STUFF
-      INTEGER(IPP)                                            :: PENCIL
-      INTEGER(IPP)                                            :: NX, NY, NZ                 !< TOTAL NUMBER OF POINTS FOR PENCIL ALONG EACH AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: I0, I1                     !< LOCAL I-INDEX FOR PROCESSES BELONGING TO PENCIL
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: J0, J1                     !< LOCAL J-INDEX FOR PROCESSES BELONGING TO PENCIL
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: LX, LY                     !< LOCAL NUMBER OF POINTS ALONG X AND Y AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: SENDCOUNTS, RECVCOUNTS     !< MPI STUFF
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                 :: SDISPLS, RDISPLS           !< MPI STUFF
-      TYPE(C_PTR)                                             :: P1
-
-      !-------------------------------------------------------------------------------------------------------------------------------
-
-      ! GROUP PROCESSES IN PENCILS ORIENTED ALONG Y-AXIS. "LY" CONTAINS NUMBER OF POINTS FOR EACH PROCESS IN "PENCIL" ALONG Y
-      CALL BUILD_PENCIL(1, PENCIL, RANK, NTASKS, LY)
-
-      ! THIS ARRAY WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL ALONG X
-      ALLOCATE(LX(0:NTASKS-1))
-
-      ! NUMBER OF POINTS ALONG X AND Z. THESE ARE INDENTICAL FOR ALL PROCESSES IN CURRENT PENCIL.
-      NX = SIZE(SPECTRUM, 1)
-      NZ = SIZE(SPECTRUM, 3)
-
-      ! TOTAL NUMBER OF POINTS ALONG Y-AXIS
-      NY = SUM(LY)
-
-      ALLOCATE(J0(0:NTASKS-1), J1(0:NTASKS-1))
-
-      ! FIRST/LAST K-INDEX FOR EACH PROCESS
-      DO P = 0, NTASKS - 1
-        IF (P .EQ. 0) THEN
-          J0(P) = 1
-          J1(P) = LY(P)
-        ELSE
-          J0(P) = J1(P - 1) + 1
-          J1(P) = J1(P - 1) + LY(P)
-        ENDIF
-      ENDDO
-
-      ALLOCATE(I0(0:NTASKS-1), I1(0:NTASKS-1))
-
-      ! DISTRIBUTE POINTS ALONG X-AXIS BETWEEN PROCESSES
-      CALL MPI_SPLIT_TASK(NX, NTASKS, I0, I1)
-
-      ! NUMBER OF POINTS ALONG X-AXIS FOR EACH PROCESS
-      DO P = 0, NTASKS - 1
-        LX(P) = I1(P) - I0(P) + 1
-      ENDDO
-
-      ALLOCATE(SENDCOUNTS(0:NTASKS-1), SDISPLS(0:NTASKS-1), RECVCOUNTS(0:NTASKS-1), RDISPLS(0:NTASKS-1))
-
-      ! SET COUNTS/DISPLACEMENT ARRAYS
-      DO P = 0, NTASKS - 1
-
-        SENDCOUNTS(P) = LY(RANK) * LX(P)              !< POINTS SEND FROM PROCESS "RANK" TO PROCESS "P"
-        RECVCOUNTS(P) = LY(P) * LX(RANK)              !< POINTS RECEIVED FROM PROCESS "RANK" BY PROCESS "P"
-
-        IF (P .EQ. 0) THEN
-          SDISPLS(P) = 0
-          RDISPLS(P) = 0
-        ELSE
-          SDISPLS(P) = SDISPLS(P - 1) + SENDCOUNTS(P - 1)
-          RDISPLS(P) = RDISPLS(P - 1) + RECVCOUNTS(P - 1)
-        ENDIF
-
-      ENDDO
-
-      ALLOCATE(SENDBUF(NX * LY(RANK)))
-      ALLOCATE(RECVBUF(NY * LX(RANK)))
-
-      ! BUFFER "CDUM" WILL BE USED FOR TRANSFORM AND IT IS ALLOCATED USING FFTW MEMORY ALLOCATION UTILITY
-#ifdef DOUBLE_PREC
-      PC = FFTW_ALLOC_COMPLEX(INT(LX(RANK) * NY, C_SIZE_T))
-#else
-      PC = FFTWF_ALLOC_COMPLEX(INT(LX(RANK) * NY, C_SIZE_T))
-#endif
-
-      CALL C_F_POINTER(PC, CDUM, [LX(RANK) * NY])
-
-      ! PREPARE FFTW PLAN ALONG Y-AXIS ("LX(RANK)" TRANSFORMS, EACH HAVING "NY" NUMBER OF POINTS)
-#ifdef DOUBLE_PREC
-      P1 = FFTW_PLAN_MANY_DFT(1, [NY], LX(RANK), CDUM, [NY], LX(RANK), 1, CDUM, [NY], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
-#else
-      P1 = FFTWF_PLAN_MANY_DFT(1, [NY], LX(RANK), CDUM, [NY], LX(RANK), 1, CDUM, [NY], LX(RANK), 1, FFTW_BACKWARD, FFTW_ESTIMATE)
-#endif
-
-      ! WORK Z-SLICES ONE BY ONE
-      DO K = 1, NZ
-
-        C = 0
-
-        ! REARRANGE ELEMENTS OF "SPECTRUM"
-        DO P = 0, NTASKS - 1
-          DO J = 1, LY(RANK)
-            DO I = I0(P), I1(P)
-              C          = C + 1
-              SENDBUF(C) = SPECTRUM(I, J, K)
-            ENDDO
-          ENDDO
-        ENDDO
-
-        ! EXCHANGE DATA
-        CALL MPI_ALLTOALLV(SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, CDUM, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, PENCIL, IERR)
-
-        ! IFFT
-#ifdef DOUBLE_PREC
-        CALL FFTW_EXECUTE_DFT(P1, CDUM, CDUM)
-#else
-        CALL FFTWF_EXECUTE_DFT(P1, CDUM, CDUM)
-#endif
-
-        C = 0
-
-        ! REARRANGE ELEMENTS OF "CDUM" INTO "RECVBUF"
-        DO P = 0, NTASKS - 1
-          DO I = 1, LX(RANK)
-            DO J = J0(P), J1(P)
-              C          = C + 1
-              RECVBUF(C) = CDUM(I + (J - 1)*LX(RANK))
-            ENDDO
-          ENDDO
-        ENDDO
-
-        ! SEND TRANSFORMED DATA BACK
-        CALL MPI_ALLTOALLV(RECVBUF, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, PENCIL, IERR)
-
-        ! REARRANGE DATA INTO ORIGINAL LAYOUT
-        DO J = 1, LY(RANK)
-          DO I = 1, NX
-            SPECTRUM(I, J, K) = SENDBUF(J + (I - 1)*LY(RANK))
-          ENDDO
-        ENDDO
-
-      ENDDO
-
-      ! DESTROY PLAN
-#ifdef DOUBLE_PREC
-      CALL FFTW_DESTROY_PLAN(P1)
-#else
-      CALL FFTWF_DESTROY_PLAN(P1)
-#endif
-
-      ! RELEASE MEMORY
-      NULLIFY(CDUM)
-
-#ifdef DOUBLE_PREC
-      CALL FFTW_FREE(PC)
-#else
-      CALL FFTWF_FREE(PC)
-#endif
-
-      DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
-      DEALLOCATE(I0, I1, J0, J1, LX, LY)
-
-      ! RELEASE COMMUNICATOR
-      CALL MPI_COMM_FREE(PENCIL, IERR)
-
-    END SUBROUTINE TRANSFORM_ALONG_Y
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE TRANSFORM_ALONG_X(SPECTRUM)
-
-      ! COMPUTE MANY IN-PLACE COMPLEX-TO-REAL IFFT ALONG X-DIRECTION ON INPUT SPECTRUM. PROCESSES ARE GATHERED IN X-ORIENTED PENCILS
-      ! BASED ON THE INPUT GEOMETRY. INSIDE EACH PENCIL, THE ALGORITHM WORKS ON Z-SLICES (TO REQUIRE AS LESS MEMORY AS POSSIBLE) TO
-      ! EXCHANGE DATA AND COMPUTE THE IFFT.
-
-      COMPLEX(FPP),              DIMENSION(:,:,:), INTENT(INOUT) :: SPECTRUM                       !< INPUT FIELD
-      COMPLEX(FPP), ALLOCATABLE, DIMENSION(:)                    :: SENDBUF                        !< SENDER BUFFER
-      INTEGER(IPP)                                               :: I, J, K, P, C                  !< COUNTERS
-      INTEGER(IPP)                                               :: RANK, NTASKS, IERR             !< MPI STUFF
-      INTEGER(IPP)                                               :: NYQUIST, PENCIL
-      INTEGER(IPP)                                               :: IMAX, P_IMAX
-      INTEGER(IPP)                                               :: NX, NY, NZ                     !< TOTAL NUMBER OF POINTS FOR PENCIL ALONG EACH AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: OFFSET
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: I0, I1                         !< LOCAL I-INDEX FOR PROCESSES BELONGING TO PENCIL
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: J0, J1                         !< LOCAL J-INDEX FOR PROCESSES BELONGING TO PENCIL
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: LX, LY                         !< LOCAL NUMBER OF POINTS ALONG X AND Y AXIS
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SENDCOUNTS, RECVCOUNTS         !< MPI STUFF
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: SDISPLS, RDISPLS               !< MPI STUFF
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: R_SENDCOUNTS, R_RECVCOUNTS     !< MPI STUFF
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                    :: R_SDISPLS, R_RDISPLS           !< MPI STUFF
-      REAL(FPP),    ALLOCATABLE, DIMENSION(:)                    :: R_SENDBUF, RECVBUF
-      TYPE(C_PTR)                                                :: P1
-
-      !-------------------------------------------------------------------------------------------------------------------------------
-
-      ! INDEX OF NYQUIST FREQUENCY ALONG X-AXIS
-      NYQUIST = NPTS(1) / 2 + 1
-
-      ! GROUP PROCESSES IN PENCILS ORIENTED ALONG X-AXIS. "LX" CONTAINS NUMBER OF POINTS FOR EACH PROCESS IN "PENCIL" ALONG X
-      CALL BUILD_PENCIL(0, PENCIL, RANK, NTASKS, LX)
-
-      ! PARAMETER USED TO DETERMINE ELEMENTS TO BE SENT/RECEIVED
-      ALLOCATE(OFFSET(0:NTASKS-1))
-
-      OFFSET(RANK) = GS(1, WORLD_RANK) - 1
-
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, OFFSET, 1, MPI_INTEGER, PENCIL, IERR)
-
-      ! THIS ARRAY WILL CONTAIN THE NUMBER OF POINTS LOCAL TO EACH PROCESS IN CURRENT PENCIL ALONG Y
-      ALLOCATE(LY(0:NTASKS-1))
-
-      ! NUMBER OF POINTS ALONG Y AND Z. THESE ARE INDENTICAL FOR ALL PROCESSES IN CURRENT PENCIL.
-      NY = SIZE(SPECTRUM, 2)
-      NZ = SIZE(SPECTRUM, 3)
-
-      ! TOTAL NUMBER OF POINTS ALONG X-AXIS
-      NX = SUM(LX)
-
-      ! MAX I-INDEX USED TO SEND DATA
-      IMAX = MIN(LX(RANK) + OFFSET(RANK), NYQUIST) - OFFSET(RANK)
-
-      IF (IMAX .LT. 1) IMAX = 0
-
-      ALLOCATE(I0(0:NTASKS-1), I1(0:NTASKS-1))
-
-      ! FIRST/LAST I-INDEX FOR EACH PROCESS
-      DO P = 0, NTASKS - 1
-        IF (P .EQ. 0) THEN
-          I0(P) = 1
-          I1(P) = LX(P)
-        ELSE
-          I0(P) = I1(P - 1) + 1
-          I1(P) = I1(P - 1) + LX(P)
-        ENDIF
-      ENDDO
-
-      ALLOCATE(J0(0:NTASKS-1), J1(0:NTASKS-1))
-
-      ! DISTRIBUTE POINTS ALONG Y-AXIS BETWEEN PROCESSES
-      CALL MPI_SPLIT_TASK(NY, NTASKS, J0, J1)
-
-      ! NUMBER OF POINTS ALONG Y-AXIS FOR EACH PROCESS
-      DO P = 0, NTASKS - 1
-        LY(P) = J1(P) - J0(P) + 1
-      ENDDO
-
-      ALLOCATE(SENDCOUNTS(0:NTASKS-1), SDISPLS(0:NTASKS-1), RECVCOUNTS(0:NTASKS-1), RDISPLS(0:NTASKS-1))
-      ALLOCATE(R_SENDCOUNTS(0:NTASKS-1), R_SDISPLS(0:NTASKS-1), R_RECVCOUNTS(0:NTASKS-1), R_RDISPLS(0:NTASKS-1))
-
-      ! SET COUNTS/DISPLACEMENT ARRAYS
-      DO P = 0, NTASKS - 1
-
-        ! DEFINE "IMAX" FOR PROCESS "P"
-        P_IMAX = MIN(LX(P) + OFFSET(P), NYQUIST) - OFFSET(P)
-
-        IF (P_IMAX .LT. 1) P_IMAX = 0
-
-        ! PROCESS COMPLETELY TO THE RIGHT OF "NYQUIST" WON'T SEND ANY ELEMENT ("SENDCOUNTS=0")
-        SENDCOUNTS(P) = LY(P) * IMAX                                            !< POINTS SEND FROM PROCESS "RANK" TO PROCESS "P"
-
-        ! A PROCESS WON'T RECEIVE ANYTHING FROM PROCESS "P" IF THE LATTER IS TO THE RIGHT OF "NYQUIST" ("RECVCOUNTS=0")
-        RECVCOUNTS(P) = LY(RANK) * P_IMAX                                       !< POINTS RECEIVED FROM PROCESS "RANK" BY PROCESS "P"
-
-        R_SENDCOUNTS(P) = LY(RANK) * LX(P)                                      !< POINTS SEND FROM PROCESS "RANK" TO PROCESS "P"
-        R_RECVCOUNTS(P) = LY(P) * LX(RANK)                                      !< POINTS RECEIVED FROM PROCESS "RANK" BY PROCESS "P"
-
-        IF (P .EQ. 0) THEN
-          SDISPLS(P)   = 0
-          RDISPLS(P)   = 0
-          R_SDISPLS(P) = 0
-          R_RDISPLS(P) = 0
-        ELSE
-          SDISPLS(P)   = SDISPLS(P - 1) + SENDCOUNTS(P - 1)
-          RDISPLS(P)   = RDISPLS(P - 1) + RECVCOUNTS(P - 1)
-          R_SDISPLS(P) = R_SDISPLS(P - 1) + R_SENDCOUNTS(P - 1)
-          R_RDISPLS(P) = R_RDISPLS(P - 1) + R_RECVCOUNTS(P - 1)
-        ENDIF
-
-      ENDDO
-
-      ALLOCATE(SENDBUF(NY * IMAX), R_SENDBUF(NX * LY(RANK)))
-      ALLOCATE(RECVBUF(NY * LX(RANK)))
-
-      ! ALLOCATE MEMORY USING FFTW ALLOCATION UTILITY
-#ifdef DOUBLE_PREC
-      PC = FFTW_ALLOC_COMPLEX(INT(LY(RANK) * NYQUIST, C_SIZE_T))
-#else
-      PC = FFTWF_ALLOC_COMPLEX(INT(LY(RANK) * NYQUIST, C_SIZE_T))
-#endif
-
-      ! FOR IN-PLACE TRANSFORMS, OUTPUT REAL ARRAY IS SLIGHTLY LONGER THAN ACTUAL PHYSICAL DIMENSION
-      CALL C_F_POINTER(PC, CDUM, [LY(RANK) * NYQUIST])
-      CALL C_F_POINTER(PC, RDUM, [LY(RANK) * NYQUIST * 2])
-
-      ! PREPARE FFTW PLAN ALONG X-AXIS ("LY(RANK)" TRANSFORMS, EACH HAVING "NPTS(1)" NUMBER OF POINTS)
-#ifdef DOUBLE_PREC
-      P1 = FFTW_PLAN_MANY_DFT_C2R(1, [NPTS(1)], LY(RANK), CDUM, [NPTS(1)], LY(RANK), 1, RDUM, [NPTS(1)], LY(RANK), 1, FFTW_ESTIMATE)
-#else
-      P1 = FFTWF_PLAN_MANY_DFT_C2R(1, [NPTS(1)], LY(RANK), CDUM, [NPTS(1)], LY(RANK), 1, RDUM, [NPTS(1)], LY(RANK), 1,FFTW_ESTIMATE)
-#endif
-
-      ! WORK Z-SLICES ONE BY ONE
-      DO K = 1, NZ
-
-        C = 0
-
-        ! REARRANGE ELEMENTS OF "SPECTRUM"
-        DO P = 0, NTASKS - 1
-          DO I = 1, IMAX
-            DO J = J0(P), J1(P)
-              C          = C + 1
-              SENDBUF(C) = SPECTRUM(I, J, K)
-            ENDDO
-          ENDDO
-        ENDDO
-
-        ! EXCHANGE DATA
-        CALL MPI_ALLTOALLV(SENDBUF, SENDCOUNTS, SDISPLS, COMPLEX_TYPE, CDUM, RECVCOUNTS, RDISPLS, COMPLEX_TYPE, PENCIL, IERR)
-
-        ! IFFT
-#ifdef DOUBLE_PREC
-        CALL FFTW_EXECUTE_DFT_C2R(P1, CDUM, RDUM)
-#else
-        CALL FFTWF_EXECUTE_DFT_C2R(P1, CDUM, RDUM)
-#endif
-
-        C = 0
-
-        ! REARRANGE ELEMENTS OF "RDUM" INTO "RECVBUF"
-        DO P = 0, NTASKS - 1
-          DO J = 1, LY(RANK)
-            DO I = I0(P), I1(P)
-              C            = C + 1
-              R_SENDBUF(C) = RDUM(J + (I - 1)*LY(RANK))
-            ENDDO
-          ENDDO
-        ENDDO
-
-        ! SEND TRANSFORMED DATA BACK
-        CALL MPI_ALLTOALLV(R_SENDBUF, R_SENDCOUNTS, R_SDISPLS, REAL_TYPE, RECVBUF, R_RECVCOUNTS, R_RDISPLS, REAL_TYPE, PENCIL, IERR)
-
-        ! REARRANGE DATA INTO ORIGINAL LAYOUT
-        DO J = 1, NY
-          DO I = 1, LX(RANK)
-            SPECTRUM(I, J, K) = CMPLX(RECVBUF(I + (J - 1)*LX(RANK)), 0._FPP, FPP)
-          ENDDO
-        ENDDO
-
-      ENDDO
-
-      ! DESTROY PLAN
-#ifdef DOUBLE_PREC
-      CALL FFTW_DESTROY_PLAN(P1)
-#else
-      CALL FFTWF_DESTROY_PLAN(P1)
-#endif
-
-      ! RELEASE MEMORY
-      NULLIFY(CDUM, RDUM)
-
-#ifdef DOUBLE_PREC
-      CALL FFTW_FREE(PC)
-#else
-      CALL FFTWF_FREE(PC)
-#endif
-
-      DEALLOCATE(SENDBUF, RECVBUF, SDISPLS, RDISPLS, SENDCOUNTS, RECVCOUNTS)
-      DEALLOCATE(R_SENDBUF, R_SDISPLS, R_RDISPLS, R_SENDCOUNTS, R_RECVCOUNTS)
-      DEALLOCATE(I0, I1, J0, J1, LX, LY, OFFSET)
-
-      ! RELEASE COMMUNICATOR
-      CALL MPI_COMM_FREE(PENCIL, IERR)
-
-    END SUBROUTINE TRANSFORM_ALONG_X
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE BUILD_PENCIL(DIR, NEWCOMM, RANK, NTASKS, N)
-
-      ! GROUP PROCESSORS IN PENCILS ORIENTED ALONG A SPECIFIC DIRECTION.
-
-      INTEGER(IPP),                                        INTENT(IN)  :: DIR                    !< STENCIL DIRECTION (0=X, 1=Y, 2=Z)
-      INTEGER(IPP),                                        INTENT(OUT) :: NEWCOMM                !< HANDLE TO NEW COMMUNICATOR
-      INTEGER(IPP),                                        INTENT(OUT) :: RANK                   !< RANK OF CALLING PROCESS IN NEW COMMUNICATOR
-      INTEGER(IPP),                                        INTENT(OUT) :: NTASKS                 !< NUMBER OF PROCESSES IN NEW COMMUNICATOR
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:),             INTENT(OUT) :: N                      !< NUMBER OF POINTS PER PROCESS IN PENCIL DIRECTION
-      INTEGER(IPP)                                                     :: I, IERR
-      INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COLOR
-      LOGICAL,                   DIMENSION(2)                          :: BOOL
+    SUBROUTINE transform_along_z(spectrum)
+
+      ! Purpose:
+      ! To compute many in-place complex-to-complex inverse FFT of 3D spectrum array along the z-axis. Processes are gathered in pencils
+      ! oriented along the z-axis. Inside each pencil, inverse FFT and data exchange occurs on slices perpendicular to the y-axis in
+      ! order to save memory.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                   !< input/output spectrum
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                    :: sendbuf, recvbuf
+      INTEGER(f_int)                                                :: i, j, k, p, c
+      INTEGER(f_int)                                                :: rank, ntasks, ierr
+      INTEGER(f_int)                                                :: pencil
+      INTEGER(f_int)                                                :: nx, ny, nz
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                     :: i0, i1
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                     :: k0, k1
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                     :: lx, lz
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                     :: sendcounts, recvcounts
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                     :: sdispls, rdispls
+      TYPE(c_ptr)                                                   :: p1
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! GROUP PROCESSES IN STENCILS
-      DO I = 0, WORLD_SIZE - 1
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! set up pencils oriented along z-axis, prepare vectors for data exchange
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-        COLOR(I) = 0
+      ! group processes in pencils oriented along z-axis. "lz" contains the number of points for each process in the pencil
+      CALL build_pencil(2, pencil, rank, ntasks, lz)
 
-        ! STENCIL ALONG X-AXIS
-        IF (DIR .EQ. 0) THEN
-          BOOL(1) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
-          BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
-        ! STENCIL ALONG Y-AXIS
-        ELSEIF (DIR .EQ. 1) THEN
-          BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
-          BOOL(2) = (GS(3, I) .EQ. GS(3, WORLD_RANK)) .AND. (GE(3, I) .EQ. GE(3, WORLD_RANK))
-        ! STENCIL ALONG Z-AXIS
-        ELSEIF (DIR .EQ. 2) THEN
-          BOOL(1) = (GS(1, I) .EQ. GS(1, WORLD_RANK)) .AND. (GE(1, I) .EQ. GE(1, WORLD_RANK))
-          BOOL(2) = (GS(2, I) .EQ. GS(2, WORLD_RANK)) .AND. (GE(2, I) .EQ. GE(2, WORLD_RANK))
+      ! this array will contain the number of points local to each process in current pencil along x-axis
+      ALLOCATE(lx(0:ntasks-1))
+
+      ! number of points along x and y. These are indentical for all processes inside same pencil
+      nx = SIZE(spectrum, 1)
+      ny = SIZE(spectrum, 2)
+
+      ! total number of points along z-axis
+      nz = SUM(lz)
+
+      ALLOCATE(k0(0:ntasks-1), k1(0:ntasks-1))
+
+      ! first/last k-index for each process
+      DO p = 0, ntasks - 1
+        IF (p .eq. 0) THEN
+          k0(p) = 1
+          k1(p) = lz(p)
+        ELSE
+          k0(p) = k1(p - 1) + 1
+          k1(p) = k1(p - 1) + lz(p)
         ENDIF
+      ENDDO
 
-        IF (ALL(BOOL .EQV. .TRUE.)) COLOR(I) = I + 1
+      ALLOCATE(i0(0:ntasks-1), i1(0:ntasks-1))
+
+      ! distribute points along x-axis between processes
+      CALL mpi_split_task(nx, ntasks, i0, i1)
+
+      ! number of points along x-axis for each process
+      DO p = 0, ntasks - 1
+        lx(p) = i1(p) - i0(p) + 1
+      ENDDO
+
+      ALLOCATE(sendcounts(0:ntasks-1), sdispls(0:ntasks-1), recvcounts(0:ntasks-1), rdispls(0:ntasks-1))
+
+      ! set counts/displacement arrays
+      DO p = 0, ntasks - 1
+
+        sendcounts(p) = lz(rank) * lx(p)              !< points send from process "rank" to process "p"
+        recvcounts(p) = lz(p) * lx(rank)              !< points received from process "rank" by process "p"
+
+        IF (p .eq. 0) THEN
+          sdispls(p) = 0
+          rdispls(p) = 0
+        ELSE
+          sdispls(p) = sdispls(p - 1) + sendcounts(p - 1)
+          rdispls(p) = rdispls(p - 1) + recvcounts(p - 1)
+        ENDIF
 
       ENDDO
 
-      ! PROCESS BELONGING TO THE SAME STENCIL HAVE SAME COLOR
-      COLOR(WORLD_RANK) = MAXVAL(COLOR, DIM = 1)
+      ALLOCATE(sendbuf(nx * lz(rank)))
+      ALLOCATE(recvbuf(nz * lx(rank)))
 
-      ! CREATE COMMUNICATOR SUBGROUP
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR(WORLD_RANK), WORLD_RANK, NEWCOMM, IERR)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! allocate memory and prepare plan for FFTW library
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! PROCESS ID AND COMMUNICATOR SIZE
-      CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
-      CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
+      ! buffer "cdum" will be used for transform and it is allocated using FFTW memory allocation utility
+#ifdef DOUBLE_PREC
+      pc = fftw_alloc_complex(INT(lx(rank) * nz, c_size_t))
+#else
+      pc = fftwf_alloc_complex(INT(lx(rank) * nz, c_size_t))
+#endif
 
-      ALLOCATE(N(0:NTASKS - 1))
+      CALL C_F_POINTER(pc, cdum, [lx(rank) * nz])
 
-      ! NUMBER OF POINTS ALONG DIRECTION "DIR" FOR CALLING PROCESS
-      N(RANK) = GE(DIR + 1, WORLD_RANK) - GS(DIR + 1, WORLD_RANK) + 1
+      ! prepare FFTW plan along z-axis ("lx(rank)" transforms, each having "nz" number of points)
+#ifdef DOUBLE_PREC
+      p1 = fftw_plan_many_dft(1, [nz], lx(rank), cdum, [nz], lx(rank), 1, cdum, [nz], lx(rank), 1, fftw_backward, fftw_estimate)
+#else
+      p1 = fftwf_plan_many_dft(1, [nz], lx(rank), cdum, [nz], lx(rank), 1, cdum, [nz], lx(rank), 1, fftw_backward, fftw_estimate)
+#endif
 
-      ! MAKE WHOLE COMMUNICATOR AWARE OF POINTS FOR EACH PROCESS
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, N, 1, MPI_INTEGER, NEWCOMM, IERR)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! collect data, apply transform and send data back
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-    END SUBROUTINE BUILD_PENCIL
+      ! work y-slices one by one
+      DO j = 1, ny
+
+        c = 0
+
+        ! rearrange elements of "spectrum"
+        DO p = 0, ntasks - 1
+          DO k = 1, lz(rank)
+            DO i = i0(p), i1(p)
+              c          = c + 1
+              sendbuf(c) = spectrum(i, j, k)
+            ENDDO
+          ENDDO
+        ENDDO
+
+        ! exchange data
+        CALL mpi_alltoallv(sendbuf, sendcounts, sdispls, cplx_type, cdum, recvcounts, rdispls, cplx_type, pencil, ierr)
+
+        ! ifft
+#ifdef DOUBLE_PREC
+        CALL fftw_execute_dft(p1, cdum, cdum)
+#else
+        CALL fftwf_execute_dft(p1, cdum, cdum)
+#endif
+
+        c = 0
+
+        ! rearrange elements of "cdum" into "recvbuf"
+        DO p = 0, ntasks - 1
+          DO i = 1, lx(rank)
+            DO k = k0(p), k1(p)
+              c          = c + 1
+              recvbuf(c) = cdum(i + (k - 1)*lx(rank))
+            ENDDO
+          ENDDO
+        ENDDO
+
+        ! send transformed data back
+        CALL mpi_alltoallv(recvbuf, recvcounts, rdispls, cplx_type, sendbuf, sendcounts, sdispls, cplx_type, pencil, ierr)
+
+        ! rearrange data into original layout
+        DO k = 1, lz(rank)
+          DO i = 1, nx
+            spectrum(i, j, k) = sendbuf(k + (i - 1)*lz(rank))
+          ENDDO
+        ENDDO
+
+      ENDDO
+
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! release resources
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! destroy FFTW plan
+#ifdef DOUBLE_PREC
+      CALL fftw_destroy_plan(p1)
+#else
+      CALL fftwf_destroy_plan(p1)
+#endif
+
+      ! release memory
+      nullify(cdum)
+
+#ifdef DOUBLE_PREC
+      CALL fftw_free(pc)
+#else
+      CALL fftwf_free(pc)
+#endif
+
+      DEALLOCATE(sendbuf, recvbuf, sdispls, rdispls, sendcounts, recvcounts)
+      DEALLOCATE(i0, i1, k0, k1, lx, lz)
+
+      ! release communicator
+      CALL mpi_comm_free(pencil, ierr)
+
+    END SUBROUTINE transform_along_z
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE COMPUTE_SPECTRUM(DS, LS, LE, DH, ACF, CL, SIGMA, HURST, SEED, SPEC, TIME)
+    SUBROUTINE transform_along_y(spectrum)
 
-      ! COMPUTE THE SPECTRUM OF A RANDOM FIELD CHARACTERISED BY A SPECIFIC AUTOCORRELATION FUNCTION, CORRELATION LENGTH, STANDARD DEVIATION,
-      ! AND HURST EXPONENT (NOT USED FOR GAUSSIAN FIELDS). BASED ON THE FOURIER INTEGRAL METHOD OF PARDO-IGUZQUIZA AND CHICA-OLMO.
+      ! compute many in-place COMPLEX-to-COMPLEX ifft along y-direction on input spectrum. processes are gathered in y-oriented pencils
+      ! based on the input geometry. inside each pencil, the algorithm works on z-slices (to require as less memory as possible) to
+      ! exchange data and compute the ifft.
 
-      REAL(FPP),                                                        INTENT(IN)  :: DS
-      INTEGER(IPP),     DIMENSION(3),                                   INTENT(IN)  :: LS, LE                !< GLOBAL INDICES
-      REAL(FPP),                                                        INTENT(IN)  :: DH                    !< GRID-STEP
-      INTEGER(IPP),                                                     INTENT(IN)  :: ACF                   !< AUTOCORRELATION FUNCTION
-      REAL(FPP),        DIMENSION(3),                                   INTENT(IN)  :: CL                    !< CORRELATION LENGTH (CAN BE ANISOTROPIC)
-      REAL(FPP),                                                        INTENT(IN)  :: SIGMA                 !< STANDARD DEVIATION (SIGMA%/100)
-      REAL(FPP),                                                        INTENT(IN)  :: HURST                 !< HURST EXPONENT
-      INTEGER(IPP),                                                     INTENT(IN)  :: SEED                  !< INITIAL SEED NUMBER
-      COMPLEX(FPP),     DIMENSION(LS(1):LE(1),LS(2):LE(2),LS(3):LE(3)), INTENT(OUT) :: SPEC                  !< SPECTRUM
-      REAL(FPP),        DIMENSION(2),                                   INTENT(OUT) :: TIME                  !< ELAPSED TIME
-      INTEGER(IPP)                                                                  :: I, J, K               !< INDICES
-      REAL(FPP)                                                                     :: BUTTER, NUM, AMP      !< USED TO COMPUTE SPECTRUM
-      REAL(FPP)                                                                     :: KC, KR                !< USED TO COMPUTE SPECTRUM
-      !REAL(FPP)                                                                     :: R
-      REAL(REAL64)                                                                  :: TICTOC                !< USED FOR TIMING
-      REAL(FPP),        DIMENSION(3)                                                :: DK                    !< RESOLUTION IN WAVENUMBER DOMAIN
-      !REAL(FPP),        DIMENSION(NPTS(1))                                          :: HARVEST               !< RANDOM VALUES
-      REAL(FPP),        DIMENSION(NPTS(1))                                          :: KX                    !< WAVENUMBER VECTOR (X)
-      REAL(FPP),        DIMENSION(NPTS(2))                                          :: KY                    !< WAVENUMBER VECTOR (Y)
-      REAL(FPP),        DIMENSION(NPTS(3))                                          :: KZ                    !< WAVENUMBER VECTOR (Z)
-      REAL(C_FPP),      DIMENSION(:),                                   POINTER     :: R
-      REAL(C_FPP),      DIMENSION(:,:,:),                               POINTER     :: HARVEST
-      TYPE(C_PTR)                                                                   :: CPTR
+      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                   !< input field
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                 :: sendbuf, recvbuf           !< sender/receiver buffer
+      INTEGER(f_int)                                            :: i, j, k, p, c              !< counters
+      INTEGER(f_int)                                            :: rank, ntasks, ierr         !< mpi stuff
+      INTEGER(f_int)                                            :: pencil
+      INTEGER(f_int)                                            :: nx, ny, nz                 !< total number of points for pencil along each axis
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: i0, i1                     !< local i-index for processes belonging to pencil
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: j0, j1                     !< local j-index for processes belonging to pencil
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: lx, ly                     !< local number of points along x and y axis
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: sendcounts, recvcounts     !< mpi stuff
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: sdispls, rdispls           !< mpi stuff
+      TYPE(c_ptr)                                             :: p1
+
+      !-------------------------------------------------------------------------------------------------------------------------------
+
+      ! group processes in pencils oriented along y-axis. "ly" CONTAINS number of points for each process in "pencil" along y
+      CALL build_pencil(1, pencil, rank, ntasks, ly)
+
+      ! this array will contain the number of points local to each process in current pencil along x
+      ALLOCATE(lx(0:ntasks-1))
+
+      ! number of points along x and z. these are indentical for ALL processes in current pencil.
+      nx = SIZE(spectrum, 1)
+      nz = SIZE(spectrum, 3)
+
+      ! total number of points along y-axis
+      ny = SUM(ly)
+
+      ALLOCATE(j0(0:ntasks-1), j1(0:ntasks-1))
+
+      ! first/last k-index for each process
+      DO p = 0, ntasks - 1
+        IF (p .eq. 0) THEN
+          j0(p) = 1
+          j1(p) = ly(p)
+        ELSE
+          j0(p) = j1(p - 1) + 1
+          j1(p) = j1(p - 1) + ly(p)
+        ENDIF
+      ENDDO
+
+      ALLOCATE(i0(0:ntasks-1), i1(0:ntasks-1))
+
+      ! distribute points along x-axis between processes
+      CALL mpi_split_task(nx, ntasks, i0, i1)
+
+      ! number of points along x-axis for each process
+      DO p = 0, ntasks - 1
+        lx(p) = i1(p) - i0(p) + 1
+      ENDDO
+
+      ALLOCATE(sendcounts(0:ntasks-1), sdispls(0:ntasks-1), recvcounts(0:ntasks-1), rdispls(0:ntasks-1))
+
+      ! set counts/displacement arrays
+      DO p = 0, ntasks - 1
+
+        sendcounts(p) = ly(rank) * lx(p)              !< points send from process "rank" to process "p"
+        recvcounts(p) = ly(p) * lx(rank)              !< points received from process "rank" by process "p"
+
+        IF (p .eq. 0) THEN
+          sdispls(p) = 0
+          rdispls(p) = 0
+        ELSE
+          sdispls(p) = sdispls(p - 1) + sendcounts(p - 1)
+          rdispls(p) = rdispls(p - 1) + recvcounts(p - 1)
+        ENDIF
+
+      ENDDO
+
+      ALLOCATE(sendbuf(nx * ly(rank)))
+      ALLOCATE(recvbuf(ny * lx(rank)))
+
+      ! buffer "cdum" will be used for transform and it is allocated using FFTW memory allocation utility
+#ifdef DOUBLE_PREC
+      pc = fftw_alloc_complex(int(lx(rank) * ny, c_size_t))
+#else
+      pc = fftwf_alloc_complex(int(lx(rank) * ny, c_size_t))
+#endif
+
+      CALL C_F_POINTER(pc, cdum, [lx(rank) * ny])
+
+      ! prepare FFTW plan along y-axis ("lx(rank)" transforms, each having "ny" number of points)
+#ifdef DOUBLE_PREC
+      p1 = fftw_plan_many_dft(1, [ny], lx(rank), cdum, [ny], lx(rank), 1, cdum, [ny], lx(rank), 1, fftw_backward, fftw_estimate)
+#else
+      p1 = fftwf_plan_many_dft(1, [ny], lx(rank), cdum, [ny], lx(rank), 1, cdum, [ny], lx(rank), 1, fftw_backward, fftw_estimate)
+#endif
+
+      ! work z-slices one by one
+      DO k = 1, nz
+
+        c = 0
+
+        ! rearrange elements of "spectrum"
+        DO p = 0, ntasks - 1
+          DO j = 1, ly(rank)
+            DO i = i0(p), i1(p)
+              c          = c + 1
+              sendbuf(c) = spectrum(i, j, k)
+            ENDDO
+          ENDDO
+        ENDDO
+
+        ! exchange data
+        CALL mpi_alltoallv(sendbuf, sendcounts, sdispls, cplx_type, cdum, recvcounts, rdispls, cplx_type, pencil, ierr)
+
+        ! ifft
+#ifdef DOUBLE_PREC
+        CALL fftw_execute_dft(p1, cdum, cdum)
+#else
+        CALL fftwf_execute_dft(p1, cdum, cdum)
+#endif
+
+        c = 0
+
+        ! rearrange elements of "cdum" into "recvbuf"
+        DO p = 0, ntasks - 1
+          DO i = 1, lx(rank)
+            DO j = j0(p), j1(p)
+              c          = c + 1
+              recvbuf(c) = cdum(i + (j - 1)*lx(rank))
+            ENDDO
+          ENDDO
+        ENDDO
+
+        ! send transformed data back
+        CALL mpi_alltoallv(recvbuf, recvcounts, rdispls, cplx_type, sendbuf, sendcounts, sdispls, cplx_type, pencil, ierr)
+
+        ! rearrange data into original layout
+        DO j = 1, ly(rank)
+          DO i = 1, nx
+            spectrum(i, j, k) = sendbuf(j + (i - 1)*ly(rank))
+          ENDDO
+        ENDDO
+
+      ENDDO
+
+      ! destroy plan
+#ifdef DOUBLE_PREC
+      CALL fftw_destroy_plan(p1)
+#else
+      CALL fftwf_destroy_plan(p1)
+#endif
+
+      ! release memory
+      nullify(cdum)
+
+#ifdef DOUBLE_PREC
+      CALL fftw_free(pc)
+#else
+      CALL fftwf_free(pc)
+#endif
+
+      DEALLOCATE(sendbuf, recvbuf, sdispls, rdispls, sendcounts, recvcounts)
+      DEALLOCATE(i0, i1, j0, j1, lx, ly)
+
+      ! release communicator
+      CALL mpi_comm_free(pencil, ierr)
+
+    END SUBROUTINE transform_along_y
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE transform_along_x(spectrum)
+
+      ! compute many in-place COMPLEX-to-REAL ifft along x-direction on input spectrum. processes are gathered in x-oriented pencils
+      ! based on the input geometry. inside each pencil, the algorithm works on z-slices (to require as less memory as possible) to
+      ! exchange data and compute the ifft.
+
+      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                       !< input field
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                    :: sendbuf                        !< sender buffer
+      INTEGER(f_int)                                               :: i, j, k, p, c                  !< counters
+      INTEGER(f_int)                                               :: rank, ntasks, ierr             !< mpi stuff
+      INTEGER(f_int)                                               :: nyquist, pencil
+      INTEGER(f_int)                                               :: imax, p_imax
+      INTEGER(f_int)                                               :: nx, ny, nz                     !< total number of points for pencil along each axis
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: offset
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: i0, i1                         !< local i-index for processes belonging to pencil
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: j0, j1                         !< local j-index for processes belonging to pencil
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: lx, ly                         !< local number of points along x and y axis
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: sendcounts, recvcounts         !< mpi stuff
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: sdispls, rdispls               !< mpi stuff
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: r_sendcounts, r_recvcounts     !< mpi stuff
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: r_sdispls, r_rdispls           !< mpi stuff
+      REAL(f_real),    ALLOCATABLE, DIMENSION(:)                    :: r_sendbuf, recvbuf
+      TYPE(c_ptr)                                                :: p1
+
+      !-------------------------------------------------------------------------------------------------------------------------------
+
+      ! index of nyquist frequency along x-axis
+      nyquist = npts(1) / 2 + 1
+
+      ! group processes in pencils oriented along x-axis. "lx" CONTAINS number of points for each process in "pencil" along x
+      CALL build_pencil(0, pencil, rank, ntasks, lx)
+
+      ! PARAMETER used to determine elements to be sent/received
+      ALLOCATE(offset(0:ntasks-1))
+
+      offset(rank) = gs(1, world_rank) - 1
+
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, offset, 1, mpi_integer, pencil, ierr)
+
+      ! this array will contain the number of points local to each process in current pencil along y
+      ALLOCATE(ly(0:ntasks-1))
+
+      ! number of points along y and z. these are indentical for ALL processes in current pencil.
+      ny = SIZE(spectrum, 2)
+      nz = SIZE(spectrum, 3)
+
+      ! total number of points along x-axis
+      nx = SUM(lx)
+
+      ! max i-index used to send data
+      imax = MIN(lx(rank) + offset(rank), nyquist) - offset(rank)
+
+      IF (imax .lt. 1) imax = 0
+
+      ALLOCATE(i0(0:ntasks-1), i1(0:ntasks-1))
+
+      ! first/last i-index for each process
+      DO p = 0, ntasks - 1
+        IF (p .eq. 0) THEN
+          i0(p) = 1
+          i1(p) = lx(p)
+        ELSE
+          i0(p) = i1(p - 1) + 1
+          i1(p) = i1(p - 1) + lx(p)
+        ENDIF
+      ENDDO
+
+      ALLOCATE(j0(0:ntasks-1), j1(0:ntasks-1))
+
+      ! distribute points along y-axis between processes
+      CALL mpi_split_task(ny, ntasks, j0, j1)
+
+      ! number of points along y-axis for each process
+      DO p = 0, ntasks - 1
+        ly(p) = j1(p) - j0(p) + 1
+      ENDDO
+
+      ALLOCATE(sendcounts(0:ntasks-1), sdispls(0:ntasks-1), recvcounts(0:ntasks-1), rdispls(0:ntasks-1))
+      ALLOCATE(r_sendcounts(0:ntasks-1), r_sdispls(0:ntasks-1), r_recvcounts(0:ntasks-1), r_rdispls(0:ntasks-1))
+
+      ! set counts/displacement arrays
+      DO p = 0, ntasks - 1
+
+        ! define "imax" for process "p"
+        p_imax = MIN(lx(p) + offset(p), nyquist) - offset(p)
+
+        IF (p_imax .lt. 1) p_imax = 0
+
+        ! process completely to the right of "nyquist" won't send ANY element ("sendcounts=0")
+        sendcounts(p) = ly(p) * imax                                            !< points send from process "rank" to process "p"
+
+        ! a process won't receive anything from process "p" IF the latter is to the right of "nyquist" ("recvcounts=0")
+        recvcounts(p) = ly(rank) * p_imax                                       !< points received from process "rank" by process "p"
+
+        r_sendcounts(p) = ly(rank) * lx(p)                                      !< points send from process "rank" to process "p"
+        r_recvcounts(p) = ly(p) * lx(rank)                                      !< points received from process "rank" by process "p"
+
+        IF (p .eq. 0) THEN
+          sdispls(p)   = 0
+          rdispls(p)   = 0
+          r_sdispls(p) = 0
+          r_rdispls(p) = 0
+        ELSE
+          sdispls(p)   = sdispls(p - 1) + sendcounts(p - 1)
+          rdispls(p)   = rdispls(p - 1) + recvcounts(p - 1)
+          r_sdispls(p) = r_sdispls(p - 1) + r_sendcounts(p - 1)
+          r_rdispls(p) = r_rdispls(p - 1) + r_recvcounts(p - 1)
+        ENDIF
+
+      ENDDO
+
+      ALLOCATE(sendbuf(ny * imax), r_sendbuf(nx * ly(rank)))
+      ALLOCATE(recvbuf(ny * lx(rank)))
+
+      ! ALLOCATE memory using FFTW allocation utility
+#ifdef DOUBLE_PREC
+      pc = fftw_alloc_complex(int(ly(rank) * nyquist, c_size_t))
+#else
+      pc = fftwf_alloc_complex(int(ly(rank) * nyquist, c_size_t))
+#endif
+
+      ! for in-place transforms, output REAL array is slightly longer than actual physical DIMENSION
+      CALL C_F_POINTER(pc, cdum, [ly(rank) * nyquist])
+      CALL C_F_POINTER(pc, rdum, [ly(rank) * nyquist * 2])
+
+      ! prepare FFTW plan along x-axis ("ly(rank)" transforms, each having "npts(1)" number of points)
+#ifdef DOUBLE_PREC
+      p1 = fftw_plan_many_dft_c2r(1, [npts(1)], ly(rank), cdum, [npts(1)], ly(rank), 1, rdum, [npts(1)], ly(rank), 1, fftw_estimate)
+#else
+      p1 = fftwf_plan_many_dft_c2r(1, [npts(1)], ly(rank), cdum, [npts(1)], ly(rank), 1, rdum, [npts(1)], ly(rank), 1,fftw_estimate)
+#endif
+
+      ! work z-slices one by one
+      DO k = 1, nz
+
+        c = 0
+
+        ! rearrange elements of "spectrum"
+        DO p = 0, ntasks - 1
+          DO i = 1, imax
+            DO j = j0(p), j1(p)
+              c          = c + 1
+              sendbuf(c) = spectrum(i, j, k)
+            ENDDO
+          ENDDO
+        ENDDO
+
+        ! exchange data
+        CALL mpi_alltoallv(sendbuf, sendcounts, sdispls, cplx_type, cdum, recvcounts, rdispls, cplx_type, pencil, ierr)
+
+        ! ifft
+#ifdef DOUBLE_PREC
+        CALL fftw_execute_dft_c2r(p1, cdum, rdum)
+#else
+        CALL fftwf_execute_dft_c2r(p1, cdum, rdum)
+#endif
+
+        c = 0
+
+        ! rearrange elements of "rdum" into "recvbuf"
+        DO p = 0, ntasks - 1
+          DO j = 1, ly(rank)
+            DO i = i0(p), i1(p)
+              c            = c + 1
+              r_sendbuf(c) = rdum(j + (i - 1)*ly(rank))
+            ENDDO
+          ENDDO
+        ENDDO
+
+        ! send transformed data back
+        CALL mpi_alltoallv(r_sendbuf, r_sendcounts, r_sdispls, real_type, recvbuf, r_recvcounts, r_rdispls, real_type, pencil, ierr)
+
+        ! rearrange data into original layout
+        DO j = 1, ny
+          DO i = 1, lx(rank)
+            spectrum(i, j, k) = cmplx(recvbuf(i + (j - 1)*lx(rank)), 0._f_real, f_real)
+          ENDDO
+        ENDDO
+
+      ENDDO
+
+      ! destroy plan
+#ifdef DOUBLE_PREC
+      CALL fftw_destroy_plan(p1)
+#else
+      CALL fftwf_destroy_plan(p1)
+#endif
+
+      ! release memory
+      nullify(cdum, rdum)
+
+#ifdef DOUBLE_PREC
+      CALL fftw_free(pc)
+#else
+      CALL fftwf_free(pc)
+#endif
+
+      DEALLOCATE(sendbuf, recvbuf, sdispls, rdispls, sendcounts, recvcounts)
+      DEALLOCATE(r_sendbuf, r_sdispls, r_rdispls, r_sendcounts, r_recvcounts)
+      DEALLOCATE(i0, i1, j0, j1, lx, ly, offset)
+
+      ! release communicator
+      CALL mpi_comm_free(pencil, ierr)
+
+    END SUBROUTINE transform_along_x
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE build_pencil(dir, newcomm, rank, ntasks, n)
+
+      ! group processors in pencils oriented along a specific direction.
+
+      INTEGER(f_int),                                        INTENT(IN)  :: dir                    !< stencil direction (0=x, 1=y, 2=z)
+      INTEGER(f_int),                                        INTENT(OUT) :: newcomm                !< handle to new communicator
+      INTEGER(f_int),                                        INTENT(OUT) :: rank                   !< rank of calling process in new communicator
+      INTEGER(f_int),                                        INTENT(OUT) :: ntasks                 !< number of processes in new communicator
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:),             INTENT(OUT) :: n                      !< number of points per process in pencil direction
+      INTEGER(f_int)                                                     :: i, ierr
+      INTEGER(f_int),              DIMENSION(0:world_size-1)             :: color
+      LOGICAL,                   DIMENSION(2)                          :: bool
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      TIME(:) = 0._FPP
+      ! group processes in stencils
+      DO i = 0, world_size - 1
+
+        color(i) = 0
+
+        ! stencil along x-axis
+        IF (dir .eq. 0) THEN
+          bool(1) = (gs(2, i) .eq. gs(2, world_rank)) .and. (ge(2, i) .eq. ge(2, world_rank))
+          bool(2) = (gs(3, i) .eq. gs(3, world_rank)) .and. (ge(3, i) .eq. ge(3, world_rank))
+        ! stencil along y-axis
+        elseif (dir .eq. 1) THEN
+          bool(1) = (gs(1, i) .eq. gs(1, world_rank)) .and. (ge(1, i) .eq. ge(1, world_rank))
+          bool(2) = (gs(3, i) .eq. gs(3, world_rank)) .and. (ge(3, i) .eq. ge(3, world_rank))
+        ! stencil along z-axis
+        elseif (dir .eq. 2) THEN
+          bool(1) = (gs(1, i) .eq. gs(1, world_rank)) .and. (ge(1, i) .eq. ge(1, world_rank))
+          bool(2) = (gs(2, i) .eq. gs(2, world_rank)) .and. (ge(2, i) .eq. ge(2, world_rank))
+        ENDIF
+
+        IF (ALL(bool .eqv. .true.)) color(i) = i + 1
+
+      ENDDO
+
+      ! process belonging to the same stencil have same color
+      color(world_rank) = MAXVAL(color, dim = 1)
+
+      ! create communicator subgroup
+      CALL mpi_comm_split(mpi_comm_world, color(world_rank), world_rank, newcomm, ierr)
+
+      ! process id and communicator SIZE
+      CALL mpi_comm_rank(newcomm, rank, ierr)
+      CALL mpi_comm_size(newcomm, ntasks, ierr)
+
+      ALLOCATE(n(0:ntasks - 1))
+
+      ! number of points along direction "dir" for calling process
+      n(rank) = ge(dir + 1, world_rank) - gs(dir + 1, world_rank) + 1
+
+      ! make whole communicator aware of points for each process
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, n, 1, mpi_integer, newcomm, ierr)
+
+    END SUBROUTINE build_pencil
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE compute_spectrum(ds, ls, le, dh, acf, cl, sigma, hurst, seed, spec, time)
+
+      ! compute the spectrum of a random field characterised by a specific autocorrelation FUNCTION, correlation length, standard deviation,
+      ! and hurst exponent (not used for gaussian fields). based on the fourier integral method of pardo-iguzquiza and chica-olmo.
+
+      REAL(f_real),                                                        INTENT(IN)  :: ds
+      INTEGER(f_int),     DIMENSION(3),                                   INTENT(IN)  :: ls, le                !< global indices
+      REAL(f_real),                                                        INTENT(IN)  :: dh                    !< grid-step
+      INTEGER(f_int),                                                     INTENT(IN)  :: acf                   !< autocorrelation FUNCTION
+      REAL(f_real),        DIMENSION(3),                                   INTENT(IN)  :: cl                    !< correlation length (can be anisotropic)
+      REAL(f_real),                                                        INTENT(IN)  :: sigma                 !< standard deviation (sigma%/100)
+      REAL(f_real),                                                        INTENT(IN)  :: hurst                 !< hurst exponent
+      INTEGER(f_int),                                                     INTENT(IN)  :: seed                  !< initial seed number
+      COMPLEX(f_real),     DIMENSION(ls(1):le(1),ls(2):le(2),ls(3):le(3)), INTENT(OUT) :: spec                  !< spectrum
+      REAL(f_real),        DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
+      INTEGER(f_int)                                                                  :: i, j, k               !< indices
+      REAL(f_real)                                                                     :: butter, num, amp      !< used to compute spectrum
+      REAL(f_real)                                                                     :: kc, kr                !< used to compute spectrum
+      !REAL(f_real)                                                                     :: r
+      REAL(f_dble)                                                                  :: tictoc                !< used for timing
+      REAL(f_real),        DIMENSION(3)                                                :: dk                    !< resolution in wavenumber domain
+      !REAL(f_real),        DIMENSION(npts(1))                                          :: harvest               !< random values
+      REAL(f_real),        DIMENSION(npts(1))                                          :: kx                    !< wavenumber vector (x)
+      REAL(f_real),        DIMENSION(npts(2))                                          :: ky                    !< wavenumber vector (y)
+      REAL(f_real),        DIMENSION(npts(3))                                          :: kz                    !< wavenumber vector (z)
+      REAL(c_real),      DIMENSION(:),                                   POINTER     :: r
+      REAL(c_real),      DIMENSION(:,:,:),                               POINTER     :: harvest
+      TYPE(c_ptr)                                                                   :: cptr
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      time(:) = 0._f_real
 
 #ifdef TIMING
-      ! START TIMER
-      CALL WATCH_START(TICTOC)
+      ! start timer
+      CALL watch_start(tictoc)
 #endif
 
-      ! RESOLUTION IN WAVENUMBER DOMAIN ALONG EACH DIRECTION
-      DO I = 1, 3
-        DK(I) = 2._FPP * PI / (REAL(NPTS(I), FPP) * DH)
+      ! resolution in wavenumber domain along each direction
+      DO i = 1, 3
+        dk(i) = 2._f_real * pi / (REAL(npts(i), f_real) * dh)
       ENDDO
 
-      ! NYQUIST WAVENUMBER
-      !KNYQ = PI / DH
+      ! nyquist wavenumber
+      !knyq = pi / dh
 
-      ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-      ! KC = PI / (DS) * SQRT(3._FPP)
-      KC = PI / DS
+      ! corner wavenumber for filtering spectrum is controlled by mesh grid-step
+      ! kc = pi / (ds) * SQRT(3._f_real)
+      kc = pi / ds
 
-      ! VECTORS GO FROM 0 TO NYQUIST AND THEN BACK AGAIN UNTIL DK
-      KX = [[(I * DK(1), I = 0, NPTS(1)/2)], [(I * DK(1), I = NPTS(1)/2-1, 1, -1)]]
-      KY = [[(J * DK(2), J = 0, NPTS(2)/2)], [(J * DK(2), J = NPTS(2)/2-1, 1, -1)]]
-      KZ = [[(K * DK(3), K = 0, NPTS(3)/2)], [(K * DK(3), K = NPTS(3)/2-1, 1, -1)]]
+      ! vectors go from 0 to nyquist and THEN back again until dk
+      kx = [[(i * dk(1), i = 0, npts(1)/2)], [(i * dk(1), i = npts(1)/2-1, 1, -1)]]
+      ky = [[(j * dk(2), j = 0, npts(2)/2)], [(j * dk(2), j = npts(2)/2-1, 1, -1)]]
+      kz = [[(k * dk(3), k = 0, npts(3)/2)], [(k * dk(3), k = npts(3)/2-1, 1, -1)]]
 
-      ! COMPUTE PART OF POWER SPECTRAL DENSITY OUTSIDE LOOP
-      IF (ACF .EQ. 0) THEN
-        NUM = 8._FPP * SQRT(PI**3) * GAMMA(HURST + 1.5_FPP) * SIGMA**2 * PRODUCT(CL) / GAMMA(HURST)
-        FUN => VK_PSDF
-      ELSEIF (ACF .EQ. 1) THEN
-        NUM = SIGMA**2 * PRODUCT(CL) * SQRT(PI**3)
-        FUN => GS_PSDF
+      ! compute part of power spectral density outside loop
+      IF (acf .eq. 0) THEN
+        num = 8._f_real * SQRT(pi**3) * GAMMA(hurst + 1.5_f_real) * sigma**2 * PRODUCT(cl) / GAMMA(hurst)
+        fun => vk_psdf
+      elseif (acf .eq. 1) THEN
+        num = sigma**2 * PRODUCT(cl) * SQRT(pi**3)
+        fun => gs_psdf
       ENDIF
 
-      ! EACH PROCESS GENERATE ITS SET OF RANDOM NUMBERS
-      CPTR = PRNG(SEED, LS, LE, NPTS)
+      ! each process generate its set of random numbers
+      cptr = prng(seed, ls, le, npts)
 
-      CALL C_F_POINTER(CPTR, R, [(LE(1) - LS(1) + 1) * (LE(2) - LS(2) + 1) * (LE(3) - LS(3) + 1)])
+      CALL C_F_POINTER(cptr, r, [(le(1) - ls(1) + 1) * (le(2) - ls(2) + 1) * (le(3) - ls(3) + 1)])
 
-      HARVEST(LS(1):LE(1), LS(2):LE(2), LS(3):LE(3)) => R
+      harvest(ls(1):le(1), ls(2):le(2), ls(3):le(3)) => r
 
-      ! COMPUTE SPECTRUM
-      DO K = LS(3), LE(3)
+      ! compute spectrum
+      DO k = ls(3), le(3)
 
-        DO J = LS(2), LE(2)
+        DO j = ls(2), le(2)
 
-          DO I = LS(1), LE(1)
+          DO i = ls(1), le(1)
 
-            ! RADIAL WAVENUMBER
-            KR = SQRT(KX(I)**2 + KY(J)**2 + KZ(K)**2)
+            ! radial wavenumber
+            kr = SQRT(kx(i)**2 + ky(j)**2 + kz(k)**2)
 
-            ! FOURTH-ORDER LOW-PASS BUTTERWORTH FILTER
-            !BUTTER = 1._FPP / SQRT(1._FPP + (KR / KC)**(2 * 4))
+            ! fourth-order low-pass butterworth filter
+            !butter = 1._f_real / SQRT(1._f_real + (kr / kc)**(2 * 4))
 
-            BUTTER = 1._FPP
+            butter = 1._f_real
 
-            !!!!IF (KR .GT. KC) BUTTER = 0._FPP
+            !!!!IF (kr .gt. kc) butter = 0._f_real
 
-            ! NOW "KR" IS THE PRODUCT "K * CL"
-            KR = (KX(I) * CL(1))**2 + (KY(J) * CL(2))**2 + (KZ(K) * CL(3))**2
+            ! now "kr" is the PRODUCT "k * cl"
+            kr = (kx(i) * cl(1))**2 + (ky(j) * cl(2))**2 + (kz(k) * cl(3))**2
 
-            ! COMPLETE POWER SPECTRAL DENSITY AND GO TO AMPLITUDE SPECTRUM
-            AMP = SQRT(NUM / FUN(KR, HURST))
+            ! complete power spectral density and go to amplitude spectrum
+            amp = SQRT(num / fun(kr, hurst))
 
-            ! APPLY FILTER
-            AMP = AMP * BUTTER
+            ! apply filter
+            amp = amp * butter
 
-            !R = HARVEST(I - LS(1) + 1, J - LS(2) + 1, K - LS(3) + 1) * 2._FPP * PI
-            HARVEST(I, J, K) = HARVEST(I, J, K) * 2._FPP * PI
+            !r = harvest(i - ls(1) + 1, j - ls(2) + 1, k - ls(3) + 1) * 2._f_real * pi
+            harvest(i, j, k) = harvest(i, j, k) * 2._f_real * pi
 
-            ! COMBINE AMPLITUDE AND RANDOM PHASE
-            SPEC(I, J, K) = CMPLX(COS(HARVEST(I, J, K)) * AMP, SIN(HARVEST(I, J, K)) * AMP, FPP)
+            ! combine amplitude and random phase
+            spec(i, j, k) = cmplx(cos(harvest(i, j, k)) * amp, sin(harvest(i, j, k)) * amp, f_real)
 
           ENDDO
         ENDDO
       ENDDO
 
-      NULLIFY(R, HARVEST)
-      CALL FREE_MEM(CPTR)
+      nullify(r, harvest)
+      CALL free_mem(cptr)
 
 #ifdef TIMING
-      CALL WATCH_STOP(TICTOC)
+      CALL watch_stop(tictoc)
 
-      TIME(1) = TICTOC
+      time(1) = tictoc
 
-      CALL WATCH_START(TICTOC)
+      CALL watch_start(tictoc)
 #endif
 
-      CALL ENFORCE_SYMMETRY(LS, LE, SPEC)
+      CALL enforce_symmetry(ls, le, spec)
 
 #ifdef TIMING
-      CALL WATCH_STOP(TICTOC)
+      CALL watch_stop(tictoc)
 
-      TIME(2) = TICTOC
+      time(2) = tictoc
 #endif
 
-    END SUBROUTINE COMPUTE_SPECTRUM
+    END SUBROUTINE compute_spectrum
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE MPI_SPLIT_TASK(NPTS, NTASKS, I0, I1)
+    SUBROUTINE mpi_split_task(npts, ntasks, i0, i1)
 
-      ! DISTRIBUTE "NPTS" POINTS AMONGST "NTASKS" PROCESSES AND, FOR EACH PROCESS, RETURN THE LOWEST AND HIGHEST INDEX.
+      ! distribute "npts" points amongst "ntasks" processes and, for each process, return the lowest and highest index.
 
-      INTEGER(IPP),                        INTENT(IN)  :: NPTS                          !< NUMBER OF POINTS TO BE SPLIT
-      INTEGER(IPP),                        INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
-      INTEGER(IPP), DIMENSION(0:NTASKS-1), INTENT(OUT) :: I0, I1                     !< 1ST/LAST INDEX
-      INTEGER(IPP)                                     :: P                          !< COUNTER
+      INTEGER(f_int),                        INTENT(IN)  :: npts                          !< number of points to be split
+      INTEGER(f_int),                        INTENT(IN)  :: ntasks                     !< number of mpi processes
+      INTEGER(f_int), DIMENSION(0:ntasks-1), INTENT(OUT) :: i0, i1                     !< 1st/last index
+      INTEGER(f_int)                                     :: p                          !< counter
 
       !------------------------------------------------------------------------------------------------------------------------------
 
-      DO P = 0, NTASKS - 1
-        I0(P) = 1 + INT( REAL(NPTS, FPP) / REAL(NTASKS, FPP) * REAL(P, FPP) )
-        I1(P) = INT( REAL(NPTS, FPP) / REAL(NTASKS, FPP) * REAL(P + 1, FPP) )
+      DO p = 0, ntasks - 1
+        i0(p) = 1 + int( REAL(npts, f_real) / REAL(ntasks, f_real) * REAL(p, f_real) )
+        i1(p) = int( REAL(npts, f_real) / REAL(ntasks, f_real) * REAL(p + 1, f_real) )
       ENDDO
 
-    END SUBROUTINE MPI_SPLIT_TASK
+    END SUBROUTINE mpi_split_task
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION VK_PSDF(M, HURST)
+    REAL(f_real) FUNCTION vk_psdf(m, hurst)
 
-      ! FUNCTION USED TO GENERATE VON KARMAN (AND EXPONENTIAL) RANDOM FIELDS
+      ! FUNCTION used to generate von karman (and exponential) random fields
 
-      REAL(FPP), INTENT(IN) :: M                  !< PRODUCT (WAVENUMBER*CL)**2
-      REAL(FPP), INTENT(IN) :: HURST              !< HURST EXPONENT
+      REAL(f_real), INTENT(IN) :: m                  !< PRODUCT (wavenumber*cl)**2
+      REAL(f_real), INTENT(IN) :: hurst              !< hurst exponent
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      VK_PSDF = (1._FPP + M)**(HURST + 1.5_FPP)
+      vk_psdf = (1._f_real + m)**(hurst + 1.5_f_real)
 
-    END FUNCTION VK_PSDF
+    END FUNCTION vk_psdf
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION GS_PSDF(M, DUMMY)
+    REAL(f_real) FUNCTION gs_psdf(m, dummy)
 
-      ! FUNCTION USED TO GENERATE GAUSSIAN RANDOM FIELDS
+      ! FUNCTION used to generate gaussian random fields
 
-      REAL(FPP), INTENT(IN) :: M                  !< PRODUCT (WAVENUMBER*CL)**2
-      REAL(FPP), INTENT(IN) :: DUMMY              !< THIS VARIABLE IS NOT USED
+      REAL(f_real), INTENT(IN) :: m                  !< PRODUCT (wavenumber*cl)**2
+      REAL(f_real), INTENT(IN) :: dummy              !< this variable is not used
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      GS_PSDF = EXP(0.25_FPP * M)
+      gs_psdf = exp(0.25_f_real * m)
 
-    END FUNCTION GS_PSDF
+    END FUNCTION gs_psdf
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE ENFORCE_SYMMETRY(FS, FE, SPEC)
+    SUBROUTINE enforce_symmetry(fs, fe, spec)
 
-      INTEGER(IPP),              DIMENSION(3),                                   INTENT(IN)    :: FS, FE
-      COMPLEX(FPP),              DIMENSION(FS(1):FE(1),FS(2):FE(2),FS(3):FE(3)), INTENT(INOUT) :: SPEC
-      INTEGER(IPP)                                                                             :: I
-      INTEGER(IPP)                                                                             :: RANK, NTASKS
-      INTEGER(IPP)                                                                             :: NEWCOMM, IERR, COLOR
-      INTEGER(IPP),              DIMENSION(3)                                                  :: NYQUIST
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                                                  :: NEW2WORLD
+      INTEGER(f_int),              DIMENSION(3),                                   INTENT(IN)    :: fs, fe
+      COMPLEX(f_real),              DIMENSION(fs(1):fe(1),fs(2):fe(2),fs(3):fe(3)), INTENT(INOUT) :: spec
+      INTEGER(f_int)                                                                             :: i
+      INTEGER(f_int)                                                                             :: rank, ntasks
+      INTEGER(f_int)                                                                             :: newcomm, ierr, color
+      INTEGER(f_int),              DIMENSION(3)                                                  :: nyquist
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                                                  :: new2world
 
-      LOGICAL,                   DIMENSION(2)                                                  :: BOOL
+      LOGICAL,                   DIMENSION(2)                                                  :: bool
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! INDEX OF NYQUIST WAVENUMBER
-      DO I = 1, 3
-        NYQUIST(I) = NPTS(I) / 2 + 1
+      ! index of nyquist wavenumber
+      DO i = 1, 3
+        nyquist(i) = npts(i) / 2 + 1
       ENDDO
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! CREATE A NEW COMMUNICATOR CONTAINING ONLY THOSE PROCESSES CROSSING X=1 AND X=NPTS(1)/2 + 1
+      ! create a new communicator containing only those processes crossing x=1 and x=npts(1)/2 + 1
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      COLOR = 0
+      color = 0
 
-      BOOL(1) = FS(1) .EQ. 1
-      BOOL(2) = (FS(1) .LE. NYQUIST(1)) .AND. (FE(1) .GE. NYQUIST(1))
+      bool(1) = fs(1) .eq. 1
+      bool(2) = (fs(1) .le. nyquist(1)) .and. (fe(1) .ge. nyquist(1))
 
-      IF (BOOL(1)) COLOR = 1
-      IF (BOOL(2)) COLOR = 2
+      IF (bool(1)) color = 1
+      IF (bool(2)) color = 2
 
-      IF (ALL(BOOL)) COLOR = 3
+      IF (ALL(bool)) color = 3
 
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, NEWCOMM, IERR)
+      CALL mpi_comm_split(mpi_comm_world, color, world_rank, newcomm, ierr)
 
-      CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
-      CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
+      CALL mpi_comm_rank(newcomm, rank, ierr)
+      CALL mpi_comm_size(newcomm, ntasks, ierr)
 
-      ALLOCATE(NEW2WORLD(0:NTASKS - 1))
+      ALLOCATE(new2world(0:ntasks - 1))
 
-      ! I-TH RANK IN "NEWCOMM" HAS ITS GLOBAL RANK CONTAINED IN "NEW2WORLD"
-      CALL MAP_RANKS(NEWCOMM, MPI_COMM_WORLD, NEW2WORLD)
+      ! i-th rank in "newcomm" has its global rank contained in "new2world"
+      CALL map_ranks(newcomm, mpi_comm_world, new2world)
 
-      ! IF ONLY ONE OF CONDITIONS ABOVE IS TRUE, WE CAN WORK ON I=1 AND I=NYQUIST(1) AT THE SAME TIME...
-      IF ( (COLOR .EQ. 1) .OR. (COLOR .EQ. 2) ) THEN
+      ! IF only one of conditions above is true, we can work on i=1 and i=nyquist(1) at the same time...
+      IF ( (color .eq. 1) .or. (color .eq. 2) ) THEN
 
-        IF (BOOL(1)) THEN
-          I = 1
+        IF (bool(1)) THEN
+          i = 1
         ELSE
-          I = NYQUIST(1)
+          i = nyquist(1)
         ENDIF
 
-        CALL EXCHANGE_CONJG
+        CALL exchange_conjg
 
-      ! ... OTHERWISE WORK IN TWO STEPS
-      ELSEIF (COLOR .EQ. 3) THEN
+      ! ... otherwise work in two steps
+      elseif (color .eq. 3) THEN
 
-        I = 1
+        i = 1
 
-        CALL EXCHANGE_CONJG
+        CALL exchange_conjg
 
-        I = NYQUIST(1)
+        i = nyquist(1)
 
-        CALL EXCHANGE_CONJG
+        CALL exchange_conjg
 
       ENDIF
 
-      DEALLOCATE(NEW2WORLD)
+      DEALLOCATE(new2world)
 
-      CALL MPI_COMM_FREE(NEWCOMM, IERR)
+      CALL mpi_comm_free(newcomm, ierr)
 
       CONTAINS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-        SUBROUTINE EXCHANGE_CONJG
+        SUBROUTINE exchange_conjg
 
-          COMPLEX(FPP), DIMENSION(FS(2):FE(2),FS(3):FE(3)) :: BUFFER, SENDBUF
-          INTEGER(IPP)                                     :: J, K, P, L, C, CY, CZ
-          INTEGER(IPP)                                     :: JS, JE, KS, KE
-          INTEGER(IPP)                                     :: J0, J1, K0, K1
-          INTEGER(IPP)                                     :: IERR
-          INTEGER(IPP), DIMENSION(2)                       :: RSIZES, RSUBSIZES, RSTARTS
-          INTEGER(IPP), DIMENSION(3)                       :: SSIZES, SSUBSIZES, SSTARTS
-          INTEGER(IPP), DIMENSION(0:NTASKS-1)              :: SENDCOUNTS, RECVCOUNTS
-          INTEGER(IPP), DIMENSION(0:NTASKS-1)              :: SDISPLS, RDISPLS
-          INTEGER(IPP), DIMENSION(0:NTASKS-1)              :: SENDTYPES, RECVTYPES
-          LOGICAL                                          :: BOOL
+          COMPLEX(f_real), DIMENSION(fs(2):fe(2),fs(3):fe(3)) :: buffer, sendbuf
+          INTEGER(f_int)                                     :: j, k, p, l, c, cy, cz
+          INTEGER(f_int)                                     :: js, je, ks, ke
+          INTEGER(f_int)                                     :: j0, j1, k0, k1
+          INTEGER(f_int)                                     :: ierr
+          INTEGER(f_int), DIMENSION(2)                       :: rsizes, rsubsizes, rstarts
+          INTEGER(f_int), DIMENSION(3)                       :: ssizes, ssubsizes, sstarts
+          INTEGER(f_int), DIMENSION(0:ntasks-1)              :: sendcounts, recvcounts
+          INTEGER(f_int), DIMENSION(0:ntasks-1)              :: sdispls, rdispls
+          INTEGER(f_int), DIMENSION(0:ntasks-1)              :: sendtypes, recvtypes
+          LOGICAL                                          :: bool
 
           !-------------------------------------------------------------------------------------------------------------------------
 
           ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-          ! APPLY CONDITIONS OF FIGURE 4 FOR ALPHA, PSI, XSI AND ETA
+          ! apply conditions of figure 4 for alpha, psi, xsi and eta
           ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-          BOOL = (I .EQ. 1) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .EQ. 1)
+          bool = (i .eq. 1) .and. (fs(2) .eq. 1) .and. (fs(3) .eq. 1)
 
-          IF (BOOL) SPEC(I, 1, 1) = 0._FPP                                                         !< ALPHA MUST BE ZERO FOR ZERO-MEAN FIELD
+          IF (bool) spec(i, 1, 1) = 0._f_real                                                         !< alpha must be zero for zero-mean field
 
-          BOOL = (I .EQ. NYQUIST(1)) .AND. (FS(2) .EQ. 1) .AND. (FS(3) .EQ. 1)
+          bool = (i .eq. nyquist(1)) .and. (fs(2) .eq. 1) .and. (fs(3) .eq. 1)
 
-          IF (BOOL) SPEC(I, 1, 1) = REAL(SPEC(I, 1, 1), FPP)                                       !< ALPHA MUST BE REAL
+          IF (bool) spec(i, 1, 1) = REAL(spec(i, 1, 1), f_real)                                       !< alpha must be REAL
 
-          BOOL = (FS(2) .LE. NYQUIST(2)) .AND. (FE(2) .GE. NYQUIST(2)) .AND. (FS(3) .LE. NYQUIST(3)) .AND. (FE(3) .GE. NYQUIST(3))
+          bool = (fs(2) .le. nyquist(2)) .and. (fe(2) .ge. nyquist(2)) .and. (fs(3) .le. nyquist(3)) .and. (fe(3) .ge. nyquist(3))
 
-          IF (BOOL) SPEC(I, NYQUIST(2), NYQUIST(3)) = REAL(SPEC(I, NYQUIST(2), NYQUIST(3)), FPP)   !< PSI MUST BE REAL
+          IF (bool) spec(i, nyquist(2), nyquist(3)) = REAL(spec(i, nyquist(2), nyquist(3)), f_real)   !< psi must be REAL
 
-          BOOL = (FS(2) .EQ. 1) .AND. (FS(3) .LE. NYQUIST(3)) .AND. (FE(3) .GE. NYQUIST(3))
+          bool = (fs(2) .eq. 1) .and. (fs(3) .le. nyquist(3)) .and. (fe(3) .ge. nyquist(3))
 
-          IF (BOOL) SPEC(I, 1, NYQUIST(3)) = REAL(SPEC(I, 1, NYQUIST(3)), FPP)                     !< XSI MUST BE REAL
+          IF (bool) spec(i, 1, nyquist(3)) = REAL(spec(i, 1, nyquist(3)), f_real)                     !< xsi must be REAL
 
-          BOOL = (FS(2) .LE. NYQUIST(2)) .AND. (FE(2) .GE. NYQUIST(2)) .AND. (FS(3) .EQ. 1)
+          bool = (fs(2) .le. nyquist(2)) .and. (fe(2) .ge. nyquist(2)) .and. (fs(3) .eq. 1)
 
-          IF (BOOL) SPEC(I, NYQUIST(2), 1) = REAL(SPEC(I, NYQUIST(2), 1), FPP)                     !< ETA MUST BE REAL
+          IF (bool) spec(i, nyquist(2), 1) = REAL(spec(i, nyquist(2), 1), f_real)                     !< eta must be REAL
 
           ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-          ! APPLY CONDITIONS OF FIGURE 4 AT REMAINING REGIONS. EXCHANGE DATA AMONGST PROCESSES. BETA- AND DELTA- REGIONS ARE TREATED
-          ! SEPARATELY.
+          ! apply conditions of figure 4 at remaining regions. exchange data amongst processes. beta- and delta- regions are treated
+          ! separately.
           ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-          SENDCOUNTS = 0
-          RECVCOUNTS = 0
+          sendcounts = 0
+          recvcounts = 0
 
-          SDISPLS = 0
-          RDISPLS = 0
+          sdispls = 0
+          rdispls = 0
 
-          SSIZES = [FE(1) - FS(1) + 1, FE(2) - FS(2) + 1, FE(3) - FS(3) + 1]
+          ssizes = [fe(1) - fs(1) + 1, fe(2) - fs(2) + 1, fe(3) - fs(3) + 1]
 
-          RSIZES = [FE(2) - FS(2) + 1, FE(3) - FS(3) + 1]
+          rsizes = [fe(2) - fs(2) + 1, fe(3) - fs(3) + 1]
 
-          ! COPY RELEVANT PART OF "SPEC". THIS IS NOT STRICTLY NECESSARY BUT MAY IMPROVE CACHE ACCESS.
-          DO K = FS(3), FE(3)
-            DO J = FS(2), FE(2)
-              BUFFER(J, K) = SPEC(I, J, K)
+          ! copy relevant part of "spec". this is not strictly necessary but may improve cache access.
+          DO k = fs(3), fe(3)
+            DO j = fs(2), fe(2)
+              buffer(j, k) = spec(i, j, k)
             ENDDO
           ENDDO
 
-          ! EXCHANGE DATA IN THE WHOLE REGION, EXCEPT BETA- AND DELTA-REGION
-          DO P = 0, NTASKS - 1
+          ! exchange data in the whole region, except beta- and delta-region
+          DO p = 0, ntasks - 1
 
-            L = NEW2WORLD(P)                                                              !< GLOBAL INDEX OF P-TH PROCESS
+            l = new2world(p)                                                              !< global index of p-th process
 
-            SENDTYPES(P) = COMPLEX_TYPE
-            RECVTYPES(P) = COMPLEX_TYPE
+            sendtypes(p) = cplx_type
+            recvtypes(p) = cplx_type
 
-            ! PROJECT POINTS OF PROCESS "P" INTO CONJUGATED FIELD.
-            JS = NPTS(2) - GE(2, L) + 2
-            JE = NPTS(2) - GS(2, L) + 2
+            ! project points of process "p" into conjugated field.
+            js = npts(2) - ge(2, l) + 2
+            je = npts(2) - gs(2, l) + 2
 
-            KS = NPTS(3) - GE(3, L) + 2
-            KE = NPTS(3) - GS(3, L) + 2
+            ks = npts(3) - ge(3, l) + 2
+            ke = npts(3) - gs(3, l) + 2
 
-            J0 = MAX(FS(2), JS)
-            J1 = MIN(FE(2), JE)
+            j0 = max(fs(2), js)
+            j1 = MIN(fe(2), je)
 
-            K0 = MAX(FS(3), KS)
-            K1 = MIN(FE(3), KE)
+            k0 = max(fs(3), ks)
+            k1 = MIN(fe(3), ke)
 
-            ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
-            IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
+            ! determine data to be sent/received to/from process "p"
+            IF ( (k0 .le. k1) .and. (j0 .le. j1) ) THEN
 
-              CY = J1 + J0
-              CZ = K1 + K0
+              cy = j1 + j0
+              cz = k1 + k0
 
-              DO K = K0, K1
-                DO J = J0, J1
-                  SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
+              DO k = k0, k1
+                DO j = j0, j1
+                  sendbuf(cy - j, cz - k) = buffer(j, k)
                 ENDDO
               ENDDO
 
-              RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
-              RSTARTS   = [J0 - FS(2), K0 - FS(3)]
+              rsubsizes = [j1 - j0 + 1, k1 - k0 + 1]
+              rstarts   = [j0 - fs(2), k0 - fs(3)]
 
-              CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
-              CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
+              CALL mpi_type_create_subarray(2, rsizes, rsubsizes, rstarts, mpi_order_fortran, cplx_type, sendtypes(p), ierr)
+              CALL mpi_type_commit(sendtypes(p), ierr)
 
-              CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
-              CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+              CALL mpi_type_create_subarray(2, rsizes, rsubsizes, rstarts, mpi_order_fortran, cplx_type, recvtypes(p), ierr)
+              CALL mpi_type_commit(recvtypes(p), ierr)
 
-              SENDCOUNTS(P) = 1
-              RECVCOUNTS(P) = 1
+              sendcounts(p) = 1
+              recvcounts(p) = 1
 
             ENDIF
 
           ENDDO
 
-          CALL MPI_ALLTOALLW(SENDBUF, SENDCOUNTS, SDISPLS, SENDTYPES, BUFFER, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
+          CALL mpi_alltoallw(sendbuf, sendcounts, sdispls, sendtypes, buffer, recvcounts, rdispls, recvtypes, newcomm, ierr)
 
-          ! FREE RESOURCES
-          DO P = 0, NTASKS - 1
-            IF (SENDCOUNTS(P) .EQ. 1) THEN
-              CALL MPI_TYPE_FREE(SENDTYPES(P), IERR)
-              CALL MPI_TYPE_FREE(RECVTYPES(P), IERR)
+          ! free resources
+          DO p = 0, ntasks - 1
+            IF (sendcounts(p) .eq. 1) THEN
+              CALL mpi_type_free(sendtypes(p), ierr)
+              CALL mpi_type_free(recvtypes(p), ierr)
             ENDIF
           ENDDO
 
-          SENDCOUNTS = 0
-          RECVCOUNTS = 0
+          sendcounts = 0
+          recvcounts = 0
 
-          ! NOW EXCHANGE DATA IN THE BETA- AND DELTA-REGION
-          DO P = 0, NTASKS - 1
+          ! now exchange data in the beta- and delta-region
+          DO p = 0, ntasks - 1
 
-            L = NEW2WORLD(P)                                                              !< GLOBAL INDEX OF P-TH PROCESS
+            l = new2world(p)                                                              !< global index of p-th process
 
-            SENDTYPES(P) = COMPLEX_TYPE
-            RECVTYPES(P) = COMPLEX_TYPE
+            sendtypes(p) = cplx_type
+            recvtypes(p) = cplx_type
 
-            ! PROJECT POINTS OF PROCESS "P" INTO CONJUGATED FIELD.
-            IF (GS(3, L) .EQ. 1) THEN
+            ! project points of process "p" into conjugated field.
+            IF (gs(3, l) .eq. 1) THEN
 
-              JS = NPTS(2) - GE(2, L) + 2
-              JE = NPTS(2) - GS(2, L) + 2
+              js = npts(2) - ge(2, l) + 2
+              je = npts(2) - gs(2, l) + 2
 
-              KS = 1
-              KE = 1
+              ks = 1
+              ke = 1
 
-              J0 = MAX(FS(2), JS)
-              J1 = MIN(FE(2), JE)
+              j0 = max(fs(2), js)
+              j1 = MIN(fe(2), je)
 
-              K0 = MAX(FS(3), KS)
-              K1 = MIN(FE(3), KE)
+              k0 = max(fs(3), ks)
+              k1 = MIN(fe(3), ke)
 
-              ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
-              IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
+              ! determine data to be sent/received to/from process "p"
+              IF ( (k0 .le. k1) .and. (j0 .le. j1) ) THEN
 
-                RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
-                RSTARTS   = [J0 - FS(2), K0 - FS(3)]
+                rsubsizes = [j1 - j0 + 1, k1 - k0 + 1]
+                rstarts   = [j0 - fs(2), k0 - fs(3)]
 
-                CY = J1 + J0
-                CZ = K1 + K0
+                cy = j1 + j0
+                cz = k1 + k0
 
-                DO K = K0, K1
-                  DO J = J0, J1
-                    SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
+                DO k = k0, k1
+                  DO j = j0, j1
+                    sendbuf(cy - j, cz - k) = buffer(j, k)
                   ENDDO
                 ENDDO
 
-                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
-                CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
+                CALL mpi_type_create_subarray(2, rsizes, rsubsizes, rstarts, mpi_order_fortran, cplx_type, sendtypes(p), ierr)
+                CALL mpi_type_commit(sendtypes(p), ierr)
 
-                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
-                CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+                CALL mpi_type_create_subarray(2, rsizes, rsubsizes, rstarts, mpi_order_fortran, cplx_type, recvtypes(p), ierr)
+                CALL mpi_type_commit(recvtypes(p), ierr)
 
-                SENDCOUNTS(P) = 1
-                RECVCOUNTS(P) = 1
+                sendcounts(p) = 1
+                recvcounts(p) = 1
 
               ENDIF
 
             ENDIF
 
-            ! PROJECT POINTS OF PROCESS "P" INTO CONJUGATED FIELD.
-            IF (GS(2, L) .EQ. 1) THEN
+            ! project points of process "p" into conjugated field.
+            IF (gs(2, l) .eq. 1) THEN
 
-              JS = 1
-              JE = 1
+              js = 1
+              je = 1
 
-              KS = NPTS(3) - GE(3, L) + 2
-              KE = NPTS(3) - GS(3, L) + 2
+              ks = npts(3) - ge(3, l) + 2
+              ke = npts(3) - gs(3, l) + 2
 
-              J0 = MAX(FS(2), JS)
-              J1 = MIN(FE(2), JE)
+              j0 = max(fs(2), js)
+              j1 = MIN(fe(2), je)
 
-              K0 = MAX(FS(3), KS)
-              K1 = MIN(FE(3), KE)
+              k0 = max(fs(3), ks)
+              k1 = MIN(fe(3), ke)
 
-              ! DETERMINE DATA TO BE SENT/RECEIVED TO/FROM PROCESS "P"
-              IF ( (K0 .LE. K1) .AND. (J0 .LE. J1) ) THEN
+              ! determine data to be sent/received to/from process "p"
+              IF ( (k0 .le. k1) .and. (j0 .le. j1) ) THEN
 
-                RSUBSIZES = [J1 - J0 + 1, K1 - K0 + 1]
-                RSTARTS   = [J0 - FS(2), K0 - FS(3)]
+                rsubsizes = [j1 - j0 + 1, k1 - k0 + 1]
+                rstarts   = [j0 - fs(2), k0 - fs(3)]
 
-                CY = J1 + J0
-                CZ = K1 + K0
+                cy = j1 + j0
+                cz = k1 + k0
 
-                DO K = K0, K1
-                  DO J = J0, J1
-                    SENDBUF(CY - J, CZ - K) = BUFFER(J, K)
+                DO k = k0, k1
+                  DO j = j0, j1
+                    sendbuf(cy - j, cz - k) = buffer(j, k)
                   ENDDO
                 ENDDO
 
-                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, SENDTYPES(P), IERR)
-                CALL MPI_TYPE_COMMIT(SENDTYPES(P), IERR)
+                CALL mpi_type_create_subarray(2, rsizes, rsubsizes, rstarts, mpi_order_fortran, cplx_type, sendtypes(p), ierr)
+                CALL mpi_type_commit(sendtypes(p), ierr)
 
-                CALL MPI_TYPE_CREATE_SUBARRAY(2, RSIZES, RSUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, COMPLEX_TYPE, RECVTYPES(P), IERR)
-                CALL MPI_TYPE_COMMIT(RECVTYPES(P), IERR)
+                CALL mpi_type_create_subarray(2, rsizes, rsubsizes, rstarts, mpi_order_fortran, cplx_type, recvtypes(p), ierr)
+                CALL mpi_type_commit(recvtypes(p), ierr)
 
-                SENDCOUNTS(P) = 1
-                RECVCOUNTS(P) = 1
+                sendcounts(p) = 1
+                recvcounts(p) = 1
 
               ENDIF
 
@@ -2401,560 +2481,560 @@ if (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', MIN_EXTEN
 
           ENDDO
 
-          CALL MPI_ALLTOALLW(SENDBUF, SENDCOUNTS, SDISPLS, SENDTYPES, BUFFER, RECVCOUNTS, RDISPLS, RECVTYPES, NEWCOMM, IERR)
+          CALL mpi_alltoallw(sendbuf, sendcounts, sdispls, sendtypes, buffer, recvcounts, rdispls, recvtypes, newcomm, ierr)
 
-          ! FREE RESOURCES
-          DO P = 0, NTASKS - 1
-            IF (SENDCOUNTS(P) .EQ. 1) THEN
-              CALL MPI_TYPE_FREE(SENDTYPES(P), IERR)
-              CALL MPI_TYPE_FREE(RECVTYPES(P), IERR)
+          ! free resources
+          DO p = 0, ntasks - 1
+            IF (sendcounts(p) .eq. 1) THEN
+              CALL mpi_type_free(sendtypes(p), ierr)
+              CALL mpi_type_free(recvtypes(p), ierr)
             ENDIF
           ENDDO
 
-          SENDCOUNTS = 0
-          RECVCOUNTS = 0
+          sendcounts = 0
+          recvcounts = 0
 
-          ! REPLACE BUFFER ON THE LHS WITH SPEC ON THE NEXT 3 BLOCKS
-          ! TAKE COMPLEX CONJUGATE
-          ! DELTA*, GAMMA*, PHI*, EPSILON*
-          DO K = MAX(NYQUIST(3) + 1, FS(3)), FE(3)
-            DO J = FS(2), FE(2)
-              SPEC(I, J, K) = CONJG(BUFFER(J, K))
+          ! replace buffer on the lhs with spec on the next 3 blocks
+          ! take COMPLEX conjugate
+          ! delta*, GAMMA*, phi*, epsilon*
+          DO k = max(nyquist(3) + 1, fs(3)), fe(3)
+            DO j = fs(2), fe(2)
+              spec(i, j, k) = conjg(buffer(j, k))
             ENDDO
           ENDDO
 
-          ! BETA*
-          DO K = MAX(1, FS(3)), 1
-            DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
-              SPEC(I, J, K) = CONJG(BUFFER(J, K))
+          ! beta*
+          DO k = max(1, fs(3)), 1
+            DO j = max(nyquist(2) + 1, fs(2)), fe(2)
+              spec(i, j, k) = conjg(buffer(j, k))
             ENDDO
           ENDDO
 
-          ! THETA*
-          DO K = MAX(NYQUIST(3), FS(3)), MIN(NYQUIST(3), FE(3))
-            DO J = MAX(NYQUIST(2) + 1, FS(2)), FE(2)
-              SPEC(I, J, K) = CONJG(BUFFER(J, K))
+          ! theta*
+          DO k = max(nyquist(3), fs(3)), MIN(nyquist(3), fe(3))
+            DO j = max(nyquist(2) + 1, fs(2)), fe(2)
+              spec(i, j, k) = conjg(buffer(j, k))
             ENDDO
           ENDDO
 
-        END SUBROUTINE EXCHANGE_CONJG
+        END SUBROUTINE exchange_conjg
 
-    END SUBROUTINE ENFORCE_SYMMETRY
+    END SUBROUTINE enforce_symmetry
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE GATHER_DATA(COMM, I0, SPEC, JMAP, KMAP, BUFFER)
+    SUBROUTINE gather_data(comm, i0, spec, jmap, kmap, buffer)
 
-      ! GATHER DATA FROM ALL PROCESSES IN A COMMUNICATOR IN ROOT PROCESS. GLOBAL INDICES OF GATHERED DATA ARE RETURNED AS WELL.
+      ! gather data from ALL processes in a communicator in root process. global indices of gathered data are returned as well.
 
-      INTEGER(IPP),                                INTENT(IN)  :: COMM                             !< MPI COMMUNICATOR
-      INTEGER(IPP),                                INTENT(IN)  :: I0                               !< LOCAL INDEX
-      COMPLEX(FPP),              DIMENSION(:,:,:), INTENT(IN)  :: SPEC                             !< SPECTRUM
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: JMAP, KMAP                       !< GLOBAL INDICES OF COLLECTED DATA
-      COMPLEX(FPP), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: BUFFER                           !< COLLECTED DATA
-      COMPLEX(FPP), ALLOCATABLE, DIMENSION(:,:)                :: DUM                              !< LOCAL BUFFER
-      INTEGER(IPP)                                             :: C, J, K, P                       !< COUNTERS
-      INTEGER(IPP)                                             :: NPTS
-      INTEGER(IPP)                                             :: NTASKS, RANK, IERR               !< MPI STUFF
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                  :: COMM2GLOBAL, RECVCOUNTS, DISPLS  !< MPI STUFF
+      INTEGER(f_int),                                INTENT(IN)  :: comm                             !< mpi communicator
+      INTEGER(f_int),                                INTENT(IN)  :: i0                               !< local index
+      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(IN)  :: spec                             !< spectrum
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: jmap, kmap                       !< global indices of collected data
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: buffer                           !< collected data
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:)                :: dum                              !< local buffer
+      INTEGER(f_int)                                             :: c, j, k, p                       !< counters
+      INTEGER(f_int)                                             :: npts
+      INTEGER(f_int)                                             :: ntasks, rank, ierr               !< mpi stuff
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                  :: comm2global, recvcounts, displs  !< mpi stuff
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL MPI_COMM_SIZE(COMM, NTASKS, IERR)
+      CALL mpi_comm_size(comm, ntasks, ierr)
 
-      CALL MPI_COMM_RANK(COMM, RANK, IERR)
+      CALL mpi_comm_rank(comm, rank, ierr)
 
-      ALLOCATE(COMM2GLOBAL(0:NTASKS-1))
+      ALLOCATE(comm2global(0:ntasks-1))
 
-      ! COMM-RANK TO GLOBAL-RANK MAPPING
-      COMM2GLOBAL(RANK) = WORLD_RANK
+      ! comm-rank to global-rank mapping
+      comm2global(rank) = world_rank
 
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_INTEGER, COMM2GLOBAL, 1, MPI_INTEGER, COMM, IERR)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_integer, comm2global, 1, mpi_integer, comm, ierr)
 
-      ALLOCATE(RECVCOUNTS(0:NTASKS-1), DISPLS(0:NTASKS-1))
+      ALLOCATE(recvcounts(0:ntasks-1), displs(0:ntasks-1))
 
-      RECVCOUNTS(RANK) = (GE(2, WORLD_RANK) - GS(2, WORLD_RANK) + 1) * (GE(3, WORLD_RANK) - GS(3, WORLD_RANK) + 1)
+      recvcounts(rank) = (ge(2, world_rank) - gs(2, world_rank) + 1) * (ge(3, world_rank) - gs(3, world_rank) + 1)
 
-      ! NUMBER OF POINTS TO BE RECEIVED BY EACH PROCESS IN "COMM" COMMUNICATOR
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_INTEGER, RECVCOUNTS, 1, MPI_INTEGER, COMM, IERR)
+      ! number of points to be received by each process in "comm" communicator
+      CALL mpi_allgather(mpi_in_place, 0, mpi_integer, recvcounts, 1, mpi_integer, comm, ierr)
 
-      ! TOTAL NUMBER OF POINTS TO BE RECEIVED
-      NPTS = SUM(RECVCOUNTS)
+      ! total number of points to be received
+      npts = SUM(recvcounts)
 
-      ALLOCATE(BUFFER(NPTS), JMAP(NPTS), KMAP(NPTS))
+      ALLOCATE(buffer(npts), jmap(npts), kmap(npts))
 
-      ! DETERMINE THEIR RELATIVE DISPLACEMENT
-      DISPLS(0) = 0
+      ! determine their relative displacement
+      displs(0) = 0
 
-      DO P = 1, NTASKS - 1
-        DISPLS(P) = DISPLS(P - 1) + RECVCOUNTS(P - 1)
+      DO p = 1, ntasks - 1
+        displs(p) = displs(p - 1) + recvcounts(p - 1)
       ENDDO
 
-      ALLOCATE(DUM(SIZE(SPEC, 2), SIZE(SPEC, 3)))
+      ALLOCATE(dum(SIZE(spec, 2), SIZE(spec, 3)))
 
-      ! PREPARE DATA TO BE TRANSFERRED
-      DO K = 1, SIZE(SPEC, 3)
-        DO J = 1, SIZE(SPEC, 2)
-          DUM(J, K) = SPEC(I0, J, K)
+      ! prepare data to be transferred
+      DO k = 1, SIZE(spec, 3)
+        DO j = 1, SIZE(spec, 2)
+          dum(j, k) = spec(i0, j, k)
         ENDDO
       ENDDO
 
-      ! COLLECT DATA INTO "BUFFER"
-      CALL MPI_GATHERV(DUM, SIZE(DUM), COMPLEX_TYPE, BUFFER, RECVCOUNTS, DISPLS, COMPLEX_TYPE, 0, COMM, IERR)
+      ! collect data into "buffer"
+      CALL mpi_gatherv(dum, SIZE(dum), cplx_type, buffer, recvcounts, displs, cplx_type, 0, comm, ierr)
 
-      DEALLOCATE(DUM, DISPLS, RECVCOUNTS)
+      DEALLOCATE(dum, displs, recvcounts)
 
-      C = 0
+      c = 0
 
-      ! CREATE MAPS FOR "J" AND "K" INDICES FOR ALL POINTS IN "BUFFER"
-      DO P = 0, NTASKS - 1
-        DO K = GS(3, COMM2GLOBAL(P)), GE(3, COMM2GLOBAL(P))
-          DO J = GS(2, COMM2GLOBAL(P)), GE(2, COMM2GLOBAL(P))
-            C       = C + 1
-            JMAP(C) = J
-            KMAP(C) = K
+      ! create maps for "j" and "k" indices for ALL points in "buffer"
+      DO p = 0, ntasks - 1
+        DO k = gs(3, comm2global(p)), ge(3, comm2global(p))
+          DO j = gs(2, comm2global(p)), ge(2, comm2global(p))
+            c       = c + 1
+            jmap(c) = j
+            kmap(c) = k
           ENDDO
         ENDDO
       ENDDO
 
-      DEALLOCATE(COMM2GLOBAL)
+      DEALLOCATE(comm2global)
 
-    END SUBROUTINE GATHER_DATA
+    END SUBROUTINE gather_data
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXCHANGE_HALO(CARTOPO, BUFFER)
+    SUBROUTINE exchange_halo(cartopo, buffer)
 
-      ! EXCHANGE HALO BETWEEN NEIGHBORING PROCESSES. THE HALO IS REPRESENTED BY THE FIRST COLUMN/ROW (ALONG X/Y, RESPECTIVELY) OF
-      ! "BUFFER"
+      ! exchange halo between neighboring processes. the halo is represented by the first column/row (along x/y, respectively) of
+      ! "buffer"
 
-      INTEGER(IPP),                   INTENT(IN)    :: CARTOPO                         !< HANDLE TO CARTESIAN TOPOLOGY
-      REAL(FPP),    DIMENSION(:,:,:), INTENT(INOUT) :: BUFFER                          !< RANDOM FIELD
-      INTEGER(IPP)                                  :: I
-      INTEGER(IPP)                                  :: NX, NY, NZ                       !< POINTS ALONG X-/Y-DIRECTION
-      INTEGER(IPP)                                  :: IERR, NEG, POS
-      INTEGER(IPP)                                  :: FROM_NEG, TO_POS
-      INTEGER(IPP), DIMENSION(3)                    :: SIZES, SUBSIZES, RSTARTS, SSTARTS
+      INTEGER(f_int),                   INTENT(IN)    :: cartopo                         !< handle to cartesian topology
+      REAL(f_real),    DIMENSION(:,:,:), INTENT(INOUT) :: buffer                          !< random field
+      INTEGER(f_int)                                  :: i
+      INTEGER(f_int)                                  :: nx, ny, nz                       !< points along x-/y-direction
+      INTEGER(f_int)                                  :: ierr, neg, pos
+      INTEGER(f_int)                                  :: from_neg, to_pos
+      INTEGER(f_int), DIMENSION(3)                    :: sizes, subsizes, rstarts, sstarts
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! POINTS ALONG X AND Y WITHOUT EXTRA ROW/COLUMN
-      NX = SIZE(BUFFER, 1) - 1
-      NY = SIZE(BUFFER, 2) - 1
-      NZ = SIZE(BUFFER, 3) - 1
+      ! points along x and y without extra row/column
+      nx = SIZE(buffer, 1) - 1
+      ny = SIZE(buffer, 2) - 1
+      nz = SIZE(buffer, 3) - 1
 
-      ! TOTAL SIZE OF "BUFFER" WITH EXTRA ROW/COLUMN FOR HALO EXCHANGE
-      SIZES = [NX + 1, NY + 1, NZ + 1]
+      ! total SIZE of "buffer" with extra row/column for halo exchange
+      sizes = [nx + 1, ny + 1, nz + 1]
 
-      ! EXCHANGE IN THE X-, Y-, Z-DIRECTION
-      DO I = 0, 2
+      ! exchange in the x-, y-, z-direction
+      DO i = 0, 2
 
-        ! DETERMINE NEIGHBORS FOR A POSITIVE UNITARY SHIFT ALONG CURRENT DIRECTION
-        CALL MPI_CART_SHIFT(CARTOPO, I, 1, NEG, POS, IERR)
+        ! determine neighbors for a positive unitary shift along current direction
+        CALL mpi_cart_shift(cartopo, i, 1, neg, pos, ierr)
 
-        IF (I .EQ. 0) THEN
-          SUBSIZES = [1, NY, NZ]            !< SHAPE OF HALO
-          RSTARTS  = [0, 1, 1]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
-          SSTARTS  = [NX, 1, 1]             !< INITIAL ADDRESS FOR DATA TO BE SENT
-        ELSEIF (I .EQ. 1) THEN
-          SUBSIZES = [NX + 1, 1, NZ]        !< SHAPE OF HALO
-          RSTARTS  = [0, 0, 1]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
-          SSTARTS  = [0, NY, 1]             !< INITIAL ADDRESS FOR DATA TO BE SENT
+        IF (i .eq. 0) THEN
+          subsizes = [1, ny, nz]            !< shape of halo
+          rstarts  = [0, 1, 1]              !< initial address for data to be received
+          sstarts  = [nx, 1, 1]             !< initial address for data to be sent
+        elseif (i .eq. 1) THEN
+          subsizes = [nx + 1, 1, nz]        !< shape of halo
+          rstarts  = [0, 0, 1]              !< initial address for data to be received
+          sstarts  = [0, ny, 1]             !< initial address for data to be sent
         ELSE
-          SUBSIZES = [NX + 1, NY + 1, 1]    !< SHAPE OF HALO
-          RSTARTS  = [0, 0, 0]              !< INITIAL ADDRESS FOR DATA TO BE RECEIVED
-          SSTARTS  = [0, 0, NZ]             !< INITIAL ADDRESS FOR DATA TO BE SENT
+          subsizes = [nx + 1, ny + 1, 1]    !< shape of halo
+          rstarts  = [0, 0, 0]              !< initial address for data to be received
+          sstarts  = [0, 0, nz]             !< initial address for data to be sent
         ENDIF
 
-        ! DATA TO BE RECEIVED
-        CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, RSTARTS, MPI_ORDER_FORTRAN, REAL_TYPE, FROM_NEG, IERR)
-        CALL MPI_TYPE_COMMIT(FROM_NEG, IERR)
+        ! data to be received
+        CALL mpi_type_create_subarray(3, sizes, subsizes, rstarts, mpi_order_fortran, f_real, from_neg, ierr)
+        CALL mpi_type_commit(from_neg, ierr)
 
-        ! DATA TO BE SENT
-        CALL MPI_TYPE_CREATE_SUBARRAY(3, SIZES, SUBSIZES, SSTARTS, MPI_ORDER_FORTRAN, REAL_TYPE, TO_POS, IERR)
-        CALL MPI_TYPE_COMMIT(TO_POS, IERR)
+        ! data to be sent
+        CALL mpi_type_create_subarray(3, sizes, subsizes, sstarts, mpi_order_fortran, f_real, to_pos, ierr)
+        CALL mpi_type_commit(to_pos, ierr)
 
-        ! EXCHANGE HALO DATA WITH NEIGHBORS. SINCE WE OPERATE ON FIRST AND LAST COLUMNS, SEND "BUFFER" IS DISJOINT FROM RECV "BUFFER"
-        CALL MPI_SENDRECV(BUFFER, 1, TO_POS, POS, 0, BUFFER, 1, FROM_NEG, NEG, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE, IERR)
+        ! exchange halo data with neighbors. since we operate on first and last columns, send "buffer" is disjoint from recv "buffer"
+        CALL mpi_sendrecv(buffer, 1, to_pos, pos, 0, buffer, 1, from_neg, neg, 0, mpi_comm_world, mpi_status_ignore, ierr)
 
-        ! REALEASE RESOURCES
-        CALL MPI_TYPE_FREE(FROM_NEG, IERR)
-        CALL MPI_TYPE_FREE(TO_POS, IERR)
+        ! realease resources
+        CALL mpi_type_free(from_neg, ierr)
+        CALL mpi_type_free(to_pos, ierr)
 
       ENDDO
 
-    END SUBROUTINE EXCHANGE_HALO
+    END SUBROUTINE exchange_halo
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INTERPOLATE(PMAX, XYZ, DELTA, V)
+    SUBROUTINE interpolate(pmax, xyz, delta, v)
 
       !
 
-      INTEGER(IPP),                   INTENT(IN)  :: PMAX
-      REAL(FPP),    DIMENSION(:,:),   INTENT(IN)  :: XYZ                          !< POINTS LOCATION
-      REAL(FPP),    DIMENSION(:,:,:), INTENT(IN)  :: DELTA                            !< RANDOM FIELD
-      REAL(FPP),    DIMENSION(:),     INTENT(OUT) :: V                            !< INTERPOLATED VALUES
-      INTEGER(IPP)                                :: P                                !< COUNTERS
-      INTEGER(IPP)                                :: I0, J0, K0                       !< INDICES
-      REAL(FPP)                                   :: I, J, K
-      REAL(FPP)                                   :: PX, PY, PZ, IPX, IPY             !< INTERPOLATION STUFF
-      REAL(FPP)                                   :: A, B                             !< INTERPOLATION STUFF
-      REAL(FPP),    DIMENSION(2,2)                :: F                                !< INTERPOLATION STUFF
+      INTEGER(f_int),                   INTENT(IN)  :: pmax
+      REAL(f_real),    DIMENSION(:,:),   INTENT(IN)  :: xyz                          !< points location
+      REAL(f_real),    DIMENSION(:,:,:), INTENT(IN)  :: delta                            !< random field
+      REAL(f_real),    DIMENSION(:),     INTENT(OUT) :: v                            !< interpolated values
+      INTEGER(f_int)                                :: p                                !< counters
+      INTEGER(f_int)                                :: i0, j0, k0                       !< indices
+      REAL(f_real)                                   :: i, j, k
+      REAL(f_real)                                   :: px, py, pz, ipx, ipy             !< interpolation stuff
+      REAL(f_real)                                   :: a, b                             !< interpolation stuff
+      REAL(f_real),    DIMENSION(2,2)                :: f                                !< interpolation stuff
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! LOOP OVER POINTS
-      DO P = 1, PMAX
+      ! loop over points
+      DO p = 1, pmax
 
-        I = XYZ(1, P)
-        J = XYZ(2, P)
-        K = XYZ(3, P)
+        i = xyz(1, p)
+        j = xyz(2, p)
+        k = xyz(3, p)
 
-        ! I0 = FLOOR(I)
-        ! J0 = FLOOR(J)
-        ! K0 = FLOOR(K)
+        ! i0 = FLOOR(i)
+        ! j0 = FLOOR(j)
+        ! k0 = FLOOR(k)
         !
-        ! F(:, 1) = DELTA(I0:I0 + 1, J0, K0)
-        ! F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0)
+        ! f(:, 1) = delta(i0:i0 + 1, j0, k0)
+        ! f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0)
         !
-        ! PX = I - I0
-        ! PY = J - J0
+        ! px = i - i0
+        ! py = j - j0
         !
-        ! IPX = (1._FPP - PX)
-        ! IPY = (1._FPP - PY)
+        ! ipx = (1._f_real - px)
+        ! ipy = (1._f_real - py)
         !
-        ! ! BILINEAR INTERPOLATION AT LEVEL 1
-        ! A = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
+        ! ! bilinear interpolation at level 1
+        ! a = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
         !
-        ! F(:, 1) = DELTA(I0:I0 + 1, J0, K0 + 1)
-        ! F(:, 2) = DELTA(I0:I0 + 1, J0 + 1, K0 + 1)
+        ! f(:, 1) = delta(i0:i0 + 1, j0, k0 + 1)
+        ! f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0 + 1)
         !
-        ! ! BILINEAR INTERPOLATION AT LEVEL 2
-        ! B = F(1, 1) * IPX * IPY + F(2, 1) * PX * IPY + F(1, 2) * IPX * PY + F(2, 2) * PX * PY
+        ! ! bilinear interpolation at level 2
+        ! b = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
         !
-        ! PZ = K - K0
+        ! pz = k - k0
         !
-        ! ! LINEAR INTERPOLATED BETWEEN LEVEL 1 AND 2
-        ! V(P) = A * (1._FPP - PZ) + B * PZ
+        ! ! linear interpolated between level 1 and 2
+        ! v(p) = a * (1._f_real - pz) + b * pz
 
-        I0 = NINT(I)
-        J0 = NINT(J)
-        K0 = NINT(K)
+        i0 = NINT(i)
+        j0 = NINT(j)
+        k0 = NINT(k)
 
-        V(P) = DELTA(I0, J0, K0)
+        v(p) = delta(i0, j0, k0)
 
       ENDDO
 
-    END SUBROUTINE INTERPOLATE
+    END SUBROUTINE interpolate
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE COORDS2INDEX(NPTS, DIMS, COORDS, FS, FE)
+    SUBROUTINE coords2index(npts, dims, coords, fs, fe)
 
-      ! MAP PROCESS COORDINATES INTO FIRST/LAST INDICES
+      ! map process coordinates into first/last indices
 
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: NPTS                        !< POINTS ALONG EACH AXIS
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: DIMS                        !< NUMBER OF PROCESSES ALONG EACH AXIS
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: COORDS                      !< CALLING PROCESS COORDINATES
-      INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: FS, FE                      !< RESULTING FIRST/LAST INDICES
-      INTEGER(IPP)                            :: I                           !< COUNTER
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: npts                        !< points along each axis
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: dims                        !< number of processes along each axis
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: coords                      !< calling process coordinates
+      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: fs, fe                      !< resulting first/last indices
+      INTEGER(f_int)                            :: i                           !< counter
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      DO I = 1, 3
-        FS(I) = 1 + INT( REAL(NPTS(I)) / REAL(DIMS(I)) * REAL(COORDS(I)) )
-        FE(I) = INT( REAL(NPTS(I)) / REAL(DIMS(I)) * REAL(COORDS(I) + 1) )
+      DO i = 1, 3
+        fs(i) = 1 + int( REAL(npts(i)) / REAL(dims(i)) * REAL(coords(i)) )
+        fe(i) = int( REAL(npts(i)) / REAL(dims(i)) * REAL(coords(i) + 1) )
       ENDDO
 
-    END SUBROUTINE COORDS2INDEX
+    END SUBROUTINE coords2index
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE BEST_CONFIG(DIMS)
+    SUBROUTINE best_config(dims)
 
-      ! COMPUTE BEST GRID OF PROCESSES
+      ! compute best grid of processes
 
-      INTEGER(IPP),              DIMENSION(3), INTENT(OUT) :: DIMS
-      !INTEGER(IPP),                            INTENT(OUT) :: NITER
+      INTEGER(f_int),              DIMENSION(3), INTENT(OUT) :: dims
+      !INTEGER(f_int),                            INTENT(OUT) :: niter
 
-      INTEGER(IPP)                                         :: I, J, K, L, C
-      INTEGER(IPP)                                         :: N2, N3 !, N
-      INTEGER(IPP)                                         :: A, B
-      INTEGER(IPP),              DIMENSION(3)              :: V1, V2
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: LIST
+      INTEGER(f_int)                                         :: i, j, k, l, c
+      INTEGER(f_int)                                         :: n2, n3 !, n
+      INTEGER(f_int)                                         :: a, b
+      INTEGER(f_int),              DIMENSION(3)              :: v1, v2
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: fact3, fact2
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: list
 
-      REAL(FPP) :: N, NITER
+      REAL(f_real) :: n, niter
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      !NITER = HUGE(1)
-      NITER = HUGE(1._FPP)
+      !niter = HUGE(1)
+      niter = HUGE(1._f_real)
 
-      C = 0
+      c = 0
 
-      ! FACTORISE NUMBER OF AVAILABLE PROCESSES
-      CALL FACTORIZATION(WORLD_SIZE, FACT3)
+      ! factorise number of available processes
+      CALL factorization(world_size, fact3)
 
-      N3 = SIZE(FACT3, 2)
+      n3 = SIZE(fact3, 2)
 
-      ALLOCATE(LIST(3, N3 * 10))
+      ALLOCATE(list(3, n3 * 10))
 
-      LIST(:,:) = 0
+      list(:,:) = 0
 
-      ! LOOP OVER FACTORISED PROCESSES
-      DO L = 1, N3
+      ! loop over factorised processes
+      DO l = 1, n3
 
-        DO K = 1, 2
+        DO k = 1, 2
 
-          IF (K .EQ. 1) THEN
-            A = FACT3(1, L)
-            B = FACT3(2, L)
+          IF (k .eq. 1) THEN
+            a = fact3(1, l)
+            b = fact3(2, l)
           ELSE
-            B = FACT3(1, L)
-            A = FACT3(2, L)
+            b = fact3(1, l)
+            a = fact3(2, l)
           ENDIF
 
-          CALL FACTORIZATION(B, FACT2)
+          CALL factorization(b, fact2)
 
-          N2 = SIZE(FACT2, 2)
+          n2 = SIZE(fact2, 2)
 
-          DO J = 1, N2
+          DO j = 1, n2
 
-            V1 = [A, FACT2(:, J)]
+            v1 = [a, fact2(:, j)]
 
-            ! SKIP TO NEXT PROCESSES GRID IF ALREADY ANALYSED
-            IF (MATCH(V1, C, LIST) .EQV. .TRUE.) CYCLE
+            ! skip to next processes grid IF already analysed
+            IF (match(v1, c, list) .eqv. .true.) CYCLE
 
-            C = C + 1
+            c = c + 1
 
-            ! ADD TO LIST
-            LIST(:, C) = V1
+            ! add to list
+            list(:, c) = v1
 
-            DO I = 0, 2
+            DO i = 0, 2
 
-              V1 = CSHIFT(V1, 1)
+              v1 = cshift(v1, 1)
 
-              CALL TEST_CONFIG(V1, N)
+              CALL test_config(v1, n)
 
-              IF (N .LT. NITER) THEN
-                DIMS  = V1
-                NITER = N
+              IF (n .lt. niter) THEN
+                dims  = v1
+                niter = n
               ENDIF
 
-              V2 = [V1(1), V1(3), V1(2)]
+              v2 = [v1(1), v1(3), v1(2)]
 
-              CALL TEST_CONFIG(V2, N)
+              CALL test_config(v2, n)
 
-              IF (N .LT. NITER) THEN
-                DIMS  = V2
-                NITER = N
+              IF (n .lt. niter) THEN
+                dims  = v2
+                niter = n
               ENDIF
 
             ENDDO
-            ! END PERMUTATIONS
+            ! END permutations
 
           ENDDO
-          ! END LOOP OVER FACTOR PAIRS FOR "A/B"
+          ! END loop over factor pairs for "a/b"
 
         ENDDO
-        ! END LOOP OVER "A/B"
+        ! END loop over "a/b"
 
       ENDDO
-      ! END LOOP OVER FACTOR PAIRS FOR "WORLD_SIZE"
+      ! END loop over factor pairs for "world_size"
 
-      DEALLOCATE(FACT3, FACT2, LIST)
+      DEALLOCATE(fact3, fact2, list)
 
       !-----------------------------------------------------------------------------------------------------------------------------
       !-----------------------------------------------------------------------------------------------------------------------------
 
       CONTAINS
 
-      LOGICAL FUNCTION MATCH(VEC, IMAX, LIST)
+      LOGICAL FUNCTION match(vec, imax, list)
 
-        INTEGER(IPP), DIMENSION(3),   INTENT(IN) :: VEC
-        INTEGER(IPP),                 INTENT(IN) :: IMAX
-        INTEGER(IPP), DIMENSION(:,:), INTENT(IN) :: LIST
-        INTEGER(IPP)                             :: I
+        INTEGER(f_int), DIMENSION(3),   INTENT(IN) :: vec
+        INTEGER(f_int),                 INTENT(IN) :: imax
+        INTEGER(f_int), DIMENSION(:,:), INTENT(IN) :: list
+        INTEGER(f_int)                             :: i
 
         !---------------------------------------------------------------------------------------------------------------------------
 
-        MATCH = .FALSE.
+        match = .false.
 
-        DO I = 1, IMAX
-          MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))
-          IF (MATCH .EQV. .TRUE.) EXIT
+        DO i = 1, imax
+          match = ANY(v1(1) .eq. list(:, i)) .and. ANY(v1(2) .eq. list(:, i)) .and. ANY(v1(3) .eq. list(:, i))
+          IF (match .eqv. .true.) exit
         ENDDO
 
-      END FUNCTION MATCH
+      END FUNCTION match
 
-    END SUBROUTINE BEST_CONFIG
+    END SUBROUTINE best_config
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! SUBROUTINE TEST_CONFIG(DIMS, NITER)
+    ! SUBROUTINE test_config(dims, niter)
     !
-    !   INTEGER(IPP),              DIMENSION(3),             INTENT(IN)  :: DIMS
-    !   INTEGER(IPP),                                        INTENT(OUT) :: NITER
-    !   INTEGER(IPP)                                                     :: I                            !< COUNTER
-    !   INTEGER(IPP)                                                     :: IERR, CARTOPO
-    !   INTEGER(IPP),              DIMENSION(3)                          :: LS, LE
-    !   INTEGER(IPP),              DIMENSION(3)                          :: COORDS
-    !   INTEGER(IPP),              DIMENSION(0:WORLD_SIZE-1)             :: COMPLETED, ISBUSY
-    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)                          :: BUFFER
+    !   INTEGER(f_int),              DIMENSION(3),             INTENT(IN)  :: dims
+    !   INTEGER(f_int),                                        INTENT(OUT) :: niter
+    !   INTEGER(f_int)                                                     :: i                            !< counter
+    !   INTEGER(f_int)                                                     :: ierr, cartopo
+    !   INTEGER(f_int),              DIMENSION(3)                          :: ls, le
+    !   INTEGER(f_int),              DIMENSION(3)                          :: coords
+    !   INTEGER(f_int),              DIMENSION(0:world_size-1)             :: completed, isbusy
+    !   INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                          :: buffer
     !
     !   !-----------------------------------------------------------------------------------------------------------------------------
     !
-    !   ! CREATE TOPOLOGY
-    !   CALL MPI_CART_CREATE(MPI_COMM_WORLD, NDIMS, DIMS, ISPERIODIC, REORDER, CARTOPO, IERR)
+    !   ! create topology
+    !   CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
     !
-    !   ! DO I = 0, WORLD_SIZE - 1
-    !   !   CALL MPI_CART_COORDS(CARTOPO, I, NDIMS, COORDS, IERR)
-    !   !   CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
-    !   !   GS(:, I) = LS
-    !   !   GE(:, I) = LE
+    !   ! DO i = 0, world_size - 1
+    !   !   CALL mpi_cart_coords(cartopo, i, ndims, coords, ierr)
+    !   !   CALL coords2index(npts, dims, coords, ls, le)
+    !   !   gs(:, i) = ls
+    !   !   ge(:, i) = le
     !   ! ENDDO
     !
-    !   ! RETURN PROCESS COORDINATES IN CURRENT TOPOLOGY
-    !   CALL MPI_CART_COORDS(CARTOPO, WORLD_RANK, NDIMS, COORDS, IERR)
+    !   ! return process coordinates in current topology
+    !   CALL mpi_cart_coords(cartopo, world_rank, ndims, coords, ierr)
     !
-    !   ! RETURN FIRST/LAST-INDEX ("LS"/"LE") ALONG EACH DIRECTION FOR CALLING PROCESS. NOTE: FIRST POINT HAS ALWAYS INDEX EQUAL TO 1.
-    !   CALL COORDS2INDEX(NPTS, DIMS, COORDS, LS, LE)
+    !   ! return first/last-index ("ls"/"le") along each direction for calling process. note: first point has always index equal to 1.
+    !   CALL coords2index(npts, dims, coords, ls, le)
     !
-    !   GS(:, WORLD_RANK) = LS
-    !   GE(:, WORLD_RANK) = LE
+    !   gs(:, world_rank) = ls
+    !   ge(:, world_rank) = le
     !
-    !   ! MAKE ALL PROCESSES AWARE OF GLOBAL INDICES ALONG EACH AXIS
-    !   CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-    !   CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+    !   ! make ALL processes aware of global indices along each axis
+    !   CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
+    !   CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
     !
-    !   ! INITIALISE LIST WITH PROCESSES HAVING THEIR POINTS ASSIGNED
-    !   COMPLETED(:) = 0
+    !   ! initialise list with processes having their points assigned
+    !   completed(:) = 0
     !
-    !   NITER = 0
+    !   niter = 0
     !
-    !   ! CYCLE UNTIL ALL PROCESSES ARE COMPLETED
-    !   DO WHILE(ANY(COMPLETED .EQ. 0))
+    !   ! CYCLE until ALL processes are completed
+    !   DO while(ANY(completed .eq. 0))
     !
-    !     ! RESET "BUSY PROCESS" FLAG
-    !     ISBUSY(:) = 0
+    !     ! reset "busy process" flag
+    !     isbusy(:) = 0
     !
-    !     ! CREATE AS MANY COMMUNICATORS AS POSSIBLE
-    !     DO I = 0, WORLD_SIZE - 1
+    !     ! create as many communicators as possible
+    !     DO i = 0, world_size - 1
     !
-    !       IF (COMPLETED(I) .EQ. 0) THEN
+    !       IF (completed(i) .eq. 0) THEN
     !
-    !         ! PRODUCE A TENTATIVE LIST OF PROCESSES THAT MAY JOIN THE NEW COMMUNICATOR
-    !         CALL FIND_BUDDIES(I, BUFFER)
+    !         ! produce a tentative list of processes that may join the new communicator
+    !         CALL find_buddies(i, buffer)
     !
-    !         ! BUILD NEW COMMUNICATOR ONLY IF ALL INVOLVED PROCESSES ARE NOT YET PART OF ANOTHER COMMUNICATOR
-    !         IF (ALL(ISBUSY(BUFFER) .EQ. 0)) THEN
+    !         ! build new communicator only IF ALL involved processes are not yet part of another communicator
+    !         IF (ALL(isbusy(buffer) .eq. 0)) THEN
     !
-    !           ! SET PROCESSES BELONGING TO NEW COMMUNICATOR AS BUSY
-    !           ISBUSY(BUFFER) = 1
+    !           ! set processes belonging to new communicator as busy
+    !           isbusy(buffer) = 1
     !
-    !           ! SET I-TH PROCESS AS COMPLETED
-    !           COMPLETED(I) = 1
+    !           ! set i-th process as completed
+    !           completed(i) = 1
     !
     !         ENDIF
     !
-    !         DEALLOCATE(BUFFER)
+    !         DEALLOCATE(buffer)
     !
     !       ENDIF
     !
     !     ENDDO
     !
-    !     NITER = NITER + 1
+    !     niter = niter + 1
     !
     !   ENDDO
     !
-    !   CALL MPI_COMM_FREE(CARTOPO, IERR)
+    !   CALL mpi_comm_free(cartopo, ierr)
     !
-    ! END SUBROUTINE TEST_CONFIG
+    ! END SUBROUTINE test_config
 
-    SUBROUTINE TEST_CONFIG(DIMS, MEASURE)
+    SUBROUTINE test_config(dims, measure)
 
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: DIMS
-      REAL(FPP),                  INTENT(OUT) :: MEASURE
-      REAL(FPP),    DIMENSION(3)              :: SIDE
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: dims
+      REAL(f_real),                  INTENT(OUT) :: measure
+      REAL(f_real),    DIMENSION(3)              :: side
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      SIDE = REAL(NPTS, FPP) / REAL(DIMS, FPP)
+      side = REAL(npts, f_real) / REAL(dims, f_real)
 
-      MEASURE = ABS(SIDE(1) - SIDE(2)) + ABS(SIDE(1) - SIDE(3)) + ABS(SIDE(2) - SIDE(3))
+      measure = abs(side(1) - side(2)) + abs(side(1) - side(3)) + abs(side(2) - side(3))
 
-    END SUBROUTINE TEST_CONFIG
+    END SUBROUTINE test_config
 
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE FACTORIZATION(N, FACTORS)
+    SUBROUTINE factorization(n, factors)
 
-      ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
+      ! factorise INTEGER "n" based on trial division method
 
-      INTEGER(IPP),                              INTENT(IN)  :: N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: FACTORS
-      INTEGER(IPP)                                           :: I, C, S
-      INTEGER(IPP)                                           :: X
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)              :: BUFFER
+      INTEGER(f_int),                              INTENT(IN)  :: n
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: factors
+      INTEGER(f_int)                                           :: i, c, s
+      INTEGER(f_int)                                           :: x
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)              :: buffer
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! MAX POSSIBLE FACTOR
-      S = FLOOR(SQRT(REAL(N, FPP)))
+      ! max possible factor
+      s = FLOOR(SQRT(REAL(n, f_real)))
 
-      ALLOCATE(BUFFER(2, S))
+      ALLOCATE(buffer(2, s))
 
-      BUFFER(:,:) = 0
+      buffer(:,:) = 0
 
-      ! TEST FACTORS
-      DO I = 1, S
+      ! test factors
+      DO i = 1, s
 
-        X = N / I
+        x = n / i
 
-        IF (MOD(N, I) .EQ. 0) THEN
-          BUFFER(1, I) = I                          !< ADD FACTOR ...
-          BUFFER(2, I) = X                          !< ... AND ITS COMPANION
+        IF (MOD(n, i) .eq. 0) THEN
+          buffer(1, i) = i                          !< add factor ...
+          buffer(2, i) = x                          !< ... and its companion
         ENDIF
 
       ENDDO
 
-      ! ACTUAL FACTORS FOUND
-      I = COUNT(BUFFER(1, :) .NE. 0)
+      ! actual factors found
+      i = COUNT(buffer(1, :) .ne. 0)
 
-      ALLOCATE(FACTORS(2, I))
+      ALLOCATE(factors(2, i))
 
-      ! COPY FACTORS TO OUTPUT ARRAY
-      C = 0
-      DO I = 1, S
-        IF (BUFFER(1, I) .NE. 0) THEN
-          C = C + 1
-          FACTORS(:, C) = BUFFER(:, I)
+      ! copy factors to output array
+      c = 0
+      DO i = 1, s
+        IF (buffer(1, i) .ne. 0) THEN
+          c = c + 1
+          factors(:, c) = buffer(:, i)
         ENDIF
       ENDDO
 
-      DEALLOCATE(BUFFER)
+      DEALLOCATE(buffer)
 
-    END SUBROUTINE FACTORIZATION
+    END SUBROUTINE factorization
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-END MODULE SCARFLIB_FFT
+END MODULE m_scarflib_fim

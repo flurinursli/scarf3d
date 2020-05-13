@@ -1,74 +1,75 @@
-MODULE SCARFLIB_COMMON
+MODULE m_scarflib_common
 
   ! Purpose:
-  !   To define constants and subprograms common within the SCARF3D library.
+  !   To define constants and subprograms common within the scarf3d library.
   !
   ! Revisions:
   !     Date                    Description of change
   !     ====                    =====================
-  !   04/05/20                  Original version
-  !   11/05/20                  Updated macro for double-precision
+  !   04/05/20                  original version
+  !   11/05/20                  updated macro for double-precision
   !
 
-  USE, INTRINSIC     :: ISO_FORTRAN_ENV
-  USE, INTRINSIC     :: ISO_C_BINDING
-  USE, NON_INTRINSIC :: MPI
+  USE, INTRINSIC     :: iso_fortran_env
+  USE, INTRINSIC     :: iso_c_binding
+  USE, NON_INTRINSIC :: mpi
 
-  IMPLICIT NONE
+  IMPLICIT none
 
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  ! ALL VARIABLES/SUBROUTINE ARE ACCESSIBLE FROM OTHER MODULES VIA HOST-ASSOCIATION
+  ! make modules, constants, shared variables and subprograms accessible to other modules via host-association
   PUBLIC
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTERFACE VARIANCE
-    MODULE PROCEDURE VARIANCE_1D, VARIANCE_3D
+  INTERFACE variance
+    MODULE PROCEDURE variance_1d, variance_3d
   END INTERFACE
 
-  INTERFACE MEAN
-    MODULE PROCEDURE MEAN_1D, MEAN_3D
+  INTERFACE mean
+    MODULE PROCEDURE mean_1d, mean_3d
   END INTERFACE
 
-  INTERFACE TAPERING
-    MODULE PROCEDURE TAPERING_UNSTRUCTURED, TAPERING_STRUCTURED
+  INTERFACE tapering
+    MODULE PROCEDURE tapering_structured, tapering_unstructured
   END INTERFACE
 
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  ! SET PRECISION
+  ! define type for integers
+  INTEGER,        PARAMETER :: f_int = int32
 
-  ! INTEGERS HAVE ALWAYS SAME "PRECISION"
-  INTEGER, PARAMETER :: IPP = INT32
-
+  ! define precision of floating point numbers
 #ifdef DOUBLE_PREC
-  INTEGER(IPP), PARAMETER :: FPP          = REAL64
-  INTEGER(IPP), PARAMETER :: C_FPP        = C_DOUBLE
-  INTEGER(IPP), PARAMETER :: C_CPP        = C_DOUBLE_COMPLEX
-  INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_DOUBLE_PRECISION
-  INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_DOUBLE_COMPLEX
+  INTEGER(f_int), PARAMETER :: f_real    = real64
+  INTEGER(f_int), PARAMETER :: f_dble    = real64
+  INTEGER(f_int), PARAMETER :: c_real    = c_double
+  INTEGER(f_int), PARAMETER :: c_cplx    = c_double_complex
+  INTEGER(f_int), PARAMETER :: real_type = mpi_double_precision
+  INTEGER(f_int), PARAMETER :: cplx_type = mpi_double_complex
 #else
-  INTEGER(IPP), PARAMETER :: FPP          = REAL32
-  INTEGER(IPP), PARAMETER :: C_FPP        = C_FLOAT
-  INTEGER(IPP), PARAMETER :: C_CPP        = C_FLOAT_COMPLEX
-  INTEGER(IPP), PARAMETER :: REAL_TYPE    = MPI_REAL
-  INTEGER(IPP), PARAMETER :: COMPLEX_TYPE = MPI_COMPLEX
+  INTEGER(f_int), PARAMETER :: f_real    = real32
+  INTEGER(f_int), PARAMETER :: f_dble    = real64
+  INTEGER(f_int), PARAMETER :: c_real    = c_float
+  INTEGER(f_int), PARAMETER :: c_cplx    = c_float_complex
+  INTEGER(f_int), PARAMETER :: real_type = mpi_real
+  INTEGER(f_int), PARAMETER :: cplx_type = mpi_complex
 #endif
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-  ! TOTAL NUMBER OF POINTS ALONG EACH AXIS (WHOLE MODEL)
-  INTEGER(IPP),                DIMENSION(3)             :: NPTS
+  ! total number of points along each axis (whole model)
+  INTEGER(f_int),              DIMENSION(3)             :: npts
 
-  ! MPI STUFF
-  INTEGER(IPP)                                          :: WORLD_RANK, WORLD_SIZE
+  ! mpi stuff
+  INTEGER(f_int)                                        :: world_rank, world_size
 
-  ! GLOBAL MODEL INDICES FOR ALL MPI PROCESSES
-  INTEGER(IPP),   ALLOCATABLE, DIMENSION(:,:)           :: GS, GE
+  ! global model indices for all mpi processes
+  INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)           :: gs, ge
 
-  ! VARIABLES
-  REAL(FPP),                                  PARAMETER :: PI = 3.141592653589793_FPP
+  ! variables
+  REAL(f_real),                               PARAMETER :: pi = 3.141592653589793_f_dble
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
@@ -78,749 +79,840 @@ MODULE SCARFLIB_COMMON
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WATCH_START(TICTOC, COMM)
+    SUBROUTINE watch_start(tictoc, comm)
 
-      ! START THE MPI-STOPWATCH
+      ! Purpose:
+      !   To start the MPI stopwatch. Timing is in double-precision. If specific communicator handle not given, mpi_comm_world is
+      !   used.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(REAL64),           INTENT(OUT) :: TICTOC                            !< INITIAL TIME
-      INTEGER(IPP), OPTIONAL, INTENT(IN)  :: COMM
-      INTEGER(IPP)                        :: IERR                              !< MPI STUFF
+      REAL(f_dble),             INTENT(OUT) :: tictoc                            !< initial time
+      INTEGER(f_int), OPTIONAL, INTENT(IN)  :: comm                              !< communicator handle
+      INTEGER(f_int)                        :: ierr
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      IF (.NOT.PRESENT(COMM)) THEN
-        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      IF (.NOT.PRESENT(comm)) THEN
+        CALL mpi_barrier(mpi_comm_world, ierr)
       ELSE
-        CALL MPI_BARRIER(COMM, IERR)
+        CALL mpi_barrier(comm, ierr)
       ENDIF
 
-      TICTOC = MPI_WTIME()
+      tictoc = mpi_wtime()
 
-    END SUBROUTINE WATCH_START
+    END SUBROUTINE watch_start
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WATCH_STOP(TICTOC, COMM)
+    SUBROUTINE watch_stop(tictoc, comm)
 
-      ! STOP THE MPI-STOPWATCH AND RETURN ELAPSED TIME
+      ! Purpose:
+      !   To stop the MPI stopwatch and return elapsed time. Timing is in double-precision.  If specific communicator handle not given,
+      !   mpi_comm_world is used.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(REAL64),           INTENT(INOUT) :: TICTOC                          !< ELAPSED TIME
-      INTEGER(IPP), OPTIONAL, INTENT(IN)    :: COMM
-      INTEGER(IPP)                          :: IERR                            !< MPI STUFF
+      REAL(f_dble),             INTENT(INOUT) :: tictoc                          !< elapsed time
+      INTEGER(f_int), OPTIONAL, INTENT(IN)    :: comm                            !< communicator handle
+      INTEGER(f_int)                          :: ierr
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      IF (.NOT.PRESENT(COMM)) THEN
-        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      IF (.NOT.PRESENT(comm)) THEN
+        CALL mpi_barrier(mpi_comm_world, ierr)
       ELSE
-        CALL MPI_BARRIER(COMM, IERR)
+        CALL mpi_barrier(comm, ierr)
       ENDIF
 
-      TICTOC = MPI_WTIME() - TICTOC
+      tictoc = mpi_wtime() - tictoc
 
-    END SUBROUTINE WATCH_STOP
+    END SUBROUTINE watch_stop
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! SUBROUTINE SET_STREAM(SEED)
+    ! SUBROUTINE set_stream(seed)
     !
-    !   ! INITIALSE THE RANDOM NUMBER GENERATOR
+    !   ! initialse the random number generator
     !
-    !   INTEGER(IPP),                           INTENT(IN) :: SEED                      !< USER-DEFINED SEED NUMBER
-    !   INTEGER(IPP)                                       :: SEED_SIZE                 !< STORE ARRAY SIZE
-    !   INTEGER(IPP), ALLOCATABLE, DIMENSION(:)            :: TMP_SEED                  !< USED TO INITIALISE THE RANDOM GENERATOR
+    !   INTEGER(f_int),                           INTENT(IN) :: seed                      !< USEr-defined seed number
+    !   INTEGER(f_int)                                       :: seed_size                 !< store array SIZE
+    !   INTEGER(f_int), ALLOCATABLE, DIMENSION(:)            :: tmp_seed                  !< USEd to initialise the random generator
     !
     !   !-----------------------------------------------------------------------------------------------------------------------------
     !
-    !   CALL RANDOM_SEED(SIZE = SEED_SIZE)
+    !   CALL random_seed(SIZE = seed_size)
     !
-    !   ALLOCATE(TMP_SEED(SEED_SIZE))
+    !   ALLOCATE(tmp_seed(seed_size))
     !
-    !   TMP_SEED = SEED
+    !   tmp_seed = seed
     !
-    !   CALL RANDOM_SEED(PUT = TMP_SEED)
+    !   CALL random_seed(put = tmp_seed)
     !
-    !   DEALLOCATE(TMP_SEED)
+    !   DEALLOCATE(tmp_seed)
     !
-    ! END SUBROUTINE SET_STREAM
+    ! END SUBROUTINE set_stream
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WRITE_SINGLE(V, FILENAME, NWRITERS)
+    SUBROUTINE write_single(v, filename, nwriters)
 
-      ! EACH PROCESS WRITES ITS OWN FILE WITH DATA. ONLY "NWRITERS" FILES ARE CREATED AT THE SAME TIME.
+      ! Purpose:
+      !   To allow each MPI process writes its own file with data. Only 'nwriters' files at most are written at the same time. This
+      !   subroutine works for structured meshes only
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),                    DIMENSION(:,:,:),          INTENT(IN) :: V                                  !< RANDOM FIELD
-      CHARACTER(LEN=*),                                        INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
-      INTEGER(IPP),                                            INTENT(IN) :: NWRITERS
-      CHARACTER(:),     ALLOCATABLE                                       :: MYNAME
-      INTEGER(IPP)                                                        :: I, N                          !< COUNTERS
-      INTEGER(IPP)                                                        :: FH, IERR                          !< MPI STUFF
-      INTEGER(IPP),                 DIMENSION(MPI_STATUS_SIZE)            :: STATUS                        !< MPI STUFF
+      REAL(f_real),               DIMENSION(:,:,:),          INTENT(IN) :: v                !< random field
+      CHARACTER(LEN=*),                                         INTENT(IN) :: filename         !< base-name of output file
+      INTEGER(f_int),                                        INTENT(IN) :: nwriters         !< number of concurrent files written
+      CHARACTER(:),      ALLOCATABLE                                       :: myname
+      INTEGER(f_int)                                                    :: i, n
+      INTEGER(f_int)                                                    :: fh, ierr
+      INTEGER(f_int),             DIMENSION(mpi_status_size)            :: status
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      DO I = 0, WORLD_SIZE - 1, NWRITERS
+      DO i = 0, world_size - 1, nwriters
 
-        N = I + NWRITERS
+        n = i + nwriters
 
-        ! ONLY PROCESSES IN THE RANGE [I, I + NWRITERS), I.E. MAX "NWRITERS", ENTER THIS BLOCK EVERY TIME
-        IF ( (WORLD_RANK .GE. I) .AND. (WORLD_RANK .LT. N) ) THEN
+        ! only processes in the range [i, i + nwriters), i.e. max "nwriters", enter this block every time
+        IF ( (world_rank .ge. i) .and. (world_rank .lt. n) ) THEN
 
-          MYNAME = FILENAME // '_x=' // NUM2STR(GS(1, WORLD_RANK)) // '_' // NUM2STR(GE(1, WORLD_RANK)) //    &
-                               '_y=' // NUM2STR(GS(2, WORLD_RANK)) // '_' // NUM2STR(GE(2, WORLD_RANK)) //    &
-                               '_z=' // NUM2STR(GS(3, WORLD_RANK)) // '_' // NUM2STR(GE(3, WORLD_RANK))
+          myname = filename // '_x=' // num2str(gs(1, world_rank)) // '_' // num2str(ge(1, world_rank)) //    &
+                               '_y=' // num2str(gs(2, world_rank)) // '_' // num2str(ge(2, world_rank)) //    &
+                               '_z=' // num2str(gs(3, world_rank)) // '_' // num2str(ge(3, world_rank))
 
-          CALL MPI_FILE_OPEN(MPI_COMM_SELF, MYNAME, MPI_MODE_CREATE + MPI_MODE_WRONLY, MPI_INFO_NULL, FH, IERR)
+          CALL mpi_file_open(mpi_comm_self, myname, mpi_mode_create + mpi_mode_wronly, mpi_info_null, fh, ierr)
 
-          CALL MPI_FILE_WRITE(FH, V, SIZE(V), REAL_TYPE, STATUS, IERR)
+          CALL mpi_file_write(fh, v, SIZE(v), real_type, status, ierr)
 
-          CALL MPI_FILE_CLOSE(FH, IERR)
+          CALL mpi_file_close(fh, ierr)
 
         ENDIF
 
-        CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+        CALL mpi_barrier(mpi_comm_world, ierr)
 
       ENDDO
 
-    END SUBROUTINE WRITE_SINGLE
+    END SUBROUTINE write_single
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WRITE_ONE(V, FILENAME, NWRITERS)
+    SUBROUTINE write_one(v, filename, nwriters)
 
-      ! "NWRITERS" PROCESSES WRITE DATA OF ALL PROCESSES TO A SINGLE FILE
+      ! Purpose:
+      !   To write data to a single file. Only 'nwriters' MPI process are allowed to write to disk after gathering data from all other
+      !   processess. This subroutine works for structured meshes only.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),                     DIMENSION(:,:,:),          INTENT(IN) :: V                                  !< RANDOM FIELD
-      CHARACTER(LEN=*),                                         INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
-      INTEGER(IPP),                                             INTENT(IN) :: NWRITERS                           !< I/O PROCESSES
-      CHARACTER(:),     ALLOCATABLE                                        :: DCHAR                              !< DUMMY
-      INTEGER(IPP)                                                         :: I, J, N                            !< COUNTER
-      INTEGER(IPP)                                                         :: NMAX, MAXTASKS                     !< COUNTER
-      INTEGER(IPP)                                                         :: COLOR, NTASKS, NEWCOMM, WRTCOMM    !< MPI STUFF
-      INTEGER(IPP)                                                         :: RANK, RCVRANK, REQUEST, INFO       !< MPI STUFF
-      INTEGER(IPP)                                                         :: NEWTYPE, IERR, FH                  !< MPI STUFF
-      INTEGER(IPP),                  DIMENSION(MPI_STATUS_SIZE)            :: STATUS                             !< MPI STUFF
-      INTEGER(IPP),                  DIMENSION(3)                          :: SUBSIZES, STARTS                   !< ARRAYS FOR DERIVED DATATYPE
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                          :: RANK0, RANK1                       !< FIRST/LAST GLOBAL RANK
-      INTEGER(IPP),     ALLOCATABLE, DIMENSION(:)                          :: NEW2WORLD                          !< MAP LOCAL TO GLOBAL RANKS
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:)                          :: BUFFER                             !< COLLECTED DATA
+      REAL(f_real),                 DIMENSION(:,:,:),           INTENT(IN) :: v                                  !< random field
+      CHARACTER(LEN=*),                                         INTENT(IN) :: filename                           !< name of output file
+      INTEGER(f_int),                                           INTENT(IN) :: nwriters                           !< number of I/O processes
+      CHARACTER(:),     ALLOCATABLE                                        :: dchar
+      INTEGER(f_int)                                                       :: i, j, n
+      INTEGER(f_int)                                                       :: nmax, maxtasks
+      INTEGER(f_int)                                                       :: color, ntasks, newcomm, wrtcomm
+      INTEGER(f_int)                                                       :: rank, rcvrank, request, info
+      INTEGER(f_int)                                                       :: newtype, ierr, fh
+      INTEGER(f_int),                DIMENSION(mpi_status_size)            :: status
+      INTEGER(f_int),                DIMENSION(3)                          :: subsizes, starts
+      INTEGER(f_int),   ALLOCATABLE, DIMENSION(:)                          :: rank0, rank1
+      INTEGER(f_int),   ALLOCATABLE, DIMENSION(:)                          :: new2world
+      REAL(f_real),     ALLOCATABLE, DIMENSION(:)                          :: buffer
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! ORGANIZE PROCESSES IN "NWRITERS" COMMUNICATORS AND PREPARE A MAP OF THE LOCAL-TO-GLOBAL RANKS
+      ! organize processes in 'nwriters' communicators and prepare a map of the local-to-global ranks
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ALLOCATE(RANK0(NWRITERS), RANK1(NWRITERS))
+      ALLOCATE(rank0(nwriters), rank1(nwriters))
 
-      CALL SPLIT_TASK(WORLD_SIZE, NWRITERS, RANK0, RANK1)
+      ! distribute 'world_size' elements between 'nwriters'
+      CALL split_task(world_size, nwriters, rank0, rank1)
 
-      ! LOWEST RANK MUST BE ZERO
-      RANK0 = RANK0 - 1
-      RANK1 = RANK1 - 1
+      ! lowest rank must be zero
+      rank0 = rank0 - 1
+      rank1 = rank1 - 1
 
-      DO I = 1, NWRITERS
-        IF ( (WORLD_RANK .GE. RANK0(I)) .AND. (WORLD_RANK .LE. RANK1(I)) ) COLOR = I
+      DO i = 1, nwriters
+        IF ( (world_rank .ge. rank0(i)) .and. (world_rank .le. rank1(i)) ) color = i
       ENDDO
 
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, NEWCOMM, IERR)
+      CALL mpi_comm_split(mpi_comm_world, color, world_rank, newcomm, ierr)
 
-      CALL MPI_COMM_RANK(NEWCOMM, RANK, IERR)
-      CALL MPI_COMM_SIZE(NEWCOMM, NTASKS, IERR)
+      CALL mpi_comm_rank(newcomm, rank, ierr)
+      CALL mpi_comm_size(newcomm, ntasks, ierr)
 
-      ALLOCATE(NEW2WORLD(0:NTASKS - 1))
+      ALLOCATE(new2world(0:ntasks - 1))
 
-      ! I-TH RANK IN "NEWCOMM" HAS ITS GLOBAL RANK CONTAINED IN "NEW2WORLD"
-      CALL MAP_RANKS(NEWCOMM, MPI_COMM_WORLD, NEW2WORLD)
-
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! PROCESSES WITH "RANK=0" IN EVERY "NEWCOMM" ARE WRITERS: GATHER THEM IN SEPARATE COMMUNICATOR "WRTCOMM"
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-
-      COLOR = 0
-
-      IF (RANK .EQ. 0) COLOR = 1
-
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, WRTCOMM, IERR)
+      ! i-th rank in "newcomm" has its global rank contained in "new2world"
+      CALL map_ranks(newcomm, mpi_comm_world, new2world)
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! DETERMINE MAXIMUM NUMBER OF TASKS AMONGST ALL "NEWCOMM" COMMUNICATORS, NEEDED TO FOR COLLECTIVE WRITE CALL BELOW
+      ! processes with "rank=0" in every "newcomm" are writers: gather them in separate communicator "wrtcomm"
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      MAXTASKS = NTASKS
+      color = 0
 
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAXTASKS, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
+      IF (rank .eq. 0) color = 1
 
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! DETERMINE MAXIMUM SIZE OF INPUT ARRAY "V" AND ALLOCATE "BUFFER" ACCORDINGLY. THIS WAY WE DON'T NEED TO REALLOCATE "BUFFER"
-      ! EVERY TIME WE GET DATA FROM A PROCESS
-      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-
-      N = SIZE(V)
-
-      NMAX = N
-
-      CALL MPI_ALLREDUCE(MPI_IN_PLACE, NMAX, 1, MPI_INTEGER, MPI_MAX, MPI_COMM_WORLD, IERR)
-
-      ALLOCATE(BUFFER(NMAX))
+      CALL mpi_comm_split(mpi_comm_world, color, world_rank, wrtcomm, ierr)
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! EACH PROCESS MAKES NON-BLOCKING SEND. I/O PROCESSES COLLECT DATA AND WRITE THEM TO FILE AT THE RIGHT LOCATION. A WRITER MAY
-      ! WRITE TWICE THE SAME DATA IF "WORLD_SIZE" NOT MULTIPLE OF "NWRITERS": THIS IS NECESSARY BECAUSE WE USE COLLECTIVE WRITE CALL
-      ! THAT MUST BE CALLED BY ALL WRITERS AT THE SAME TIME.
+      ! determine maximum number of tasks amongst all "newcomm" communicators, needed to for collective WRITE CALL below
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ! EACH PROCESS SENDS ITS DATA TO WRITER INSIDE COMMUNICATOR "NEWCOMM"
-      CALL MPI_ISEND(V, N, REAL_TYPE, 0, 1, NEWCOMM, REQUEST, IERR)
+      maxtasks = ntasks
 
-      ! ONLY WRITERS CAN WORK ON FILES
-      IF (RANK .EQ. 0) THEN
+      CALL mpi_allreduce(mpi_in_place, maxtasks, 1, mpi_integer, mpi_max, mpi_comm_world, ierr)
 
-        INFO = MPI_INFO_NULL
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! determine maximum SIZE of input array "v" and ALLOCATE "buffer" accordingly. this way we don't need to reallocate "buffer"
+      ! every time we get data from a process
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-        ! SET "STRIPING_FACTOR" EQUAL TO NUMBER OF I/O PROCESSES. "STRIPING_UNIT" IS ARBITRAY SET TO 128MB (REASONABLE VALUE).
+      n = SIZE(v)
+
+      nmax = n
+
+      CALL mpi_allreduce(mpi_in_place, nmax, 1, mpi_integer, mpi_max, mpi_comm_world, ierr)
+
+      ALLOCATE(buffer(nmax))
+
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! each process makes non-blocking send. i/o processes collect data and WRITE them to file at the right location. a writer may
+      ! WRITE twice the same data IF "world_size" not multiple of "nwriters": this is necessary becaUSE we USE collective WRITE CALL
+      ! that must be called by all writers at the same time.
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! each process of communicator "newcomm" sends its data to the writer of the communicator
+      CALL mpi_isend(v, n, real_type, 0, 1, newcomm, request, ierr)
+
+      ! only writers can work on files
+      IF (rank .eq. 0) THEN
+
+        info = mpi_info_null
+
+        ! set "striping_factor" equal to number of i/o processes. "striping_unit" is arbitray set to 128mb (reasonable value).
 #ifdef PFS
-        CALL MPI_INFO_CREATE(INFO, IERR)
+        CALL mpi_info_create(info, ierr)
 
-        DCHAR = NUM2STR(NWRITERS)
+        dchar = num2str(nwriters)
 
-        CALL MPI_INFO_SET(INFO, "striping_factor", DCHAR, IERR)
+        CALL mpi_info_set(info, "striping_factor", dchar, ierr)
 
-        DEALLOCATE(DCHAR)
+        DEALLOCATE(dchar)
 
-        DCHAR = NUM2STR(128*1024*1024)
+        dchar = num2str(128*1024*1024)
 
-        CALL MPI_INFO_SET(INFO, "striping_unit", DCHAR, IERR)
+        CALL mpi_info_set(info, "striping_unit", dchar, ierr)
 
-        DEALLOCATE(DCHAR)
+        DEALLOCATE(dchar)
 #endif
 
-        CALL MPI_FILE_OPEN(WRTCOMM, FILENAME, MPI_MODE_CREATE + MPI_MODE_WRONLY, INFO, FH, IERR)
+        CALL mpi_file_open(wrtcomm, filename, mpi_mode_create + mpi_mode_wronly, info, fh, ierr)
 
-        ! LOOP UNTIL ALL DATA ARE RECEIVED
-        DO J = 0, MAXTASKS - 1
+        ! loop until all data are received
+        DO j = 0, maxtasks - 1
 
-          ! STOP RECEIVING IF WE HAVE ALREADY COLLECTED ALL DATA FOR "NEWCOMM"
-          IF (J .LE. NTASKS - 1) THEN
+          ! stop receiving IF we have already collected all data for "newcomm"
+          IF (j .le. ntasks - 1) THEN
 
-            CALL MPI_RECV(BUFFER, SIZE(BUFFER), REAL_TYPE, MPI_ANY_SOURCE, MPI_ANY_TAG, NEWCOMM, STATUS, IERR)
+            ! receive data
+            CALL mpi_recv(buffer, SIZE(buffer), real_type, mpi_any_source, mpi_any_tag, newcomm, status, ierr)
 
-            ! FIND WHO SENT DATA
-            RCVRANK = STATUS(MPI_SOURCE)
+            ! find who sent data
+            rcvrank = status(mpi_source)
 
-            ! MAP ITS LOCAL RANK INTO GLOBAL ONE
-            RCVRANK = NEW2WORLD(RCVRANK)
+            ! map its local rank into global one
+            rcvrank = new2world(rcvrank)
 
           ENDIF
 
-          SUBSIZES(:) = GE(:, RCVRANK) - GS(:, RCVRANK) + 1
-          !STARTS(:)   = GS(:, RCVRANK) - 1
-          STARTS(:)   = GS(:, RCVRANK) - MINVAL(GS, DIM = 2)
+          subsizes(:) = ge(:, rcvrank) - gs(:, rcvrank) + 1
+          !starts(:)   = gs(:, rcvrank) - 1
+          starts(:)   = gs(:, rcvrank) - MINVAL(gs, dim = 2)
 
-          CALL MPI_TYPE_CREATE_SUBARRAY(3, NPTS, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
+          CALL mpi_type_create_subarray(3, npts, subsizes, starts, mpi_order_fortran, real_type, newtype, ierr)
 
-          CALL MPI_TYPE_COMMIT(NEWTYPE, IERR)
+          CALL mpi_type_commit(newtype, ierr)
 
-          ! VIEW IS CONTROLLED BY DERIVED DATATYPE
-          CALL MPI_FILE_SET_VIEW(FH, 0_MPI_OFFSET_KIND, REAL_TYPE, NEWTYPE, 'NATIVE', MPI_INFO_NULL, IERR)
+          ! view is controlled by derived datatype
+          CALL mpi_file_set_view(fh, 0_mpi_offset_kind, real_type, newtype, 'native', mpi_info_null, ierr)
 
-          CALL MPI_FILE_WRITE_ALL(FH, BUFFER, PRODUCT(SUBSIZES), REAL_TYPE, MPI_STATUS_IGNORE, IERR)
+          CALL mpi_file_write_all(fh, buffer, PRODUCT(subsizes), real_type, mpi_status_ignore, ierr)
 
-          CALL MPI_TYPE_FREE(NEWTYPE, IERR)
+          CALL mpi_type_free(newtype, ierr)
 
         ENDDO
 
-        CALL MPI_FILE_CLOSE(FH, IERR)
+        CALL mpi_file_close(fh, ierr)
 
 #ifdef PFS
-        CALL MPI_INFO_FREE(INFO, IERR)
+        CALL mpi_info_free(info, ierr)
 #endif
 
       ENDIF
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! FREE RESOURCES
+      ! free resources
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      DEALLOCATE(RANK0, RANK1, NEW2WORLD, BUFFER)
+      DEALLOCATE(rank0, rank1, new2world, buffer)
 
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      CALL mpi_barrier(mpi_comm_world, ierr)
 
-      CALL MPI_COMM_FREE(NEWCOMM, IERR)
-      CALL MPI_COMM_FREE(WRTCOMM, IERR)
+      CALL mpi_comm_free(newcomm, ierr)
+      CALL mpi_comm_free(wrtcomm, ierr)
 
-    END SUBROUTINE WRITE_ONE
+    END SUBROUTINE write_one
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    FUNCTION NUM2STR(V)
+    FUNCTION num2str(v)
 
-      ! CONVERT AN INTEGER INTO A STRING
+      ! Purpose:
+      !   To convert an integer into a string.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(IPP),                       INTENT(IN) :: V
-      CHARACTER(:),           ALLOCATABLE            :: NUM2STR
-      CHARACTER(RANGE(V) + 2)                        :: DUM
+      INTEGER(f_int),                     INTENT(IN) :: v               !< integer to be converted
+      CHARACTER(:),           ALLOCATABLE            :: num2str
+      CHARACTER(RANGE(v) + 2)                        :: dum
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      WRITE(DUM, '(I0)') V
+      WRITE(dum, '(i0)') v
 
-      NUM2STR = TRIM(DUM)
+      num2str = TRIM(dum)
 
-    END FUNCTION NUM2STR
+    END FUNCTION num2str
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SPLIT_TASK(NPTS, NTASKS, I0, I1)
+    SUBROUTINE split_task(npts, ntasks, i0, i1)
 
-      ! DISTRIBUTE "NPTS" POINTS AMONGST "NTASKS" PROCESSES AND, FOR EACH PROCESS, RETURN THE LOWEST AND HIGHEST INDEX.
+      ! Purpose:
+      !   To distribute an hypotethical vector of 'npts' elements between 'ntasks' processes, returning the first and last index.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(IPP),                        INTENT(IN)  :: NPTS                          !< NUMBER OF POINTS TO BE SPLIT
-      INTEGER(IPP),                        INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
-      INTEGER(IPP), DIMENSION(0:NTASKS-1), INTENT(OUT) :: I0, I1                     !< 1ST/LAST INDEX
-      INTEGER(IPP)                                     :: P                          !< COUNTER
+      INTEGER(f_int),                        INTENT(IN)  :: npts                       !< number of elements to be distributed
+      INTEGER(f_int),                        INTENT(IN)  :: ntasks                     !< number of MPI processes
+      INTEGER(f_int), DIMENSION(0:ntasks-1), INTENT(OUT) :: i0, i1                     !< 1st/last index
+      INTEGER(f_int)                                     :: p
 
       !------------------------------------------------------------------------------------------------------------------------------
 
-      DO P = 0, NTASKS - 1
-        I0(P) = 1 + INT( REAL(NPTS, FPP) / REAL(NTASKS, FPP) * REAL(P, FPP) )
-        I1(P) = INT( REAL(NPTS, FPP) / REAL(NTASKS, FPP) * REAL(P + 1, FPP) )
+      DO p = 0, ntasks - 1
+        i0(p) = 1 + INT( REAL(npts, f_real) / REAL(ntasks, f_real) * REAL(p, f_real) )
+        i1(p) = INT( REAL(npts, f_real) / REAL(ntasks, f_real) * REAL(p + 1, f_real) )
       ENDDO
 
-    END SUBROUTINE SPLIT_TASK
+    END SUBROUTINE split_task
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE MAP_RANKS(SRC_COMM, DEST_COMM, DEST_RANKS)
+    SUBROUTINE map_ranks(src_comm, dest_comm, dest_ranks)
 
-      ! MAP RANKS FROM LOCAL TO GLOBAL COMMUNICATOR
+      ! Purpose:
+      !   To map ranks from one communicator to another.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(IPP),                         INTENT(IN)    :: SRC_COMM                     !< COMMUNICATOR
-      INTEGER(IPP),                         INTENT(IN)    :: DEST_COMM
-      INTEGER(IPP), DIMENSION(:),           INTENT(INOUT) :: DEST_RANKS                   !< RANKS AFTER BEING MAPPED TO GLOBAL GROUP
-      INTEGER(IPP)                                        :: I                        !< COUNTER
-      INTEGER(IPP)                                        :: IERR, SRC_GROUP              !< MPI STUFF
-      INTEGER(IPP)                                        :: DEST_GROUP
-      INTEGER(IPP)                                        :: NTASKS
-      INTEGER(IPP), DIMENSION(SIZE(DEST_RANKS))           :: SRC_RANKS
+      INTEGER(f_int),                             INTENT(IN)    :: src_comm                     !< source communicator handle
+      INTEGER(f_int),                             INTENT(IN)    :: dest_comm                    !< destination communicator handle
+      INTEGER(f_int), DIMENSION(:),               INTENT(INOUT) :: dest_ranks                   !< ranks after mapping
+      INTEGER(f_int)                                            :: i
+      INTEGER(f_int)                                            :: ierr, src_group
+      INTEGER(f_int)                                            :: dest_group
+      INTEGER(f_int)                                            :: ntasks
+      INTEGER(f_int), DIMENSION(SIZE(dest_ranks))               :: src_ranks
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      NTASKS = SIZE(SRC_RANKS)
+      ntasks = SIZE(src_ranks)
 
-      ! RANKS IN SOURCE COMMUNICATOR
-      DO I = 1, NTASKS
-        SRC_RANKS(I) = I - 1
+      ! ranks in source communicator
+      DO i = 1, ntasks
+        src_ranks(i) = i - 1
       ENDDO
 
-      ! GROUP ASSOCIATED TO SOURCE COMMUNICATOR
-      CALL MPI_COMM_GROUP(SRC_COMM, SRC_GROUP, IERR)
+      ! group associated to source communicator
+      CALL mpi_comm_group(src_comm, src_group, ierr)
 
-      ! GROUP ASSOCIATED TO DESTINATION COMMUNICATOR
-      CALL MPI_COMM_GROUP(DEST_COMM, DEST_GROUP, IERR)
+      ! group associated to destination communicator
+      CALL mpi_comm_group(dest_comm, dest_group, ierr)
 
-      ! MAP RANKS IN "GROUP" INTO RANKS IN "MPI_GROUP_WORLD"
-      CALL MPI_GROUP_TRANSLATE_RANKS(SRC_GROUP, NTASKS, SRC_RANKS, DEST_GROUP, DEST_RANKS, IERR)
+      ! map ranks in "group" into ranks in "mpi_group_world"
+      CALL mpi_group_translate_ranks(src_group, ntasks, src_ranks, dest_group, dest_ranks, ierr)
 
-      CALL MPI_GROUP_FREE(SRC_GROUP, IERR)
-      CALL MPI_GROUP_FREE(DEST_GROUP, IERR)
+      CALL mpi_group_free(src_group, ierr)
+      CALL mpi_group_free(dest_group, ierr)
 
-    END SUBROUTINE MAP_RANKS
+    END SUBROUTINE map_ranks
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE WRITE_SLICE(DIRECTION, PLANE, V, FILENAME)
+    SUBROUTINE write_slice(direction, plane, v, filename)
 
-      ! CREATE A SINGLE FILE CONTAINING A SLICE OF THE RANDOM FIELD. EACH PROCESS WRITE ITS OWN PART BY MAKING USE OF THE SUBARRAY
-      ! DATATYPE. A SLICE CAN BE ORIENTED ALONG THE X-, Y- OR Z-AXIS.
+      ! Purpose:
+      !   To write to disk a single file containing a slice of the random field. Each MPI process writes its own part based on the
+      !   subarray datatype. A slice can be oriented along the x-, y- or z-axis. This subroutine works for structured meshes only.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !   11/05/20                  handle case when min(gs) != 1
+      !
 
-      INTEGER(IPP),                                    INTENT(IN) :: DIRECTION                          !< DIRECTION OF DESIRED 2D SLICE
-      INTEGER(IPP),                                    INTENT(IN) :: PLANE                              !< INDEX OF SLICE IN GLOBAL COORDINATES
-      REAL(FPP),                     DIMENSION(:,:,:), INTENT(IN) :: V                                  !< RANDOM FIELD
-      CHARACTER(LEN=*),                                INTENT(IN) :: FILENAME                           !< NAME OF OUTPUT FILE
-      INTEGER(IPP)                                                :: I, J, C                            !< COUNTERS
-      INTEGER(IPP)                                                :: NEWTYPE, IERR, FH, COMM, COLOR     !< MPI STUFF
-      INTEGER(IPP),                  DIMENSION(2)                 :: SUBSIZES, STARTS, DIMS             !< ARRAYS FOR DERIVED DATATYPE
-      LOGICAL                                                     :: BOOL
-      REAL(FPP),        ALLOCATABLE, DIMENSION(:,:)               :: BUFFER                             !< STORE PART OF THE SLICE
+      CHARACTER(LEN=1),                                INTENT(IN) :: direction                          !< axis cut by the slice
+      INTEGER(f_int),                                  INTENT(IN) :: plane                              !< slice index in global coordinates
+      REAL(f_real),                  DIMENSION(:,:,:), INTENT(IN) :: v                                  !< random field
+      CHARACTER(LEN=*),                                INTENT(IN) :: filename                           !< name  of output file
+      INTEGER(f_int)                                              :: i, j, c
+      INTEGER(f_int)                                              :: axis
+      INTEGER(f_int)                                              :: newtype, ierr, fh, comm, color
+      INTEGER(f_int),                DIMENSION(2)                 :: dir
+      INTEGER(f_int),                DIMENSION(2)                 :: subsizes, starts, dims
+      LOGICAL                                                     :: bool
+      REAL(f_real),     ALLOCATABLE, DIMENSION(:,:)               :: buffer
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! CREAT A NEW COMMUNICATOR ONLY WITH PROCESSES CONTAINING DATA AT "PLANE". THESE WILL WRITE DATA TO DISK.
-      COLOR = 0
+      SELECT CASE(direction)
+      CASE('x')
+        axis = 1
+        dir  = [2, 3]
+      CASE ('y')
+        axis = 2
+        dir  = [1, 3]
+      CASE ('z')
+        axis = 3
+        dir  = [1, 2]
+      END SELECT
 
-      ! PREPARE SOME VARIABLES FOR WRITING TO DISK. "BOOL" DETERMINE IF A PROCESS BELONG TO THE LOCAL COMMUNICATOR. "C" IS USED FOR
-      ! GLOBAL TO LOCAL INDEX MAPPING.
-      ! SLICE ALONG X
-      IF (DIRECTION .EQ. 1) THEN
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! create a new communicator only with processes having data on the slice
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-        BOOL = (PLANE .GE. GS(1, WORLD_RANK)) .AND. (PLANE .LE. GE(1, WORLD_RANK))
+      color = 0
 
-        SUBSIZES = [SIZE(V, 2), SIZE(V, 3)]
-        STARTS   = [GS(2, WORLD_RANK) - MINVAL(GS(2, :)), GS(3, WORLD_RANK) - MINVAL(GS(3, :))]
+      bool = (plane .ge. gs(axis, world_rank)) .and. (plane .le. ge(axis, world_rank))
 
-        DIMS = [NPTS(2), NPTS(3)]
+      DO i = 1, 2
+        subsizes(i) = SIZE(v, dir(i))
+        starts(i)   = gs(dir(i), world_rank) - MINVAL(gs(dir(i), :))
+        dims(i)     = npts(dir(i))
+      ENDDO
 
-        C = PLANE - GS(1, WORLD_RANK) + 1
+      ! global-to-local index mapping
+      c = plane - gs(axis, world_rank) + 1
 
-      ! SLICE ALONG Y
-      ELSEIF (DIRECTION .EQ. 2) THEN
+      ! update color of calling process only if it contains part of the slice
+      IF (bool) color = 1
 
-        BOOL = (PLANE .GE. GS(2, WORLD_RANK)) .AND. (PLANE .LE. GE(2, WORLD_RANK))
+      ! split communicator
+      CALL mpi_comm_split(mpi_comm_world, color, world_rank, comm, ierr)
 
-        SUBSIZES = [SIZE(V, 1), SIZE(V, 3)]
-        !STARTS   = [GS(1, WORLD_RANK) - 1, GS(3, WORLD_RANK) - 1]
-        STARTS   = [GS(1, WORLD_RANK) - MINVAL(GS(1, :)), GS(3, WORLD_RANK) - MINVAL(GS(2, :))]
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! copy data into a contiguous buffer and write to disk
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-        DIMS = [NPTS(1), NPTS(3)]
+      ! only processes in the new communicator enter section below
+      IF (color .eq. 1) THEN
 
-        C = PLANE - GS(2, WORLD_RANK) + 1
+        ALLOCATE(buffer(subsizes(1), subsizes(2)))
 
-      ! SLICE ALONG Z
-      ELSEIF (DIRECTION .EQ. 3) THEN
+        IF (axis .eq. 1) THEN
 
-        BOOL = (PLANE .GE. GS(3, WORLD_RANK)) .AND. (PLANE .LE. GE(3, WORLD_RANK))
-
-        SUBSIZES = [SIZE(V, 1), SIZE(V, 2)]
-        !STARTS   = [GS(1, WORLD_RANK) - 1, GS(2, WORLD_RANK) - 1]
-        STARTS   = [GS(1, WORLD_RANK) - MINVAL(GS(1, :)), GS(2, WORLD_RANK) - MINVAL(GS(2, :))]
-
-        DIMS = [NPTS(1), NPTS(2)]
-
-        C = PLANE - GS(3, WORLD_RANK) + 1
-
-      ENDIF
-
-      ! UPDATE COLOR FOR CURRENT PROCESS IF IT CONTAINS PART OF THE SLICE
-      IF (BOOL) COLOR = 1
-
-      ! SPLIT COMMUNICATOR
-      CALL MPI_COMM_SPLIT(MPI_COMM_WORLD, COLOR, WORLD_RANK, COMM, IERR)
-
-      ! ONLY PROCESSES IN THE NEW COMMUNICATOR ENTER SECTION BELOW
-      IF (COLOR .EQ. 1) THEN
-
-        ALLOCATE(BUFFER(SUBSIZES(1), SUBSIZES(2)))
-
-        ! HERE BELOW WE COPY THE RIGHT DATA INTO "BUFFER"
-
-        IF (DIRECTION .EQ. 1) THEN
-
-          DO J = 1, SUBSIZES(2)
-            DO I = 1, SUBSIZES(1)
-              BUFFER(I, J) = V(C, I, J)
+          DO j = 1, subsizes(2)
+            DO i = 1, subsizes(1)
+              buffer(i, j) = v(c, i, j)
             ENDDO
           ENDDO
 
-        ELSEIF (DIRECTION .EQ. 2) THEN
+        ELSEIF (axis .eq. 2) THEN
 
-          DO J = 1, SUBSIZES(2)
-            DO I = 1, SUBSIZES(1)
-              BUFFER(I, J) = V(I, C, J)
+          DO j = 1, subsizes(2)
+            DO i = 1, subsizes(1)
+              buffer(i, j) = v(i, c, j)
             ENDDO
           ENDDO
 
-        ELSEIF (DIRECTION .EQ. 3) THEN
+        ELSEIF (axis .eq. 3) THEN
 
-          DO J = 1, SUBSIZES(2)
-            DO I = 1, SUBSIZES(1)
-              BUFFER(I, J) = V(I, J, C)
+          DO j = 1, subsizes(2)
+            DO i = 1, subsizes(1)
+              buffer(i, j) = v(i, j, c)
             ENDDO
           ENDDO
 
         ENDIF
 
-        ! CREATE SUBARRAY
-        CALL MPI_TYPE_CREATE_SUBARRAY(2, DIMS, SUBSIZES, STARTS, MPI_ORDER_FORTRAN, REAL_TYPE, NEWTYPE, IERR)
+        ! create subarray
+        CALL mpi_type_create_subarray(2, dims, subsizes, starts, mpi_order_fortran, real_type, newtype, ierr)
 
-        CALL MPI_TYPE_COMMIT(NEWTYPE, IERR)
+        CALL mpi_type_commit(newtype, ierr)
 
-        CALL MPI_FILE_OPEN(COMM, FILENAME, MPI_MODE_CREATE + MPI_MODE_WRONLY, MPI_INFO_NULL, FH, IERR)
+        CALL mpi_file_open(comm, filename, mpi_mode_create + mpi_mode_wronly, mpi_info_null, fh, ierr)
 
-        ! SET FILE VIEW BASED ON SUBARRAY DATATYPE
-        CALL MPI_FILE_SET_VIEW(FH, 0_MPI_OFFSET_KIND, REAL_TYPE, NEWTYPE, 'NATIVE', MPI_INFO_NULL, IERR)
+        ! set file view based on subarray datatype
+        CALL mpi_file_set_view(fh, 0_mpi_offset_kind, real_type, newtype, 'native', mpi_info_null, ierr)
 
-        CALL MPI_FILE_WRITE_ALL(FH, BUFFER, PRODUCT(SUBSIZES), REAL_TYPE, MPI_STATUS_IGNORE, IERR)
+        CALL mpi_file_write_all(fh, buffer, PRODUCT(subsizes), real_type, mpi_status_ignore, ierr)
 
-        CALL MPI_FILE_CLOSE(FH, IERR)
+        CALL mpi_file_close(fh, ierr)
 
-        ! RELEASE DERIVED DATATYPE
-        CALL MPI_TYPE_FREE(NEWTYPE, IERR)
+        ! release derived datatype
+        CALL mpi_type_free(newtype, ierr)
 
-        ! REALEASE LOCAL COMMUNICATOR
-        CALL MPI_COMM_FREE(COMM, IERR)
+        ! realease local communicator
+        CALL mpi_comm_free(comm, ierr)
 
-        DEALLOCATE(BUFFER)
+        DEALLOCATE(buffer)
 
       ENDIF
 
-      CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+      CALL mpi_barrier(mpi_comm_world, ierr)
 
-    END SUBROUTINE WRITE_SLICE
+    END SUBROUTINE write_slice
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION VARIANCE_1D(R)
+    REAL(f_real) FUNCTION variance_1d(r)
 
-      ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM. CALCULATIONS ARE ALWAYS IN DOUBLE
-      ! PRECISION.
+      ! Purpose:
+      !   To compute variance according to the compensated-summation version of the two-pass algorithm. Calculations in double-precision.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
-      INTEGER(IPP)                          :: I
-      INTEGER(IPP)                          :: N
-      REAL(REAL64)                          :: MU, S1, S2, X, V
+      REAL(f_real),  DIMENSION(:), INTENT(IN) :: r                      !< vector of data
+      INTEGER(f_int)                          :: i, n
+      REAL(f_dble)                            :: mu, s1, s2, x, v
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      N = SIZE(R)
+      n = SIZE(r)
 
-      MU = MEAN(R)
+      mu = mean(r)
 
-      S1 = 0._REAL64
-      S2 = 0._REAL64
+      s1 = 0._f_dble
+      s2 = 0._f_dble
 
-      DO I = 1, N
-        X = REAL(R(I), REAL64) - MU
-        S1 = S1 + X
-        S2 = S2 + X**2
+      DO i = 1, n
+        x = REAL(r(i), f_dble) - mu
+        s1 = s1 + x
+        s2 = s2 + x**2
       ENDDO
 
-      S1 = (S1**2) / REAL(N, REAL64)
+      s1 = (s1**2) / REAL(n, f_dble)
 
-      V = (S2 - S1) / REAL(N - 1, REAL64)
+      v = (s2 - s1) / REAL(n - 1, f_dble)
 
-      VARIANCE_1D = REAL(V, FPP)
+      variance_1d = REAL(v, f_real)
 
-    END FUNCTION VARIANCE_1D
+    END FUNCTION variance_1d
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION VARIANCE_3D(R)
+    REAL(f_real) FUNCTION variance_3d(r)
 
-      ! COMPUTE VARIANCE BASED ON THE COMPENSATED-SUMMATION VERSION OF THE TWO-PASS ALGORITHM. CALCULATIONS ARE ALWAYS IN DOUBLE
-      ! PRECISION.
+      ! Purpose:
+      !   To compute variance according to the compensated-summation version of the two-pass algorithm. Calculations in double-precision.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-      INTEGER(IPP)                              :: I, J, K
-      INTEGER(IPP)                              :: NX, NY, NZ
-      REAL(REAL64)                              :: MU, S1, S2, X, V
+      REAL(f_real),  DIMENSION(:,:,:), INTENT(IN) :: r                    !< array of data
+      INTEGER(f_int)                              :: i, j, k
+      INTEGER(f_int)                              :: nx, ny, nz
+      REAL(f_dble)                                :: mu, s1, s2, x, v
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      NX = SIZE(R, 1)
-      NY = SIZE(R, 2)
-      NZ = SIZE(R, 3)
+      nx = SIZE(r, 1)
+      ny = SIZE(r, 2)
+      nz = SIZE(r, 3)
 
-      MU = MEAN(R)
+      mu = mean(r)
 
-      S1 = 0._REAL64
-      S2 = 0._REAL64
+      s1 = 0._f_dble
+      s2 = 0._f_dble
 
-      DO K = 1, NZ
-        DO J = 1, NY
-          DO I = 1, NX
-            X = REAL(R(I, J, K), REAL64) - MU
-            S1 = S1 + X
-            S2 = S2 + X**2
+      DO k = 1, nz
+        DO j = 1, ny
+          DO i = 1, nx
+            x = REAL(r(i, j, k), f_dble) - mu
+            s1 = s1 + x
+            s2 = s2 + x**2
           ENDDO
         ENDDO
       ENDDO
 
-      S1 = (S1**2) / REAL(SIZE(R), REAL64)
+      s1 = (s1**2) / REAL(SIZE(r), f_dble)
 
-      V = (S2 - S1) / REAL(SIZE(R) - 1, REAL64)
+      v = (s2 - s1) / REAL(SIZE(r) - 1, f_dble)
 
-      VARIANCE_3D = REAL(V, FPP)
+      variance_3d = REAL(v, f_real)
 
-    END FUNCTION VARIANCE_3D
+    END FUNCTION variance_3d
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION MEAN_1D(R)
+    REAL(f_real) FUNCTION mean_1d(r)
 
-      ! COMPUTE MEAN OF DATASET "R" AVOIDING FLOATING POINT INACCURACIES. CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
+      ! Purpose:
+      !   To compute average. Calculations in double-precision to reduce risk of cancellation.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),   DIMENSION(:), INTENT(IN) :: R
-      INTEGER(IPP)                          :: I
-      INTEGER(IPP)                          :: N
-      REAL(REAL64)                          :: V, C
+      REAL(f_real),  DIMENSION(:), INTENT(IN) :: r               !< vector of data
+      INTEGER(f_int)                          :: i
+      INTEGER(f_int)                          :: n
+      REAL(f_dble)                            :: v, c
 
-      !-------------------------------------------------------------------------------------------------------------------------------
+      !-----------------------------------------------------------------------------------------------------------------------------
 
-      N = SIZE(R)
+      n = SIZE(r)
 
-      V = 0._REAL64
-      C = 1._REAL64
+      v = 0._f_dble
+      c = 1._f_dble
 
-      DO I = 1, N
-        V = V + (REAL(R(I), REAL64) - V) / C
-        C = C + 1._REAL64
+      DO i = 1, n
+        v = v + (REAL(r(i), f_dble) - v) / c
+        c = c + 1._f_dble
       ENDDO
 
-      ! RETURN MEAN AT DESIRED PRECISION
-      MEAN_1D = REAL(V, FPP)
+      ! return mean at desired precision
+      mean_1d = REAL(v, f_real)
 
-    END FUNCTION MEAN_1D
+    END FUNCTION mean_1d
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(FPP) FUNCTION MEAN_3D(R)
+    REAL(f_real) FUNCTION mean_3d(r)
 
-      ! COMPUTE MEAN OF DATASET "R" AVOIDING FLOATING POINT INACCURACIES. CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
+      ! Purpose:
+      !   To compute average. Calculations in double-precision to reduce risk of cancellation.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),   DIMENSION(:,:,:), INTENT(IN) :: R
-      INTEGER(IPP)                              :: I, J, K
-      INTEGER(IPP)                              :: NX, NY, NZ
-      REAL(REAL64)                              :: V, C
+      REAL(f_real),  DIMENSION(:,:,:), INTENT(IN) :: r                       !< array of data
+      INTEGER(f_int)                              :: i, j, k
+      INTEGER(f_int)                              :: nx, ny, nz
+      REAL(f_dble)                                :: v, c
 
-      !-------------------------------------------------------------------------------------------------------------------------------
+      !-----------------------------------------------------------------------------------------------------------------------------
 
-      NX = SIZE(R, 1)
-      NY = SIZE(R, 2)
-      NZ = SIZE(R, 3)
+      nx = SIZE(r, 1)
+      ny = SIZE(r, 2)
+      nz = SIZE(r, 3)
 
-      V = 0._REAL64
-      C = 1._REAL64
+      v = 0._f_dble
+      c = 1._f_dble
 
-      DO K = 1, NZ
-        DO J = 1, NY
-          DO I = 1, NX
-            V = V + (REAL(R(I, J, K), REAL64) - V) / C
-            C = C + 1._REAL64
+      DO k = 1, nz
+        DO j = 1, ny
+          DO i = 1, nx
+            v = v + (REAL(r(i, j, k), f_dble) - v) / c
+            c = c + 1._f_dble
           ENDDO
         ENDDO
       ENDDO
 
-      ! RETURN MEAN AT DESIRED PRECISION
-      MEAN_3D = REAL(V, FPP)
+      ! return mean with desired precision
+      mean_3d = REAL(v, f_real)
 
-    END FUNCTION MEAN_3D
+    END FUNCTION mean_3d
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE PARALLEL_VARIANCE(VARSET, AVGSET, NSET, VAR, AVG)
+    SUBROUTINE parallel_variance(varset, avgset, nset, var, avg)
 
-      ! GIVEN A SEQUENCE OF VARIANCE "VARSET" AND MEAN "AVGSET" VALUES, EACH BASED ON "NSET" NUMBER OF POINTS, THIS SUBROUTINE RETURNS
-      ! THE RESULTING TOTAL VARIANCE AND MEAN BASED ON THE ALGORITHM OF CHAN ET AL. (1979). CALCULATIONS ARE ALWAYS IN DOUBLE PRECISION.
+      ! Purpose:
+      !   To compute variance and mean of a sequence of variance and mean values, each computed from a set of "nset" elements, based
+      !   on the algorithm of Chan et al. (1979). Internal calculations in double-precision.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),    DIMENSION(:), INTENT(IN)  :: VARSET                             !< SET OF VARIANCE VALUES
-      REAL(FPP),    DIMENSION(:), INTENT(IN)  :: AVGSET                             !< SET OF MEAN VALUES
-      INTEGER(IPP), DIMENSION(:), INTENT(IN)  :: NSET                               !< NUMBER OF POINTS FOR EACH SET
-      REAL(FPP),                  INTENT(OUT) :: VAR                                !< RESULTING VARIANCE
-      REAL(FPP),                  INTENT(OUT) :: AVG                                !< RESULTING AVERAGE
-      INTEGER(IPP)                            :: I                                  !< COUNTER
-      REAL(REAL64)                            :: SIG, MU, N, DELTA, M1, M2, M       !< LOCAL VARIABLES
+      REAL(f_real),   DIMENSION(:), INTENT(IN)  :: varset                             !< set of variance values
+      REAL(f_real),   DIMENSION(:), INTENT(IN)  :: avgset                             !< set of mean values
+      INTEGER(f_int), DIMENSION(:), INTENT(IN)  :: nset                               !< number of points for each set
+      REAL(f_real),                 INTENT(OUT) :: var                                !< resulting variance
+      REAL(f_real),                 INTENT(OUT) :: avg                                !< resulting average
+      INTEGER(f_int)                            :: i
+      REAL(f_dble)                              :: sig, mu, n, delta, m1, m2, m
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! VARIANCE, MEAN AND NUMBER OF POINTS OF FIRST SET
-      SIG = REAL(VARSET(1), REAL64)
-      MU  = REAL(AVGSET(1), REAL64)
-      N   = REAL(NSET(1), REAL64)
+      ! variance, mean and number of points of first set
+      sig = REAL(varset(1), f_dble)
+      mu  = REAL(avgset(1), f_dble)
+      n   = REAL(nset(1), f_dble)
 
-      ! LOOP OVER SET OF VARIANCE/MEAN VALUES
-      DO I = 2, SIZE(NSET)
+      ! loop over set of variance/mean values
+      DO i = 2, SIZE(nset)
 
-        DELTA = REAL(AVGSET(I), REAL64) - MU
+        delta = REAL(avgset(i), f_dble) - mu
 
-        M1 = SIG * (N - 1._REAL64)
-        M2 = REAL(VARSET(I), REAL64) * (NSET(I) - 1._REAL64)
+        m1 = sig * (n - 1._f_dble)
+        m2 = REAL(varset(i), f_dble) * (nset(i) - 1._f_dble)
 
-        M = M1 + M2 + DELTA**2 * N * REAL(NSET(I), REAL64) / (N + REAL(NSET(I), REAL64))
+        m = m1 + m2 + delta**2 * n * REAL(nset(i), f_dble) / (n + REAL(nset(i), f_dble))
 
-        ! RESULTING MEAN
-        MU = (MU * N + REAL(AVGSET(I), REAL64) * REAL(NSET(I), REAL64)) / (N + REAL(NSET(I), REAL64))
+        ! resulting mean
+        mu = (mu * n + REAL(avgset(i), f_dble) * REAL(nset(i), f_dble)) / (n + REAL(nset(i), f_dble))
 
-        ! RESULTING NUMBER OF POINTS
-        N = N + REAL(NSET(I), REAL64)
+        ! resulting number of points
+        n = n + REAL(nset(i), f_dble)
 
-        ! RESULTING VARIANCE
-        SIG = M / (N - 1._REAL64)
+        ! resulting variance
+        sig = m / (n - 1._f_dble)
 
       ENDDO
 
-      ! RETURN WITH DESIRED PRECISION
-      VAR = REAL(SIG, FPP)
-      AVG = REAL(MU, FPP)
+      ! return with desired precision
+      var = REAL(sig, f_real)
+      avg = REAL(mu, f_real)
 
-    END SUBROUTINE PARALLEL_VARIANCE
+    END SUBROUTINE parallel_variance
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE TAPERING_STRUCTURED (DH, FS, FE, FIELD, POI, MUTE, TAPER)
+    SUBROUTINE tapering_structured (dh, fs, fe, field, poi, mute, taper)
 
-      ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
-      ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
+      ! Purpose:
+      !   To mute and/or taper the random field in a volume around a specific point. The random field at those grid points whose
+      !   distance from the point is <= 'mute' are set to zero, while a cosine taper (ranging from 0 to 1) is applied if the distance
+      !   is in the range ('mute' 'mute + taper']
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),                                                      INTENT(IN)    :: DH
-      INTEGER(IPP), DIMENSION(3),                                     INTENT(IN)    :: FS, FE                !< START/END INDICES ALONG EACH DIRECTION
-      REAL(FPP),    DIMENSION(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)), INTENT(INOUT) :: FIELD                !< RANDOM FIELD
-      REAL(FPP),    DIMENSION(3),                                     INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (TRASLATED)
-      REAL(FPP),                                                      INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
-      INTEGER(IPP)                                                                  :: I, J, K               !< COUNTERS
-      REAL(FPP)                                                                     :: D, DS                 !< VARIOUS DISTANCES
-      REAL(FPP)                                                                     :: DX, DY, DZ            !< NODE-POI DISTANCE
-      REAL(FPP)                                                                     :: T                     !< TAPER PARAMETER
+      REAL(f_real),                                                     INTENT(IN)    :: dh             !< grid-step
+      INTEGER(f_int), DIMENSION(3),                                     INTENT(IN)    :: fs, fe         !< first/last index along each direction
+      REAL(f_real),   DIMENSION(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)), INTENT(INOUT) :: field          !< random field
+      REAL(f_real),   DIMENSION(3),                                     INTENT(IN)    :: poi            !< point-of-interest
+      REAL(f_real),                                                     INTENT(IN)    :: mute, taper    !< radius for muting/tapering
+      INTEGER(f_int)                                                                  :: i, j, k
+      REAL(f_real)                                                                    :: d, ds
+      REAL(f_real)                                                                    :: dx, dy, dz
+      REAL(f_real)                                                                    :: t
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! TOTAL RADIUS OF TAPERED AND/OR MUTED VOLUME
-      DS = MUTE + TAPER
+      ! total radius of tapered and/or muted volume
+      ds = mute + taper
 
-      DO K = FS(3), FE(3)
+      DO k = fs(3), fe(3)
 
-        DZ = ((K - 1) * DH - POI(3))**2                                                !< DISTANCE ALONG Z FROM "POI"
+        dz = ((k - 1) * dh - poi(3))**2                                                !< distance along z from "poi"
 
-        DO J = FS(2), FE(2)
+        DO j = fs(2), fe(2)
 
-          DY = ((J - 1) * DH - POI(2))**2                                              !< DISTANCE ALONG Y FROM "POI"
+          dy = ((j - 1) * dh - poi(2))**2                                              !< distance along y from "poi"
 
-          DO I = FS(1), FE(1)
+          DO i = fs(1), fe(1)
 
-            DX = ((I - 1) * DH - POI(1))**2                                            !< DISTANCE ALONG X FROM "POI"
+            dx = ((i - 1) * dh - poi(1))**2                                            !< distance along x from "poi"
 
-            D = SQRT(DX + DY + DZ)                                                     !< TOTAL DISTANCE
+            d = SQRT(dx + dy + dz)                                                     !< total distance
 
-            ! MUTE IF DISTANCE NODE-POI IS BELOW "MUTE"
-            IF (D .LE. MUTE) THEN
+            ! mute if distance node-poi is below "mute"
+            IF (d .le. mute) THEN
 
-              FIELD(I, J, K) = 0._FPP
+              field(i, j, k) = 0._f_real
 
-            ! TAPER IF DISTANCE NODE-POI IS BETWEEN "MUTE" AND "TAPER + MUTE"
-            ELSEIF ( (D .GT. MUTE) .AND. (D .LE. DS) ) THEN
+            ! taper if distance node-poi is between "mute" and "taper + mute"
+            ELSEIF ( (d .gt. mute) .and. (d .le. ds) ) THEN
 
-              T = (D - MUTE) / TAPER                                                   !< TAPER PARAMETER
+              t = (d - mute) / taper                                                   !< taper parameter
 
-              FIELD(I, J, K) = FIELD(I, J, K) * (0.5_FPP - 0.5_FPP * COS(T * PI))
+              field(i, j, k) = field(i, j, k) * (0.5_f_real - 0.5_f_real * COS(t * pi))
 
             ENDIF
 
@@ -828,60 +920,63 @@ MODULE SCARFLIB_COMMON
         ENDDO
       ENDDO
 
-    END SUBROUTINE TAPERING_STRUCTURED
+    END SUBROUTINE tapering_structured
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE TAPERING_UNSTRUCTURED(X, Y, Z, FIELD, POI, MUTE, TAPER)
+    SUBROUTINE tapering_unstructured(x, y, z, field, poi, mute, taper)
 
-      ! MUTE AND/OR TAPER THE RANDOM FIELD AROUND A POINT-OF-INTEREST. MUTING OCCURS WITHIN A RADIUS OF "MUTE" POINTS; TAPERING IS
-      ! ACHIEVED BY APPLYING A HANNING WINDOW WITHIN A RADIUS IN THE RANGE "MUTE + 1" AND "MUTE + TAPER" POINTS.
+      ! Purpose:
+      !   To mute and/or taper the random field in a volume around a specific point. The random field at those grid points whose
+      !   distance from the point is <= 'mute' are set to zero, while a cosine taper (ranging from 0 to 1) is applied if the distance
+      !   is in the range ('mute' 'mute + taper']
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(FPP),    DIMENSION(:), INTENT(IN)    :: X, Y, Z
-      REAL(FPP),    DIMENSION(:), INTENT(INOUT) :: FIELD                 !< RANDOM FIELD
-      REAL(FPP),    DIMENSION(3), INTENT(IN)    :: POI                   !< POINT-OF-INTEREST (NODES)
-      REAL(FPP),                  INTENT(IN)    :: MUTE, TAPER           !< MUTE/TAPER LENGTH (IN POINTS)
-      INTEGER(IPP)                              :: I                     !< COUNTERS
-      REAL(FPP)                                 :: D, DS                 !< VARIOUS DISTANCES
-      REAL(FPP)                                 :: T                     !< TAPER PARAMETER
+      REAL(f_real),  DIMENSION(:), INTENT(IN)    :: x, y, z
+      REAL(f_real),  DIMENSION(:), INTENT(INOUT) :: field                 !< random field
+      REAL(f_real),  DIMENSION(3), INTENT(IN)    :: poi                   !< point-of-interest (nodes)
+      REAL(f_real),                INTENT(IN)    :: mute, taper           !< radius for muting/tapering
+      INTEGER(f_int)                             :: i
+      REAL(f_real)                               :: d, ds
+      REAL(f_real)                               :: t
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! TOTAL RADIUS OF TAPERED AND/OR MUTED VOLUME
-      DS = MUTE + TAPER
+      ! total radius of tapered and/or muted volume
+      ds = mute + taper
 
-      DO I = 1, SIZE(FIELD)
+      DO i = 1, SIZE(field)
 
-        ! DISTANCE BETWEEN GRID POINT AND "POI"
-        D = SQRT( (X(I) - POI(1))**2 + (Y(I) - POI(2))**2 + (Z(I) - POI(3))**2 )
+        ! distance between grid point and "poi"
+        d = SQRT( (x(i) - poi(1))**2 + (y(i) - poi(2))**2 + (z(i) - poi(3))**2 )
 
-        ! MUTE IF DISTANCE NODE-POI IS BELOW "MUTE"
-        IF (D .LE. MUTE) THEN
+        ! mute IF distance node-poi is below "mute"
+        IF (d .le. mute) THEN
 
-          FIELD(I) = 0._FPP
+          field(i) = 0._f_real
 
-        ! TAPER IF DISTANCE NODE-POI IS BETWEEN "MUTE" AND "MUTE + TAPER"
-        ELSEIF ( (D .GT. MUTE) .AND. (D .LE. DS) ) THEN
+        ! taper IF distance node-poi is between "mute" and "mute + taper"
+        ELSEIF ( (d .gt. mute) .and. (d .le. ds) ) THEN
 
-          T = (D - MUTE) / TAPER                                             !< TAPER PARAMETER
+          t = (d - mute) / taper                                             !< taper parameter
 
-          FIELD(I) = FIELD(I) * (0.5_FPP - 0.5_FPP * COS(T * PI))
+          field(i) = field(i) * (0.5_f_real - 0.5_f_real * COS(t * pi))
 
         ENDIF
 
       ENDDO
 
-    END SUBROUTINE TAPERING_UNSTRUCTURED
+    END SUBROUTINE tapering_unstructured
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-END MODULE SCARFLIB_COMMON
+END MODULE m_scarflib_common
