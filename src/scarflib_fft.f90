@@ -2,7 +2,7 @@ MODULE m_scarflib_fim
 
   ! Purpose:
   !   To compute a random field according to the Fourier Integral Method (FIM). Subprograms rely on the FFTW (version 3) library to
-  !   compute the fast Fourier transform.
+  !   compute the fast Fourier transform and on the TRNG (version 4) library to generate random numbers.
   !   Subroutines 'scarf3d_unstructured_fim' and 'scarf3d_structured_fim' are virtually indentical, with only few differences sparse
   !   at different points in the code (this inhibits somehow the use of 'include' statements to handle a single code)
   !
@@ -128,7 +128,7 @@ MODULE m_scarflib_fim
       REAL(f_real),                                  INTENT(IN)  :: ds           !< grid-step external grid, control max resolvable wavenumber
       REAL(f_real),                 DIMENSION(:),    INTENT(IN)  :: x, y, z      !< position of points along x, y, z
       REAL(f_real),                                  INTENT(IN)  :: dh           !< grid-step of internal (FFT) grid
-      INTEGER(f_int),                                INTENT(IN)  :: acf          !< autocorrelation FUNCTION: 0=vk, 1=gauss
+      INTEGER(f_int),                                INTENT(IN)  :: acf          !< autocorrelation function: 0=vk, 1=gauss
       REAL(f_real),                 DIMENSION(3),    INTENT(IN)  :: cl           !< correlation length
       REAL(f_real),                                  INTENT(IN)  :: sigma        !< standard deviation
       REAL(f_real),                                  INTENT(IN)  :: hurst        !< hurst exponent
@@ -206,7 +206,7 @@ MODULE m_scarflib_fim
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, f_real, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, f_real, mpi_max, mpi_comm_world, ierr)
 
-      ! CYCLE over the three main directions to determine the necessary model size (in number of points) and the absolute position
+      ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
       DO i = 1, 3
 
@@ -1422,7 +1422,7 @@ MODULE m_scarflib_fim
       ALLOCATE(i0(0:ntasks-1), i1(0:ntasks-1))
 
       ! distribute points along x-axis between processes
-      CALL mpi_split_task(nx, ntasks, i0, i1)
+      CALL split_task(nx, ntasks, i0, i1)
 
       ! number of points along x-axis for each process
       DO p = 0, ntasks - 1
@@ -1535,7 +1535,7 @@ MODULE m_scarflib_fim
 #endif
 
       ! release memory
-      nullify(cdum)
+      NULLIFY(cdum)
 
 #ifdef DOUBLE_PREC
       CALL fftw_free(pc)
@@ -1557,32 +1557,43 @@ MODULE m_scarflib_fim
 
     SUBROUTINE transform_along_y(spectrum)
 
-      ! compute many in-place COMPLEX-to-COMPLEX ifft along y-direction on input spectrum. processes are gathered in y-oriented pencils
-      ! based on the input geometry. inside each pencil, the algorithm works on z-slices (to require as less memory as possible) to
-      ! exchange data and compute the ifft.
+      ! Purpose:
+      ! To compute many in-place complex-to-complex inverse FFT of 3D spectrum array along the y-axis. Processes are gathered in pencils
+      ! oriented along the y-axis. Inside each pencil, inverse FFT and data exchange occurs on slices perpendicular to the z-axis in
+      ! order to save memory.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                   !< input field
-      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                 :: sendbuf, recvbuf           !< sender/receiver buffer
-      INTEGER(f_int)                                            :: i, j, k, p, c              !< counters
-      INTEGER(f_int)                                            :: rank, ntasks, ierr         !< mpi stuff
-      INTEGER(f_int)                                            :: pencil
-      INTEGER(f_int)                                            :: nx, ny, nz                 !< total number of points for pencil along each axis
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: i0, i1                     !< local i-index for processes belonging to pencil
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: j0, j1                     !< local j-index for processes belonging to pencil
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: lx, ly                     !< local number of points along x and y axis
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: sendcounts, recvcounts     !< mpi stuff
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                 :: sdispls, rdispls           !< mpi stuff
-      TYPE(c_ptr)                                             :: p1
+      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                   !< input/output spectrum
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                    :: sendbuf, recvbuf
+      INTEGER(f_int)                                                :: i, j, k, p, c
+      INTEGER(f_int)                                                :: rank, ntasks, ierr
+      INTEGER(f_int)                                                :: pencil
+      INTEGER(f_int)                                                :: nx, ny, nz
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: i0, i1
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: j0, j1
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: lx, ly
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: sendcounts, recvcounts
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: sdispls, rdispls
+      TYPE(c_ptr)                                                   :: p1
 
       !-------------------------------------------------------------------------------------------------------------------------------
 
-      ! group processes in pencils oriented along y-axis. "ly" CONTAINS number of points for each process in "pencil" along y
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! set up pencils oriented along y-axis, prepare vectors for data exchange
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! group processes in pencils oriented along y-axis. "ly" contains the number of points for each process in the pencil
       CALL build_pencil(1, pencil, rank, ntasks, ly)
 
-      ! this array will contain the number of points local to each process in current pencil along x
+      ! this array will contain the number of points local to each process in current pencil along x-axis
       ALLOCATE(lx(0:ntasks-1))
 
-      ! number of points along x and z. these are indentical for ALL processes in current pencil.
+      ! number of points along x and z. These are indentical for all processes inside same pencil
       nx = SIZE(spectrum, 1)
       nz = SIZE(spectrum, 3)
 
@@ -1591,7 +1602,7 @@ MODULE m_scarflib_fim
 
       ALLOCATE(j0(0:ntasks-1), j1(0:ntasks-1))
 
-      ! first/last k-index for each process
+      ! first/last j-index for each process
       DO p = 0, ntasks - 1
         IF (p .eq. 0) THEN
           j0(p) = 1
@@ -1605,7 +1616,7 @@ MODULE m_scarflib_fim
       ALLOCATE(i0(0:ntasks-1), i1(0:ntasks-1))
 
       ! distribute points along x-axis between processes
-      CALL mpi_split_task(nx, ntasks, i0, i1)
+      CALL split_task(nx, ntasks, i0, i1)
 
       ! number of points along x-axis for each process
       DO p = 0, ntasks - 1
@@ -1633,11 +1644,15 @@ MODULE m_scarflib_fim
       ALLOCATE(sendbuf(nx * ly(rank)))
       ALLOCATE(recvbuf(ny * lx(rank)))
 
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! allocate memory and prepare plan for FFTW library
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
       ! buffer "cdum" will be used for transform and it is allocated using FFTW memory allocation utility
 #ifdef DOUBLE_PREC
-      pc = fftw_alloc_complex(int(lx(rank) * ny, c_size_t))
+      pc = fftw_alloc_complex(INT(lx(rank) * ny, c_size_t))
 #else
-      pc = fftwf_alloc_complex(int(lx(rank) * ny, c_size_t))
+      pc = fftwf_alloc_complex(INT(lx(rank) * ny, c_size_t))
 #endif
 
       CALL C_F_POINTER(pc, cdum, [lx(rank) * ny])
@@ -1698,7 +1713,11 @@ MODULE m_scarflib_fim
 
       ENDDO
 
-      ! destroy plan
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! release resources
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! destroy FFTW plan
 #ifdef DOUBLE_PREC
       CALL fftw_destroy_plan(p1)
 #else
@@ -1706,7 +1725,7 @@ MODULE m_scarflib_fim
 #endif
 
       ! release memory
-      nullify(cdum)
+      NULLIFY(cdum)
 
 #ifdef DOUBLE_PREC
       CALL fftw_free(pc)
@@ -1728,47 +1747,58 @@ MODULE m_scarflib_fim
 
     SUBROUTINE transform_along_x(spectrum)
 
-      ! compute many in-place COMPLEX-to-REAL ifft along x-direction on input spectrum. processes are gathered in x-oriented pencils
-      ! based on the input geometry. inside each pencil, the algorithm works on z-slices (to require as less memory as possible) to
-      ! exchange data and compute the ifft.
+      ! Purpose:
+      ! To compute many in-place complex-to-complex inverse FFT of 3D spectrum array along the x-axis. Processes are gathered in pencils
+      ! oriented along the x-axis. Inside each pencil, inverse FFT and data exchange occurs on slices perpendicular to the z-axis in
+      ! order to save memory.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                       !< input field
-      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                    :: sendbuf                        !< sender buffer
-      INTEGER(f_int)                                               :: i, j, k, p, c                  !< counters
-      INTEGER(f_int)                                               :: rank, ntasks, ierr             !< mpi stuff
-      INTEGER(f_int)                                               :: nyquist, pencil
-      INTEGER(f_int)                                               :: imax, p_imax
-      INTEGER(f_int)                                               :: nx, ny, nz                     !< total number of points for pencil along each axis
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: offset
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: i0, i1                         !< local i-index for processes belonging to pencil
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: j0, j1                         !< local j-index for processes belonging to pencil
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: lx, ly                         !< local number of points along x and y axis
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: sendcounts, recvcounts         !< mpi stuff
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: sdispls, rdispls               !< mpi stuff
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: r_sendcounts, r_recvcounts     !< mpi stuff
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                    :: r_sdispls, r_rdispls           !< mpi stuff
+      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(INOUT) :: spectrum                       !< input/output spectrum
+      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:)                    :: sendbuf
+      INTEGER(f_int)                                                :: i, j, k, p, c
+      INTEGER(f_int)                                                :: rank, ntasks, ierr
+      INTEGER(f_int)                                                :: nyquist, pencil
+      INTEGER(f_int)                                                :: imax, p_imax
+      INTEGER(f_int)                                                :: nx, ny, nz
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: offset
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: i0, i1
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: j0, j1
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: lx, ly
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: sendcounts, recvcounts
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: sdispls, rdispls
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: r_sendcounts, r_recvcounts
+      INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                    :: r_sdispls, r_rdispls
       REAL(f_real),    ALLOCATABLE, DIMENSION(:)                    :: r_sendbuf, recvbuf
-      TYPE(c_ptr)                                                :: p1
+      TYPE(c_ptr)                                                   :: p1
 
       !-------------------------------------------------------------------------------------------------------------------------------
+
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! set up pencils oriented along x-axis, prepare vectors for data exchange
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
       ! index of nyquist frequency along x-axis
       nyquist = npts(1) / 2 + 1
 
-      ! group processes in pencils oriented along x-axis. "lx" CONTAINS number of points for each process in "pencil" along x
+      ! group processes in pencils oriented along x-axis. "lx" contains number of points for each process in the pencil
       CALL build_pencil(0, pencil, rank, ntasks, lx)
 
-      ! PARAMETER used to determine elements to be sent/received
+      ! parameter used to determine elements to be sent/received
       ALLOCATE(offset(0:ntasks-1))
 
       offset(rank) = gs(1, world_rank) - 1
 
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, offset, 1, mpi_integer, pencil, ierr)
 
-      ! this array will contain the number of points local to each process in current pencil along y
+      ! this array will contain the number of points local to each process in current pencil along y-axis
       ALLOCATE(ly(0:ntasks-1))
 
-      ! number of points along y and z. these are indentical for ALL processes in current pencil.
+      ! number of points along y and z. these are indentical for all processes inside same pencil
       ny = SIZE(spectrum, 2)
       nz = SIZE(spectrum, 3)
 
@@ -1796,7 +1826,7 @@ MODULE m_scarflib_fim
       ALLOCATE(j0(0:ntasks-1), j1(0:ntasks-1))
 
       ! distribute points along y-axis between processes
-      CALL mpi_split_task(ny, ntasks, j0, j1)
+      CALL split_task(ny, ntasks, j0, j1)
 
       ! number of points along y-axis for each process
       DO p = 0, ntasks - 1
@@ -1814,10 +1844,10 @@ MODULE m_scarflib_fim
 
         IF (p_imax .lt. 1) p_imax = 0
 
-        ! process completely to the right of "nyquist" won't send ANY element ("sendcounts=0")
+        ! process completely to the right of "nyquist" won't send any element ("sendcounts=0")
         sendcounts(p) = ly(p) * imax                                            !< points send from process "rank" to process "p"
 
-        ! a process won't receive anything from process "p" IF the latter is to the right of "nyquist" ("recvcounts=0")
+        ! a process won't receive anything from process "p" if the latter is to the right of "nyquist" ("recvcounts=0")
         recvcounts(p) = ly(rank) * p_imax                                       !< points received from process "rank" by process "p"
 
         r_sendcounts(p) = ly(rank) * lx(p)                                      !< points send from process "rank" to process "p"
@@ -1840,14 +1870,17 @@ MODULE m_scarflib_fim
       ALLOCATE(sendbuf(ny * imax), r_sendbuf(nx * ly(rank)))
       ALLOCATE(recvbuf(ny * lx(rank)))
 
-      ! ALLOCATE memory using FFTW allocation utility
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! allocate memory and prepare plan for FFTW library (complex-to-real transforms)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
 #ifdef DOUBLE_PREC
       pc = fftw_alloc_complex(int(ly(rank) * nyquist, c_size_t))
 #else
       pc = fftwf_alloc_complex(int(ly(rank) * nyquist, c_size_t))
 #endif
 
-      ! for in-place transforms, output REAL array is slightly longer than actual physical DIMENSION
+      ! for in-place transforms, output real array is slightly longer than actual physical dimensions
       CALL C_F_POINTER(pc, cdum, [ly(rank) * nyquist])
       CALL C_F_POINTER(pc, rdum, [ly(rank) * nyquist * 2])
 
@@ -1857,6 +1890,10 @@ MODULE m_scarflib_fim
 #else
       p1 = fftwf_plan_many_dft_c2r(1, [npts(1)], ly(rank), cdum, [npts(1)], ly(rank), 1, rdum, [npts(1)], ly(rank), 1,fftw_estimate)
 #endif
+
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! collect data, apply transform and send data back
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
       ! work z-slices one by one
       DO k = 1, nz
@@ -1907,7 +1944,11 @@ MODULE m_scarflib_fim
 
       ENDDO
 
-      ! destroy plan
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! release resources
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! destroy FFTW plan
 #ifdef DOUBLE_PREC
       CALL fftw_destroy_plan(p1)
 #else
@@ -1915,7 +1956,7 @@ MODULE m_scarflib_fim
 #endif
 
       ! release memory
-      nullify(cdum, rdum)
+      NULLIFY(cdum, rdum)
 
 #ifdef DOUBLE_PREC
       CALL fftw_free(pc)
@@ -1938,34 +1979,41 @@ MODULE m_scarflib_fim
 
     SUBROUTINE build_pencil(dir, newcomm, rank, ntasks, n)
 
-      ! group processors in pencils oriented along a specific direction.
+      ! Purpose:
+      ! To group processes falling inside the same pencil oriented along a specific direction.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(f_int),                                        INTENT(IN)  :: dir                    !< stencil direction (0=x, 1=y, 2=z)
-      INTEGER(f_int),                                        INTENT(OUT) :: newcomm                !< handle to new communicator
-      INTEGER(f_int),                                        INTENT(OUT) :: rank                   !< rank of calling process in new communicator
-      INTEGER(f_int),                                        INTENT(OUT) :: ntasks                 !< number of processes in new communicator
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:),             INTENT(OUT) :: n                      !< number of points per process in pencil direction
+      INTEGER(f_int),                                        INTENT(IN)  :: dir            !< pencil direction (0=x, 1=y, 2=z)
+      INTEGER(f_int),                                        INTENT(OUT) :: newcomm        !< handle to new communicator
+      INTEGER(f_int),                                        INTENT(OUT) :: rank           !< rank of calling process in new communicator
+      INTEGER(f_int),                                        INTENT(OUT) :: ntasks         !< number of processes in new communicator
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:),             INTENT(OUT) :: n              !< number of points per process in pencil direction
       INTEGER(f_int)                                                     :: i, ierr
       INTEGER(f_int),              DIMENSION(0:world_size-1)             :: color
-      LOGICAL,                   DIMENSION(2)                          :: bool
+      LOGICAL,                     DIMENSION(2)                          :: bool
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! group processes in stencils
+      ! group processes into pencils
       DO i = 0, world_size - 1
 
         color(i) = 0
 
-        ! stencil along x-axis
+        ! pencil oriented along x-axis
         IF (dir .eq. 0) THEN
           bool(1) = (gs(2, i) .eq. gs(2, world_rank)) .and. (ge(2, i) .eq. ge(2, world_rank))
           bool(2) = (gs(3, i) .eq. gs(3, world_rank)) .and. (ge(3, i) .eq. ge(3, world_rank))
-        ! stencil along y-axis
-        elseif (dir .eq. 1) THEN
+        ! pencil oriented along y-axis
+        ELSEIF (dir .eq. 1) THEN
           bool(1) = (gs(1, i) .eq. gs(1, world_rank)) .and. (ge(1, i) .eq. ge(1, world_rank))
           bool(2) = (gs(3, i) .eq. gs(3, world_rank)) .and. (ge(3, i) .eq. ge(3, world_rank))
-        ! stencil along z-axis
-        elseif (dir .eq. 2) THEN
+        ! pencil oriented along z-axis
+        ELSEIF (dir .eq. 2) THEN
           bool(1) = (gs(1, i) .eq. gs(1, world_rank)) .and. (ge(1, i) .eq. ge(1, world_rank))
           bool(2) = (gs(2, i) .eq. gs(2, world_rank)) .and. (ge(2, i) .eq. ge(2, world_rank))
         ENDIF
@@ -1974,19 +2022,19 @@ MODULE m_scarflib_fim
 
       ENDDO
 
-      ! process belonging to the same stencil have same color
+      ! process belonging to the same pencil have same color
       color(world_rank) = MAXVAL(color, dim = 1)
 
       ! create communicator subgroup
       CALL mpi_comm_split(mpi_comm_world, color(world_rank), world_rank, newcomm, ierr)
 
-      ! process id and communicator SIZE
+      ! process id and communicator size
       CALL mpi_comm_rank(newcomm, rank, ierr)
       CALL mpi_comm_size(newcomm, ntasks, ierr)
 
       ALLOCATE(n(0:ntasks - 1))
 
-      ! number of points along direction "dir" for calling process
+      ! number of points along pencil direction for calling process
       n(rank) = ge(dir + 1, world_rank) - gs(dir + 1, world_rank) + 1
 
       ! make whole communicator aware of points for each process
@@ -2000,32 +2048,38 @@ MODULE m_scarflib_fim
 
     SUBROUTINE compute_spectrum(ds, ls, le, dh, acf, cl, sigma, hurst, seed, spec, time)
 
-      ! compute the spectrum of a random field characterised by a specific autocorrelation FUNCTION, correlation length, standard deviation,
-      ! and hurst exponent (not used for gaussian fields). based on the fourier integral method of pardo-iguzquiza and chica-olmo.
+      ! Purpose:
+      ! To compute the power spectral density function (PSDF) corresponding to a specific autocorrelation function (ACF). Spectrum
+      ! is tapered if grid-step of external grid is not equal to grid-step of internal (FFT) grid.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(f_real),                                                        INTENT(IN)  :: ds
-      INTEGER(f_int),     DIMENSION(3),                                   INTENT(IN)  :: ls, le                !< global indices
-      REAL(f_real),                                                        INTENT(IN)  :: dh                    !< grid-step
-      INTEGER(f_int),                                                     INTENT(IN)  :: acf                   !< autocorrelation FUNCTION
-      REAL(f_real),        DIMENSION(3),                                   INTENT(IN)  :: cl                    !< correlation length (can be anisotropic)
-      REAL(f_real),                                                        INTENT(IN)  :: sigma                 !< standard deviation (sigma%/100)
-      REAL(f_real),                                                        INTENT(IN)  :: hurst                 !< hurst exponent
-      INTEGER(f_int),                                                     INTENT(IN)  :: seed                  !< initial seed number
-      COMPLEX(f_real),     DIMENSION(ls(1):le(1),ls(2):le(2),ls(3):le(3)), INTENT(OUT) :: spec                  !< spectrum
-      REAL(f_real),        DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
-      INTEGER(f_int)                                                                  :: i, j, k               !< indices
-      REAL(f_real)                                                                     :: butter, num, amp      !< used to compute spectrum
-      REAL(f_real)                                                                     :: kc, kr                !< used to compute spectrum
-      !REAL(f_real)                                                                     :: r
-      REAL(f_dble)                                                                  :: tictoc                !< used for timing
-      REAL(f_real),        DIMENSION(3)                                                :: dk                    !< resolution in wavenumber domain
-      !REAL(f_real),        DIMENSION(npts(1))                                          :: harvest               !< random values
-      REAL(f_real),        DIMENSION(npts(1))                                          :: kx                    !< wavenumber vector (x)
-      REAL(f_real),        DIMENSION(npts(2))                                          :: ky                    !< wavenumber vector (y)
-      REAL(f_real),        DIMENSION(npts(3))                                          :: kz                    !< wavenumber vector (z)
-      REAL(c_real),      DIMENSION(:),                                   POINTER     :: r
-      REAL(c_real),      DIMENSION(:,:,:),                               POINTER     :: harvest
-      TYPE(c_ptr)                                                                   :: cptr
+      REAL(f_real),                                                    INTENT(IN)  :: ds
+      INTEGER(f_int),  DIMENSION(3),                                   INTENT(IN)  :: ls, le                !< global indices
+      REAL(f_real),                                                    INTENT(IN)  :: dh                    !< grid-step
+      INTEGER(f_int),                                                  INTENT(IN)  :: acf                   !< autocorrelation FUNCTION
+      REAL(f_real),    DIMENSION(3),                                   INTENT(IN)  :: cl                    !< correlation length (can be anisotropic)
+      REAL(f_real),                                                    INTENT(IN)  :: sigma                 !< standard deviation (sigma%/100)
+      REAL(f_real),                                                    INTENT(IN)  :: hurst                 !< hurst exponent
+      INTEGER(f_int),                                                  INTENT(IN)  :: seed                  !< initial seed number
+      COMPLEX(f_real), DIMENSION(ls(1):le(1),ls(2):le(2),ls(3):le(3)), INTENT(OUT) :: spec                  !< spectrum
+      REAL(f_real),    DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
+      INTEGER(f_int)                                                               :: i, j, k
+      LOGICAL                                                                      :: filter
+      REAL(f_real)                                                                 :: butter, num, amp
+      REAL(f_real)                                                                 :: kc, kr
+      REAL(f_dble)                                                                 :: tictoc
+      REAL(f_real),    DIMENSION(3)                                                :: dk
+      REAL(f_real),    DIMENSION(npts(1))                                          :: kx
+      REAL(f_real),    DIMENSION(npts(2))                                          :: ky
+      REAL(f_real),    DIMENSION(npts(3))                                          :: kz
+      REAL(c_real),    DIMENSION(:),                                   POINTER     :: r
+      REAL(c_real),    DIMENSION(:,:,:),                               POINTER     :: harvest
+      TYPE(c_ptr)                                                                  :: cptr
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2044,9 +2098,14 @@ MODULE m_scarflib_fim
       ! nyquist wavenumber
       !knyq = pi / dh
 
-      ! corner wavenumber for filtering spectrum is controlled by mesh grid-step
+      ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
       ! kc = pi / (ds) * SQRT(3._f_real)
       kc = pi / ds
+
+      filter = .false.
+
+      ! spectrum is filtered only if grid-step of internal mesh is not equal to grid-step of external mesh
+      IF (ds .ne. dh) filter = .true.
 
       ! vectors go from 0 to nyquist and THEN back again until dk
       kx = [[(i * dk(1), i = 0, npts(1)/2)], [(i * dk(1), i = npts(1)/2-1, 1, -1)]]
@@ -2057,7 +2116,7 @@ MODULE m_scarflib_fim
       IF (acf .eq. 0) THEN
         num = 8._f_real * SQRT(pi**3) * GAMMA(hurst + 1.5_f_real) * sigma**2 * PRODUCT(cl) / GAMMA(hurst)
         fun => vk_psdf
-      elseif (acf .eq. 1) THEN
+      ELSEIF (acf .eq. 1) THEN
         num = sigma**2 * PRODUCT(cl) * SQRT(pi**3)
         fun => gs_psdf
       ENDIF
@@ -2080,13 +2139,13 @@ MODULE m_scarflib_fim
             kr = SQRT(kx(i)**2 + ky(j)**2 + kz(k)**2)
 
             ! fourth-order low-pass butterworth filter
-            !butter = 1._f_real / SQRT(1._f_real + (kr / kc)**(2 * 4))
+            ! butter = 1._f_real / SQRT(1._f_real + (kr / kc)**(2 * 4))
 
             butter = 1._f_real
 
-            !!!!IF (kr .gt. kc) butter = 0._f_real
+            IF (filter .and. (kr .gt. kc)) butter = 0._f_real
 
-            ! now "kr" is the PRODUCT "k * cl"
+            ! now "kr" is the product "k * cl"
             kr = (kx(i) * cl(1))**2 + (ky(j) * cl(2))**2 + (kz(k) * cl(3))**2
 
             ! complete power spectral density and go to amplitude spectrum
@@ -2095,7 +2154,6 @@ MODULE m_scarflib_fim
             ! apply filter
             amp = amp * butter
 
-            !r = harvest(i - ls(1) + 1, j - ls(2) + 1, k - ls(3) + 1) * 2._f_real * pi
             harvest(i, j, k) = harvest(i, j, k) * 2._f_real * pi
 
             ! combine amplitude and random phase
@@ -2105,7 +2163,7 @@ MODULE m_scarflib_fim
         ENDDO
       ENDDO
 
-      nullify(r, harvest)
+      NULLIFY(r, harvest)
       CALL free_mem(cptr)
 
 #ifdef TIMING
@@ -2116,6 +2174,7 @@ MODULE m_scarflib_fim
       CALL watch_start(tictoc)
 #endif
 
+      ! apply symmetry conditions
       CALL enforce_symmetry(ls, le, spec)
 
 #ifdef TIMING
@@ -2130,33 +2189,18 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE mpi_split_task(npts, ntasks, i0, i1)
-
-      ! distribute "npts" points amongst "ntasks" processes and, for each process, return the lowest and highest index.
-
-      INTEGER(f_int),                        INTENT(IN)  :: npts                          !< number of points to be split
-      INTEGER(f_int),                        INTENT(IN)  :: ntasks                     !< number of mpi processes
-      INTEGER(f_int), DIMENSION(0:ntasks-1), INTENT(OUT) :: i0, i1                     !< 1st/last index
-      INTEGER(f_int)                                     :: p                          !< counter
-
-      !------------------------------------------------------------------------------------------------------------------------------
-
-      DO p = 0, ntasks - 1
-        i0(p) = 1 + int( REAL(npts, f_real) / REAL(ntasks, f_real) * REAL(p, f_real) )
-        i1(p) = int( REAL(npts, f_real) / REAL(ntasks, f_real) * REAL(p + 1, f_real) )
-      ENDDO
-
-    END SUBROUTINE mpi_split_task
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
     REAL(f_real) FUNCTION vk_psdf(m, hurst)
 
-      ! FUNCTION used to generate von karman (and exponential) random fields
+      ! Purpose:
+      ! To compute the denominator of Von Karman (or exponential, if hurst = 0.5) PSDFs.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(f_real), INTENT(IN) :: m                  !< PRODUCT (wavenumber*cl)**2
+      REAL(f_real), INTENT(IN) :: m                  !< quantity (wavenumber*cl)**2
       REAL(f_real), INTENT(IN) :: hurst              !< hurst exponent
 
       !-----------------------------------------------------------------------------------------------------------------------------
@@ -2169,16 +2213,23 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(f_real) FUNCTION gs_psdf(m, dummy)
+    REAL(f_real) FUNCTION gs_psdf(m, void)
 
-      ! FUNCTION used to generate gaussian random fields
+      ! Purpose:
+      ! To compute the denominator of Gaussian PSDFs. Second argument is not used but is kept to allow generic procedure pointers.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      REAL(f_real), INTENT(IN) :: m                  !< PRODUCT (wavenumber*cl)**2
-      REAL(f_real), INTENT(IN) :: dummy              !< this variable is not used
+      REAL(f_real), INTENT(IN) :: m                 !< quantity (wavenumber*cl)**2
+      REAL(f_real), INTENT(IN) :: void              !< this variable is not used
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      gs_psdf = exp(0.25_f_real * m)
+      gs_psdf = EXP(0.25_f_real * m)
 
     END FUNCTION gs_psdf
 
@@ -2188,15 +2239,23 @@ MODULE m_scarflib_fim
 
     SUBROUTINE enforce_symmetry(fs, fe, spec)
 
-      INTEGER(f_int),              DIMENSION(3),                                   INTENT(IN)    :: fs, fe
-      COMPLEX(f_real),              DIMENSION(fs(1):fe(1),fs(2):fe(2),fs(3):fe(3)), INTENT(INOUT) :: spec
+      ! Purpose:
+      ! To apply Hermitian symmetry on the PSDF.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),              DIMENSION(3),                                   INTENT(IN)    :: fs, fe        !< grid indices
+      COMPLEX(f_real),             DIMENSION(fs(1):fe(1),fs(2):fe(2),fs(3):fe(3)), INTENT(INOUT) :: spec          !< spectrum
       INTEGER(f_int)                                                                             :: i
       INTEGER(f_int)                                                                             :: rank, ntasks
       INTEGER(f_int)                                                                             :: newcomm, ierr, color
       INTEGER(f_int),              DIMENSION(3)                                                  :: nyquist
       INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                                                  :: new2world
-
-      LOGICAL,                   DIMENSION(2)                                                  :: bool
+      LOGICAL,                     DIMENSION(2)                                                  :: bool
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2206,7 +2265,7 @@ MODULE m_scarflib_fim
       ENDDO
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
-      ! create a new communicator containing only those processes crossing x=1 and x=npts(1)/2 + 1
+      ! create a new communicator containing only those processes crossing x-axis at 1 and npts(1)/2 + 1
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
       color = 0
@@ -2229,7 +2288,11 @@ MODULE m_scarflib_fim
       ! i-th rank in "newcomm" has its global rank contained in "new2world"
       CALL map_ranks(newcomm, mpi_comm_world, new2world)
 
-      ! IF only one of conditions above is true, we can work on i=1 and i=nyquist(1) at the same time...
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! exchange data and enforce symmetry
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! if only one of conditions above is true, we can work on i=1 and i=nyquist(1) at the same time...
       IF ( (color .eq. 1) .or. (color .eq. 2) ) THEN
 
         IF (bool(1)) THEN
@@ -2241,7 +2304,7 @@ MODULE m_scarflib_fim
         CALL exchange_conjg
 
       ! ... otherwise work in two steps
-      elseif (color .eq. 3) THEN
+      ELSEIF (color .eq. 3) THEN
 
         i = 1
 
@@ -2264,16 +2327,16 @@ MODULE m_scarflib_fim
         SUBROUTINE exchange_conjg
 
           COMPLEX(f_real), DIMENSION(fs(2):fe(2),fs(3):fe(3)) :: buffer, sendbuf
-          INTEGER(f_int)                                     :: j, k, p, l, c, cy, cz
-          INTEGER(f_int)                                     :: js, je, ks, ke
-          INTEGER(f_int)                                     :: j0, j1, k0, k1
-          INTEGER(f_int)                                     :: ierr
-          INTEGER(f_int), DIMENSION(2)                       :: rsizes, rsubsizes, rstarts
-          INTEGER(f_int), DIMENSION(3)                       :: ssizes, ssubsizes, sstarts
-          INTEGER(f_int), DIMENSION(0:ntasks-1)              :: sendcounts, recvcounts
-          INTEGER(f_int), DIMENSION(0:ntasks-1)              :: sdispls, rdispls
-          INTEGER(f_int), DIMENSION(0:ntasks-1)              :: sendtypes, recvtypes
-          LOGICAL                                          :: bool
+          INTEGER(f_int)                                      :: j, k, p, l, c, cy, cz
+          INTEGER(f_int)                                      :: js, je, ks, ke
+          INTEGER(f_int)                                      :: j0, j1, k0, k1
+          INTEGER(f_int)                                      :: ierr
+          INTEGER(f_int), DIMENSION(2)                        :: rsizes, rsubsizes, rstarts
+          INTEGER(f_int), DIMENSION(3)                        :: ssizes, ssubsizes, sstarts
+          INTEGER(f_int), DIMENSION(0:ntasks-1)               :: sendcounts, recvcounts
+          INTEGER(f_int), DIMENSION(0:ntasks-1)               :: sdispls, rdispls
+          INTEGER(f_int), DIMENSION(0:ntasks-1)               :: sendtypes, recvtypes
+          LOGICAL                                             :: bool
 
           !-------------------------------------------------------------------------------------------------------------------------
 
@@ -2316,7 +2379,7 @@ MODULE m_scarflib_fim
 
           rsizes = [fe(2) - fs(2) + 1, fe(3) - fs(3) + 1]
 
-          ! copy relevant part of "spec". this is not strictly necessary but may improve cache access.
+          ! copy relevant part of "spec". This is not strictly necessary but may improve cache access.
           DO k = fs(3), fe(3)
             DO j = fs(2), fe(2)
               buffer(j, k) = spec(i, j, k)
@@ -2338,10 +2401,10 @@ MODULE m_scarflib_fim
             ks = npts(3) - ge(3, l) + 2
             ke = npts(3) - gs(3, l) + 2
 
-            j0 = max(fs(2), js)
+            j0 = MAX(fs(2), js)
             j1 = MIN(fe(2), je)
 
-            k0 = max(fs(3), ks)
+            k0 = MAX(fs(3), ks)
             k1 = MIN(fe(3), ke)
 
             ! determine data to be sent/received to/from process "p"
@@ -2402,10 +2465,10 @@ MODULE m_scarflib_fim
               ks = 1
               ke = 1
 
-              j0 = max(fs(2), js)
+              j0 = MAX(fs(2), js)
               j1 = MIN(fe(2), je)
 
-              k0 = max(fs(3), ks)
+              k0 = MAX(fs(3), ks)
               k1 = MIN(fe(3), ke)
 
               ! determine data to be sent/received to/from process "p"
@@ -2445,10 +2508,10 @@ MODULE m_scarflib_fim
               ks = npts(3) - ge(3, l) + 2
               ke = npts(3) - gs(3, l) + 2
 
-              j0 = max(fs(2), js)
+              j0 = MAX(fs(2), js)
               j1 = MIN(fe(2), je)
 
-              k0 = max(fs(3), ks)
+              k0 = MAX(fs(3), ks)
               k1 = MIN(fe(3), ke)
 
               ! determine data to be sent/received to/from process "p"
@@ -2494,26 +2557,28 @@ MODULE m_scarflib_fim
           sendcounts = 0
           recvcounts = 0
 
-          ! replace buffer on the lhs with spec on the next 3 blocks
-          ! take COMPLEX conjugate
-          ! delta*, GAMMA*, phi*, epsilon*
-          DO k = max(nyquist(3) + 1, fs(3)), fe(3)
+          ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+          ! update spectrum with conjugate values
+          ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+          ! delta*, gamma*, phi*, epsilon*
+          DO k = MAX(nyquist(3) + 1, fs(3)), fe(3)
             DO j = fs(2), fe(2)
-              spec(i, j, k) = conjg(buffer(j, k))
+              spec(i, j, k) = CONJG(buffer(j, k))
             ENDDO
           ENDDO
 
           ! beta*
-          DO k = max(1, fs(3)), 1
-            DO j = max(nyquist(2) + 1, fs(2)), fe(2)
-              spec(i, j, k) = conjg(buffer(j, k))
+          DO k = MAX(1, fs(3)), 1
+            DO j = MAX(nyquist(2) + 1, fs(2)), fe(2)
+              spec(i, j, k) = CONJG(buffer(j, k))
             ENDDO
           ENDDO
 
           ! theta*
-          DO k = max(nyquist(3), fs(3)), MIN(nyquist(3), fe(3))
-            DO j = max(nyquist(2) + 1, fs(2)), fe(2)
-              spec(i, j, k) = conjg(buffer(j, k))
+          DO k = MAX(nyquist(3), fs(3)), MIN(nyquist(3), fe(3))
+            DO j = MAX(nyquist(2) + 1, fs(2)), fe(2)
+              spec(i, j, k) = CONJG(buffer(j, k))
             ENDDO
           ENDDO
 
@@ -2525,97 +2590,22 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE gather_data(comm, i0, spec, jmap, kmap, buffer)
-
-      ! gather data from ALL processes in a communicator in root process. global indices of gathered data are returned as well.
-
-      INTEGER(f_int),                                INTENT(IN)  :: comm                             !< mpi communicator
-      INTEGER(f_int),                                INTENT(IN)  :: i0                               !< local index
-      COMPLEX(f_real),              DIMENSION(:,:,:), INTENT(IN)  :: spec                             !< spectrum
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: jmap, kmap                       !< global indices of collected data
-      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:),     INTENT(OUT) :: buffer                           !< collected data
-      COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:)                :: dum                              !< local buffer
-      INTEGER(f_int)                                             :: c, j, k, p                       !< counters
-      INTEGER(f_int)                                             :: npts
-      INTEGER(f_int)                                             :: ntasks, rank, ierr               !< mpi stuff
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                  :: comm2global, recvcounts, displs  !< mpi stuff
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      CALL mpi_comm_size(comm, ntasks, ierr)
-
-      CALL mpi_comm_rank(comm, rank, ierr)
-
-      ALLOCATE(comm2global(0:ntasks-1))
-
-      ! comm-rank to global-rank mapping
-      comm2global(rank) = world_rank
-
-      CALL mpi_allgather(mpi_in_place, 0, mpi_integer, comm2global, 1, mpi_integer, comm, ierr)
-
-      ALLOCATE(recvcounts(0:ntasks-1), displs(0:ntasks-1))
-
-      recvcounts(rank) = (ge(2, world_rank) - gs(2, world_rank) + 1) * (ge(3, world_rank) - gs(3, world_rank) + 1)
-
-      ! number of points to be received by each process in "comm" communicator
-      CALL mpi_allgather(mpi_in_place, 0, mpi_integer, recvcounts, 1, mpi_integer, comm, ierr)
-
-      ! total number of points to be received
-      npts = SUM(recvcounts)
-
-      ALLOCATE(buffer(npts), jmap(npts), kmap(npts))
-
-      ! determine their relative displacement
-      displs(0) = 0
-
-      DO p = 1, ntasks - 1
-        displs(p) = displs(p - 1) + recvcounts(p - 1)
-      ENDDO
-
-      ALLOCATE(dum(SIZE(spec, 2), SIZE(spec, 3)))
-
-      ! prepare data to be transferred
-      DO k = 1, SIZE(spec, 3)
-        DO j = 1, SIZE(spec, 2)
-          dum(j, k) = spec(i0, j, k)
-        ENDDO
-      ENDDO
-
-      ! collect data into "buffer"
-      CALL mpi_gatherv(dum, SIZE(dum), cplx_type, buffer, recvcounts, displs, cplx_type, 0, comm, ierr)
-
-      DEALLOCATE(dum, displs, recvcounts)
-
-      c = 0
-
-      ! create maps for "j" and "k" indices for ALL points in "buffer"
-      DO p = 0, ntasks - 1
-        DO k = gs(3, comm2global(p)), ge(3, comm2global(p))
-          DO j = gs(2, comm2global(p)), ge(2, comm2global(p))
-            c       = c + 1
-            jmap(c) = j
-            kmap(c) = k
-          ENDDO
-        ENDDO
-      ENDDO
-
-      DEALLOCATE(comm2global)
-
-    END SUBROUTINE gather_data
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
     SUBROUTINE exchange_halo(cartopo, buffer)
 
-      ! exchange halo between neighboring processes. the halo is represented by the first column/row (along x/y, respectively) of
-      ! "buffer"
+      ! Purpose:
+      ! To exchange points inside halos between neighboring processes. An halo is represented by the first column/row (along x/y,
+      ! respectively) of input/output array.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
       INTEGER(f_int),                   INTENT(IN)    :: cartopo                         !< handle to cartesian topology
-      REAL(f_real),    DIMENSION(:,:,:), INTENT(INOUT) :: buffer                          !< random field
+      REAL(f_real),   DIMENSION(:,:,:), INTENT(INOUT) :: buffer                         !< random field with halo
       INTEGER(f_int)                                  :: i
-      INTEGER(f_int)                                  :: nx, ny, nz                       !< points along x-/y-direction
+      INTEGER(f_int)                                  :: nx, ny, nz
       INTEGER(f_int)                                  :: ierr, neg, pos
       INTEGER(f_int)                                  :: from_neg, to_pos
       INTEGER(f_int), DIMENSION(3)                    :: sizes, subsizes, rstarts, sstarts
@@ -2640,7 +2630,7 @@ MODULE m_scarflib_fim
           subsizes = [1, ny, nz]            !< shape of halo
           rstarts  = [0, 1, 1]              !< initial address for data to be received
           sstarts  = [nx, 1, 1]             !< initial address for data to be sent
-        elseif (i .eq. 1) THEN
+        ELSEIF (i .eq. 1) THEN
           subsizes = [nx + 1, 1, nz]        !< shape of halo
           rstarts  = [0, 0, 1]              !< initial address for data to be received
           sstarts  = [0, ny, 1]             !< initial address for data to be sent
@@ -2675,18 +2665,26 @@ MODULE m_scarflib_fim
 
     SUBROUTINE interpolate(pmax, xyz, delta, v)
 
+      ! Purpose:
+      ! To interpolate values from internal (FFT) grid into external one. Possible interpolation schemes are nearest neighbor and
+      ! bilinear. Note that bilinear interpolation has a smoothing effect stronger than nearest neighbor.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version (nearest neighbor interp.)
       !
 
-      INTEGER(f_int),                   INTENT(IN)  :: pmax
-      REAL(f_real),    DIMENSION(:,:),   INTENT(IN)  :: xyz                          !< points location
-      REAL(f_real),    DIMENSION(:,:,:), INTENT(IN)  :: delta                            !< random field
-      REAL(f_real),    DIMENSION(:),     INTENT(OUT) :: v                            !< interpolated values
-      INTEGER(f_int)                                :: p                                !< counters
-      INTEGER(f_int)                                :: i0, j0, k0                       !< indices
-      REAL(f_real)                                   :: i, j, k
-      REAL(f_real)                                   :: px, py, pz, ipx, ipy             !< interpolation stuff
-      REAL(f_real)                                   :: a, b                             !< interpolation stuff
-      REAL(f_real),    DIMENSION(2,2)                :: f                                !< interpolation stuff
+      INTEGER(f_int),                   INTENT(IN)  :: pmax                         !< highest index to consider
+      REAL(f_real),   DIMENSION(:,:),   INTENT(IN)  :: xyz                          !< external mesh nodes projected onto internal mesh
+      REAL(f_real),   DIMENSION(:,:,:), INTENT(IN)  :: delta                        !< input field
+      REAL(f_real),   DIMENSION(:),     INTENT(OUT) :: v                            !< interpolated values
+      INTEGER(f_int)                                :: p
+      INTEGER(f_int)                                :: i0, j0, k0
+      REAL(f_real)                                  :: i, j, k
+      REAL(f_real)                                  :: px, py, pz, ipx, ipy
+      REAL(f_real)                                  :: a, b
+      REAL(f_real),   DIMENSION(2,2)                :: f
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2697,6 +2695,17 @@ MODULE m_scarflib_fim
         j = xyz(2, p)
         k = xyz(3, p)
 
+        ! nearest neighbor
+        ! {
+        i0 = NINT(i)
+        j0 = NINT(j)
+        k0 = NINT(k)
+
+        v(p) = delta(i0, j0, k0)
+        ! }
+
+        ! bilinear
+        ! {
         ! i0 = FLOOR(i)
         ! j0 = FLOOR(j)
         ! k0 = FLOOR(k)
@@ -2723,12 +2732,7 @@ MODULE m_scarflib_fim
         !
         ! ! linear interpolated between level 1 and 2
         ! v(p) = a * (1._f_real - pz) + b * pz
-
-        i0 = NINT(i)
-        j0 = NINT(j)
-        k0 = NINT(k)
-
-        v(p) = delta(i0, j0, k0)
+        ! }
 
       ENDDO
 
@@ -2740,13 +2744,20 @@ MODULE m_scarflib_fim
 
     SUBROUTINE coords2index(npts, dims, coords, fs, fe)
 
-      ! map process coordinates into first/last indices
+      ! Purpose:
+      ! To return first/last grid index for the calling process in a given topology.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: npts                        !< points along each axis
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: npts                        !< total number of grid points along each axis
       INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: dims                        !< number of processes along each axis
       INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: coords                      !< calling process coordinates
-      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: fs, fe                      !< resulting first/last indices
-      INTEGER(f_int)                            :: i                           !< counter
+      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: fs, fe                      !< resulting first/last index
+      INTEGER(f_int)                            :: i
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2763,39 +2774,49 @@ MODULE m_scarflib_fim
 
     SUBROUTINE best_config(dims)
 
-      ! compute best grid of processes
+      ! Purpose:
+      ! To return an optimal grid of process according to some specific cost function.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
       INTEGER(f_int),              DIMENSION(3), INTENT(OUT) :: dims
-      !INTEGER(f_int),                            INTENT(OUT) :: niter
-
       INTEGER(f_int)                                         :: i, j, k, l, c
-      INTEGER(f_int)                                         :: n2, n3 !, n
+      INTEGER(f_int)                                         :: n2, n3
       INTEGER(f_int)                                         :: a, b
       INTEGER(f_int),              DIMENSION(3)              :: v1, v2
       INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: fact3, fact2
       INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: list
-
-      REAL(f_real) :: n, niter
+      REAL(f_real)                                           :: val, minimum
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      !niter = HUGE(1)
-      niter = HUGE(1._f_real)
+      minimum = HUGE(1._f_real)
 
       c = 0
 
-      ! factorise number of available processes
+      ! factorise the number of available processes (return pairs)
       CALL factorization(world_size, fact3)
 
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! factorise each pair member (thus resulting in a triplet of numbers), evaluate cost function and eventually store triplet
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+      ! number of pairs found
       n3 = SIZE(fact3, 2)
 
+      ! allocate a list where to store all the factorized triplets. Factor of 10 seems to be large enough for 200k processes
       ALLOCATE(list(3, n3 * 10))
 
       list(:,:) = 0
 
-      ! loop over factorised processes
+      ! loop over factorized processes
       DO l = 1, n3
 
+        ! loop over pair members
         DO k = 1, 2
 
           IF (k .eq. 1) THEN
@@ -2806,53 +2827,58 @@ MODULE m_scarflib_fim
             a = fact3(2, l)
           ENDIF
 
+          ! factorization of a number returns a new pair
           CALL factorization(b, fact2)
 
           n2 = SIZE(fact2, 2)
 
+          ! loop over new pairs
           DO j = 1, n2
 
+            ! build candidate triplet
             v1 = [a, fact2(:, j)]
 
-            ! skip to next processes grid IF already analysed
+            ! skip to next pair if current triplet already analysed ("v1" is already in "list")
             IF (match(v1, c, list) .eqv. .true.) CYCLE
 
             c = c + 1
 
-            ! add to list
+            ! triplet is new: add it to the list
             list(:, c) = v1
 
+            ! evaluate cost function for all three possible arrangements (permutations) of the triplet
             DO i = 0, 2
 
-              v1 = cshift(v1, 1)
+              v1 = CSHIFT(v1, 1)
 
-              CALL test_config(v1, n)
+              ! evaluate cost function
+              CALL cost_fun(v1, val)
 
-              IF (n .lt. niter) THEN
-                dims  = v1
-                niter = n
+              IF (val .lt. minimum) THEN
+                dims    = v1
+                minimum = val
               ENDIF
 
               v2 = [v1(1), v1(3), v1(2)]
 
-              CALL test_config(v2, n)
+              CALL cost_fun(v2, val)
 
-              IF (n .lt. niter) THEN
-                dims  = v2
-                niter = n
+              IF (val .lt. minimum) THEN
+                dims    = v2
+                minimum = val
               ENDIF
 
             ENDDO
-            ! END permutations
+            ! end permutations
 
           ENDDO
-          ! END loop over factor pairs for "a/b"
+          ! end loop over factor pairs for "a/b"
 
         ENDDO
-        ! END loop over "a/b"
+        ! end loop over "a/b"
 
       ENDDO
-      ! END loop over factor pairs for "world_size"
+      ! end loop over factor pairs for "world_size"
 
       DEALLOCATE(fact3, fact2, list)
 
@@ -2885,7 +2911,7 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! SUBROUTINE test_config(dims, niter)
+    ! SUBROUTINE cost_fun(dims, niter)
     !
     !   INTEGER(f_int),              DIMENSION(3),             INTENT(IN)  :: dims
     !   INTEGER(f_int),                                        INTENT(OUT) :: niter
@@ -2963,13 +2989,23 @@ MODULE m_scarflib_fim
     !
     !   CALL mpi_comm_free(cartopo, ierr)
     !
-    ! END SUBROUTINE test_config
+    ! END SUBROUTINE cost_fun
 
-    SUBROUTINE test_config(dims, measure)
+    SUBROUTINE cost_fun(dims, measure)
 
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: dims
-      REAL(f_real),                  INTENT(OUT) :: measure
-      REAL(f_real),    DIMENSION(3)              :: side
+      ! Purpose:
+      ! To return a cost estimate based on the size of a grid block assigned to each process, where the cost is represented by differences
+      ! along each side (the goal is to having blocks in shape of cubes).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: dims           !< processes in each direction
+      REAL(f_real),                 INTENT(OUT) :: measure        !< cost
+      REAL(f_real),   DIMENSION(3)              :: side           !< grid nodes in a block along each direction
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2977,8 +3013,7 @@ MODULE m_scarflib_fim
 
       measure = abs(side(1) - side(2)) + abs(side(1) - side(3)) + abs(side(2) - side(3))
 
-    END SUBROUTINE test_config
-
+    END SUBROUTINE cost_fun
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -2986,7 +3021,15 @@ MODULE m_scarflib_fim
 
     SUBROUTINE factorization(n, factors)
 
-      ! factorise INTEGER "n" based on trial division method
+      ! Purpose:
+      ! To compute the factorization of an integer number based on the trial division method. For example, for "n=12" the output looks
+      ! like "[1 12; 2 6; 3 4]"
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
       INTEGER(f_int),                              INTENT(IN)  :: n
       INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: factors
@@ -2996,7 +3039,7 @@ MODULE m_scarflib_fim
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! max possible factor
+      ! max possible number of factors
       s = FLOOR(SQRT(REAL(n, f_real)))
 
       ALLOCATE(buffer(2, s))

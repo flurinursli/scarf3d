@@ -429,7 +429,7 @@ MODULE m_scarflib_common
     SUBROUTINE split_task(npts, ntasks, i0, i1)
 
       ! Purpose:
-      !   To distribute an hypotethical vector of 'npts' elements between 'ntasks' processes, returning the first and last index.
+      !   To evenly distribute elements of vector amongst processes, returning first and last index for each process.
       !
       ! Revisions:
       !     Date                    Description of change
@@ -512,15 +512,14 @@ MODULE m_scarflib_common
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
-      !   11/05/20                  handle case when min(gs) != 1
+      !   11/05/20                  handle case when min(gs) .ne. 1
       !
 
-      CHARACTER(LEN=1),                                INTENT(IN) :: direction                          !< axis cut by the slice
+      INTEGER(f_int),                                  INTENT(IN) :: direction                          !< axis (1=x,2=y,3=z) cut by the slice
       INTEGER(f_int),                                  INTENT(IN) :: plane                              !< slice index in global coordinates
       REAL(f_real),                  DIMENSION(:,:,:), INTENT(IN) :: v                                  !< random field
       CHARACTER(LEN=*),                                INTENT(IN) :: filename                           !< name  of output file
       INTEGER(f_int)                                              :: i, j, c
-      INTEGER(f_int)                                              :: axis
       INTEGER(f_int)                                              :: newtype, ierr, fh, comm, color
       INTEGER(f_int),                DIMENSION(2)                 :: dir
       INTEGER(f_int),                DIMENSION(2)                 :: subsizes, starts, dims
@@ -530,14 +529,11 @@ MODULE m_scarflib_common
       !-----------------------------------------------------------------------------------------------------------------------------
 
       SELECT CASE(direction)
-      CASE('x')
-        axis = 1
+      CASE(1)
         dir  = [2, 3]
-      CASE ('y')
-        axis = 2
+      CASE (2)
         dir  = [1, 3]
-      CASE ('z')
-        axis = 3
+      CASE (3)
         dir  = [1, 2]
       END SELECT
 
@@ -547,7 +543,7 @@ MODULE m_scarflib_common
 
       color = 0
 
-      bool = (plane .ge. gs(axis, world_rank)) .and. (plane .le. ge(axis, world_rank))
+      bool = (plane .ge. gs(direction, world_rank)) .and. (plane .le. ge(direction, world_rank))
 
       DO i = 1, 2
         subsizes(i) = SIZE(v, dir(i))
@@ -556,7 +552,7 @@ MODULE m_scarflib_common
       ENDDO
 
       ! global-to-local index mapping
-      c = plane - gs(axis, world_rank) + 1
+      c = plane - gs(direction, world_rank) + 1
 
       ! update color of calling process only if it contains part of the slice
       IF (bool) color = 1
@@ -573,7 +569,7 @@ MODULE m_scarflib_common
 
         ALLOCATE(buffer(subsizes(1), subsizes(2)))
 
-        IF (axis .eq. 1) THEN
+        IF (direction .eq. 1) THEN
 
           DO j = 1, subsizes(2)
             DO i = 1, subsizes(1)
@@ -581,7 +577,7 @@ MODULE m_scarflib_common
             ENDDO
           ENDDO
 
-        ELSEIF (axis .eq. 2) THEN
+        ELSEIF (direction .eq. 2) THEN
 
           DO j = 1, subsizes(2)
             DO i = 1, subsizes(1)
@@ -589,7 +585,7 @@ MODULE m_scarflib_common
             ENDDO
           ENDDO
 
-        ELSEIF (axis .eq. 3) THEN
+        ELSEIF (direction .eq. 3) THEN
 
           DO j = 1, subsizes(2)
             DO i = 1, subsizes(1)

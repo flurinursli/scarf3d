@@ -1,52 +1,65 @@
-MODULE SCARFLIB_SPEC
+MODULE m_scarflib_srm
 
-  USE, NON_INTRINSIC :: SCARFLIB_COMMON
+  ! Purpose:
+  !   To compute a random field according to the Spectral Representation Method (SRM). Subprograms rely on the TRNG (version 4) library
+  !   to generate random numbers.
+  !   Subroutines 'scarf3d_unstructured_srm' and 'scarf3d_structured_srm' are virtually indentical, with only few differences sparse
+  !   at different points in the code (this inhibits somehow the use of 'include' statements to handle a single code)
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !   11/05/20                  updated macro for double-precision
+  !
 
-  IMPLICIT NONE
+  USE, NON_INTRINSIC :: m_scarflib_common
+
+  IMPLICIT none
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
   PRIVATE
 
-  PUBLIC :: SCARF3D_SPEC
+  PUBLIC :: scarf3d_spec
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTERFACE SCARF3D_SPEC
-    MODULE PROCEDURE SCARF3D_UNSTRUCTURED_SPEC, SCARF3D_STRUCTURED_SPEC
+  INTERFACE scarf3d_srm
+    MODULE PROCEDURE scarf3d_unstructured_srm, scarf3d_structured_srm
   END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-  ! INTERFACE TO C++ FUNCTIONS/SUBROUTINES
+  ! interface to c++ functions/subroutines
   INTERFACE
 
-    SUBROUTINE SRNG(RAND) BIND(C, NAME="srng")
-      USE, INTRINSIC     :: ISO_C_BINDING
-      USE, NON_INTRINSIC :: SCARFLIB_COMMON
-      IMPLICIT NONE
-      REAL(C_FPP), DIMENSION(2), INTENT(OUT) :: RAND
-    END SUBROUTINE SRNG
+    SUBROUTINE srng(rand) BIND(c, name="srng")
+      USE, INTRINSIC     :: iso_c_binding
+      USE, NON_INTRINSIC :: scarflib_common
+      IMPLICIT none
+      REAL(c_real), DIMENSION(2), INTENT(OUT) :: rand
+    END SUBROUTINE srng
 
-    SUBROUTINE NORMDIST(RAND) BIND(C, NAME="normdist")
-      USE, INTRINSIC     :: ISO_C_BINDING
-      USE, NON_INTRINSIC :: SCARFLIB_COMMON
-      IMPLICIT NONE
-      REAL(C_FPP), DIMENSION(2), INTENT(OUT) :: RAND
-    END SUBROUTINE NORMDIST
+    SUBROUTINE normdist(rand) BIND(c, name="normdist")
+      USE, INTRINSIC     :: iso_c_binding
+      USE, NON_INTRINSIC :: scarflib_common
+      IMPLICIT none
+      REAL(c_real), DIMENSION(2), INTENT(OUT) :: rand
+    END SUBROUTINE normdist
 
-    SUBROUTINE SET_SEED(SEED) BIND(C, NAME="set_seed")
-      USE, INTRINSIC :: ISO_C_BINDING
-      IMPLICIT NONE
-      INTEGER(C_INT), VALUE :: SEED
-    END SUBROUTINE SET_SEED
+    SUBROUTINE set_seed(seed) BIND(c, name="set_seed")
+      USE, INTRINSIC :: iso_c_binding
+      IMPLICIT none
+      INTEGER(c_int), value :: seed
+    END SUBROUTINE set_seed
 
   END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  ! NUMBER OF HARMONICS IN SPECTRAL SUMMATION
-  INTEGER(IPP), PARAMETER :: NHARM = 5000*4 / 2
+  ! number of harmonics in spectral summation
+  INTEGER(f_int), PARAMETER :: nharm = 20000
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -56,607 +69,617 @@ MODULE SCARFLIB_SPEC
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE scarf3d_unstructured_spec(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, field, stats)
+  SUBROUTINE scarf3d_unstructured_srm(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, field, info)
 
     ! Purpose:
-    !   To compute a random field on structured/unstructured meshes based on the spectral representation method.
+    ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
+    ! heterogeneity may be influenced by the size of the external mesh (determined by the near-corner 'nc' and far-corner 'fc') and
+    ! the minimum desired grid-step 'dh'. Harmonics contribution outside the corrisponding interval [kmin kmax] will be rejected if
+    ! minimum and actual external grid-steps do not coincide.
     !
     ! Revisions:
     !     Date                    Description of change
     !     ====                    =====================
-    !   11/05/20                  Original version
+    !   04/05/20                  original version
     !
 
-    REAL(FPP),                   DIMENSION(3),   INTENT(IN)  :: NC, FC
-    REAL(FPP),                                   INTENT(IN)  :: DS
-    REAL(FPP),                   DIMENSION(:),   INTENT(IN)  :: X, Y, Z              !< POSITION OF GRID POINTS ALONG X, Y, Z
-    REAL(FPP),                                   INTENT(IN)  :: DH                   !< MIN DISTANCE BETWEEN GRID POINTS
-    INTEGER(IPP),                                INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-    REAL(FPP),                   DIMENSION(3),   INTENT(IN)  :: CL                   !< CORRELATION LENGTH
-    REAL(FPP),                                   INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
-    REAL(FPP),                                   INTENT(IN)  :: HURST                !< HURST EXPONENT
-    INTEGER(IPP),                                INTENT(IN)  :: SEED                 !< SEED NUMBER
-    REAL(FPP),                   DIMENSION(:,:), INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-    REAL(FPP),                                   INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-    REAL(FPP),                                   INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    REAL(FPP),                   DIMENSION(:),   INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
-    REAL(FPP),                   DIMENSION(6),   INTENT(OUT) :: STATS                 !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
-    INTEGER(IPP)                                             :: I, L
-    INTEGER(IPP)                                             :: NPTS
-    INTEGER(IPP)                                             :: IERR
-    INTEGER(C_INT)                                           :: C_SEED
-    INTEGER(IPP),  ALLOCATABLE,  DIMENSION(:)                :: NPOINTS
-    REAL(FPP)                                                :: SCALING
-    REAL(FPP)                                                :: KMAX, KMIN, KC
-    REAL(FPP)                                                :: K, D                 !< USED TO COMPUTE THE COVARIANCE FUNCTION
-    REAL(FPP)                                                :: PHI, THETA
-    REAL(FPP)                                                :: V1, V2, V3
-    REAL(FPP)                                                :: A, B, ARG
-    REAL(REAL64)                                             :: TICTOC
-    REAL(C_FPP),                 DIMENSION(2)                :: R
-    REAL(FPP),                   DIMENSION(3)                :: SPAN
-    REAL(FPP),                   DIMENSION(3)                :: MIN_EXTENT, MAX_EXTENT
-    REAL(FPP),      ALLOCATABLE, DIMENSION(:)                :: MU, VAR
+    REAL(f_real),                DIMENSION(3),   INTENT(IN)  :: nc, fc       !< min/max extent of external grid, control min wavenumber
+    REAL(f_real),                                INTENT(IN)  :: ds           !< current grid-step of external grid, control corner wavenumber
+    REAL(f_real),                DIMENSION(:),   INTENT(IN)  :: x, y, z      !< position of grid points along x, y, z
+    REAL(f_real),                                INTENT(IN)  :: dh           !< minimum grid-step of external grid, control max wavenumber
+    INTEGER(f_int),                              INTENT(IN)  :: acf          !< autocorrelation function: 0=vk, 1=gauss
+    REAL(f_real),                DIMENSION(3),   INTENT(IN)  :: cl           !< correlation length
+    REAL(f_real),                                INTENT(IN)  :: sigma        !< standard deviation
+    REAL(f_real),                                INTENT(IN)  :: hurst        !< hurst exponent
+    INTEGER(f_int),                              INTENT(IN)  :: seed         !< seed number
+    REAL(f_real),                DIMENSION(:,:), INTENT(IN)  :: poi          !< location of point(s)-of-interest where muting/tapering is applied
+    REAL(f_real),                                INTENT(IN)  :: mute         !< radius for muting
+    REAL(f_real),                                INTENT(IN)  :: taper        !< radius for tapering
+    INTEGER(f_int),                              INTENT(IN)  :: rescale      !< flag for rescaling random field to desired sigma
+    REAL(f_real),                DIMENSION(:),   INTENT(OUT) :: field        !< random field at x,y,z location
+    REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and timing for performance analysis
+    INTEGER(f_int)                                           :: i, l
+    INTEGER(f_int)                                           :: npts
+    INTEGER(f_int)                                           :: ierr
+    INTEGER(c_int)                                           :: c_seed
+    INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                :: npoints
+    REAL(f_real)                                             :: scaling
+    REAL(f_real)                                             :: kmax, kmin, kc
+    REAL(f_real)                                             :: k, d
+    REAL(f_real)                                             :: phi, theta
+    REAL(f_real)                                             :: v1, v2, v3
+    REAL(f_real)                                             :: a, b, arg
+    REAL(f_dble)                                             :: tictoc
+    REAL(c_real),                DIMENSION(2)                :: r
+    REAL(f_real),                DIMENSION(3)                :: span
+    REAL(f_real),                DIMENSION(3)                :: min_extent, max_extent
+    REAL(f_real),   ALLOCATABLE, DIMENSION(:)                :: mu, var
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
+    CALL mpi_comm_SIZE(mpi_comm_world, world_size, ierr)
     CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
     IF (world_rank == 0) THEN
-      PRINT*, 'INPUT PARAMS @ UNSTRUCTURED-SPEC'
-      PRINT*, 'NC ', NC
-      PRINT*, 'FC ', FC
-      PRINT*, 'DS ', DS
-      PRINT*, 'X ', SIZE(X)
-      PRINT*, 'Z ', SIZE(Z)
-      PRINT*, 'DH ', DH
-      PRINT*, 'ACF ', ACF
-      PRINT*, 'CL ', CL
-      PRINT*, 'SIGMA ', SIGMA
-      PRINT*, 'HURST ', HURST
-      PRINT*, 'SEED ', SEED
-      PRINT*, 'POI ', SIZE(POI)
-      PRINT*, 'MUTE ', MUTE
-      PRINT*, 'TAPER ', TAPER
+      print*, 'input params @ unstructured-spec'
+      print*, 'nc ', nc
+      print*, 'fc ', fc
+      print*, 'ds ', ds
+      print*, 'x ', SIZE(x)
+      print*, 'z ', SIZE(z)
+      print*, 'dh ', dh
+      print*, 'acf ', acf
+      print*, 'cl ', cl
+      print*, 'sigma ', sigma
+      print*, 'hurst ', hurst
+      print*, 'seed ', seed
+      print*, 'poi ', SIZE(poi)
+      print*, 'mute ', mute
+      print*, 'taper ', taper
     ENDIF
     CALL mpi_barrier(mpi_comm_world, ierr)
 
-    STATS = 0._FPP
+    info(:) = 0._f_real
 
-    ! INITIALISE RANDOM GENERATOR
+    ! initialise random generator
     c_seed = seed
     CALL set_seed(c_seed)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! SET MIN/MAX RADIAL WAVENUMBER SUCH THAT "V1", "V2", "V3" BELOW ARE IN THE RANGE ["KMIN" "KMAX"] WHEN THE TRIGONOMETRIC TERMS
-    ! EQUAL UNITY. THIS IS ACHIEVED BY TAKING THE LARGEST "KMIN*CL" AND THE SMALLEST "KMAX*CL". "CL" IS CONSIDERED IN THE CALCULATIONS
-    ! BECAUSE THE RADIAL AVENUMBER "K" IS DIVIDED BY "CL" (SEE .EQ. 8 OF RAESS ET AL., 2019)
+    ! set min/max radial wavenumber such that "v1", "v2", "v3" below are in the range ["kmin" "kmax"] when the trigonometric terms
+    ! equal 1. This is achieved by taking the largest "kmin*cl" and the smallest "kmax*cl". "cl" is considered in the calculations
+    ! because the radial avenumber "k" is divided by "cl" (see Eq.8 of Raess et al., 2019)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    MIN_EXTENT = NC
-    MAX_EXTENT = FC
+    ! model limits (for each process) along each axis
+    min_extent = nc
+    max_extent = fc
 
-    ! (GLOBAL) MODEL LIMITS
-    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
-    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
+    ! (global) model limits
+    CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
+    CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
-    ! GLOBAL EFFECTIVE GRID SIZE
-    SPAN = MAX_EXTENT - MIN_EXTENT
+    ! (global) effective grid size
+    span = max_extent - min_extent
 
-    KMIN = 2._fpp * PI * MAXVAL(CL / SPAN)
+    kmin = 2._f_real * pi * maxval(cl / span)
 
-    KMAX = PI / DH * MINVAL(CL)
+    kmax = pi / dh * minval(cl)
 
-    ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-    KC = PI / DS * MINVAL(CL) !* SQRT(3._FPP)
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
-    ! 1) KMIN < 1/CL
-    ! 2) KMAX > 1/CL, OR DS <= CL / 2 (FRENJE & JUHLIN, 2000)
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    IF (ANY(2._FPP * PI / SPAN .GE. 1._FPP / CL)) STATS(1) = 1._FPP
-
-    IF (ANY(DS .GT. CL / 2._FPP)) STATS(2) = 1._FPP
-
-    !IF (WORLD_RANK == 0) PRINT*, 'KMAX ', KMIN, KMAX
-
-    ! SET SCALING FACTOR
-    SCALING = SIGMA / SQRT(REAL(NHARM, FPP))
-
-    ! NUMBER OF POINTS WHERE RANDOM FIELD MUST BE CALCULATED
-    NPTS = SIZE(X)
-
-    ! INITIALISE RANDOM FIELD
-    FIELD(:) = 0._FPP
+    ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
+    kc = pi / ds * minval(cl)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! COMPUTE RANDOM FIELD DIRECTLY AT EACH GRID POINT. USE UNIFORM DISTRIBUTION IN THE RANGE [0 1] AS MAJORANT FUNCTION.
+    ! check if the following conditions for a correct wavenumber representation are violated:
+    ! 1) kmin < 1/cl
+    ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! LOOP OVER HARMONICS
-    ! OPENACC: "FIELD" IS COPIED IN&OUT, ALL THE OTHERS ARE ONLY COPIED IN. "ARG" IS CREATED LOCALLY ON THE ACCELERATOR
-    !$ACC DATA COPY(FIELD) COPYIN(X, Y, Z, SCALING, NPTS, A, B, V1, V2, V3)
-    DO L = 1, NHARM
+    IF (ANY(2._f_real * pi / span .ge. 1._f_real / cl)) info(1) = 1._f_real
 
-      !IF ((MOD(L, 100) == 0) .AND. (WORLD_RANK == 0)) PRINT*, WORLD_RANK, L
+    IF (ANY(ds .gt. cl / 2._f_real)) info(2) = 1._f_real
 
-#ifdef TIMING
-      CALL WATCH_START(TICTOC, MPI_COMM_SELF)
-#endif
+    ! set scaling factor
+    scaling = sigma / SQRT(REAL(nharm, f_real))
+
+    ! number of points where random field must be calculated
+    npts = SIZE(x)
+
+    ! initialise random field
+    field(:) = 0._f_real
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    ! compute random field directly at each grid point. USE uniform distribution in the range [0 1] as majorant function.
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    ! loop over harmonics
+    ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
+    !$acc data copy(field) copyin(x, y, z, scaling, npts, a, b, v1, v2, v3)
+    DO l = 1, nharm
+
+#ifdef timing
+      CALL watch_start(tictoc, mpi_comm_self)
+#ENDIF
 
       DO
 
-        ! FIRST SET OF RANDOM NUMBERS
-        CALL SRNG(R)
+        ! first set of random numbers
+        CALL srng(r)
 
-        ! RANDOM VARIABLE "K`" MUST SPAN THE RANGE [KMIN, KMAX]
-        K = R(1) * (KMAX - KMIN) + KMIN
+        ! random variable "k`" must span the range [kmin, kmax]
+        k = r(1) * (kmax - kmin) + kmin
 
-        ! EVALUATE ORIGINAL PDF
-        IF (ACF .EQ. 0) THEN
-          D = K**2 / (1._FPP + K**2)**(1.5_FPP + HURST)
+        ! evaluate original pdf
+        IF (acf .eq. 0) THEN
+          d = k**2 / (1._f_real + k**2)**(1.5_fpp + hurst)
         ELSE
-          D = K**2 * EXP(-0.25_FPP * K**2) / SQRT(PI)
+          d = k**2 * EXP(-0.25_fpp * k**2) / SQRT(pi)
         ENDIF
 
-        ! TAKE "K" AND EXIT IF INEQUALITY R < D IS VERIFIED
-        IF (R(2) .LT. D) EXIT
+        ! take "k" and exit if inequality r < d is verified
+        IF (r(2) .lt. d) EXIT
 
       ENDDO
 
-      ! SECOND SET OF RANDOM NUMBERS
-      CALL SRNG(R)
+      ! second set of random numbers
+      CALL srng(r)
 
-      ! NEGLECT CONTRIBUTION OF CURRENT HARMONIC IF WAVENUMBER "U" WAS LARGER THAN CORNER WAVENUMBER "KC"
-      IF (K .GT. KC) CYCLE
+      ! neglect contribution of current harmonic if wavenumber "u" was larger than corner wavenumber "kc" (always false is "ds" = "dh")
+      IF (k .gt. kc) CYCLE
 
-      ! COMPUTE AZIMUTH AND POLAR ANGLES
-      PHI   = R(1) * 2._FPP * PI
-      THETA = ACOS(1._FPP - 2._FPP * R(2))
+      ! compute azimuth and polar angles
+      phi   = r(1) * 2._f_real * pi
+      theta = ACOS(1._f_real - 2._f_real * r(2))
 
-      V1 = K * SIN(PHI) * SIN(THETA) / CL(1)
-      V2 = K * COS(PHI) * SIN(THETA) / CL(2)
-      V3 = K * COS(THETA)            / CL(3)
+      v1 = k * SIN(phi) * SIN(theta) / cl(1)
+      v2 = k * COS(phi) * SIN(theta) / cl(2)
+      v3 = k * COS(theta)            / cl(3)
 
-      ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      ! CALL NORMDIST(R)
+      ! compute harmonics coefficient "a" and "b"
+      ! CALL normdist(r)
       !
-      ! A = R(1)
-      ! B = R(2)
+      ! a = r(1)
+      ! b = r(2)
 
-      ! BOX-MUELLER TRANSFORM
-      CALL SRNG(R)
-      A = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+      ! box-mueller transform
+      CALL srng(r)
+      a = SQRT(-2._f_real * log(r(1))) * COS(2._f_real * pi * r(2))
 
-      CALL SRNG(R)
-      B = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+      CALL srng(r)
+      b = SQRT(-2._f_real * log(r(1))) * COS(2._f_real * pi * r(2))
 
 
-#ifdef TIMING
-      CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+#ifdef timing
+      CALL watch_stop(tictoc, mpi_comm_self)
 
-      STATS(5) = STATS(5) + TICTOC
+      info(5) = info(5) + tictoc
 
-      CALL WATCH_START(TICTOC, MPI_COMM_SELF)
-#endif
+      CALL watch_start(tictoc, mpi_comm_self)
+#ENDIF
 
-      !$ACC WAIT
+      !$acc wait
 
-      ! UPDATE SELECTED VARIABLES IN GPU MEMORY
-      !$ACC UPDATE DEVICE(A, B, V1, V2, V3)
+      ! update selected variables in gpu memory
+      !$acc update device(a, b, v1, v2, v3)
 
-      ! !$ACC PARALLEL LOOP PRIVATE(ARG) ASYNC
-      ! DO I = 1, NPTS
-      !   ARG = V1 * X(I) + V2 * Y(I) + V3 * Z(I)
-      !   FIELD(I) = FIELD(I) + A * SIN(ARG) + B * COS(ARG)
+      ! !$acc parallel loop private(arg) async
+      ! DO i = 1, npts
+      !   arg = v1 * x(i) + v2 * y(i) + v3 * z(i)
+      !   field(i) = field(i) + a * SIN(arg) + b * COS(arg)
       ! ENDDO
-      ! !$ACC END PARALLEL LOOP
+      ! !$acc end parallel loop
 
-      !$ACC KERNELS ASYNC
-      !$ACC LOOP INDEPENDENT PRIVATE(ARG)
-      DO I = 1, NPTS
-        ARG = V1 * X(I) + V2 * Y(I) + V3 * Z(I)
-        FIELD(I) = FIELD(I) + A * SIN(ARG) + B * COS(ARG)
+      !$acc kernels async
+      !$acc loop independent private(arg)
+      DO i = 1, npts
+        arg = v1 * x(i) + v2 * y(i) + v3 * z(i)
+        field(i) = field(i) + a * SIN(arg) + b * COS(arg)
       ENDDO
-      !$ACC END KERNELS
+      !$acc end kernels
 
 
-#ifdef TIMING
-      CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+#ifdef timing
+      CALL watch_stop(tictoc, mpi_comm_self)
 
-      STATS(6) = STATS(6) + TICTOC
-#endif
+      info(6) = info(6) + tictoc
+#ENDIF
 
     ENDDO
-    ! END LOOP OVER HARMONICS
+    ! END loop over harmonics
 
-#ifdef TIMING
-    CALL WATCH_START(TICTOC, MPI_COMM_SELF)
-#endif
+#ifdef timing
+    CALL watch_start(tictoc, mpi_comm_self)
+#ENDIF
 
-    !$ACC WAIT
+    !$acc wait
 
-    ! NORMALISE RANDOM FIELD
-    ! !$ACC PARALLEL LOOP
-    ! DO I = 1, NPTS
-    !   FIELD(I) = FIELD(I) * SCALING
+    ! normalise random field
+    ! !$acc parallel loop
+    ! DO i = 1, npts
+    !   field(i) = field(i) * scaling
     ! ENDDO
-    ! !$ACC END PARALLEL LOOP
+    ! !$acc END parallel loop
 
-    !$ACC KERNELS
-    !$ACC LOOP INDEPENDENT
-    DO I = 1, NPTS
-      FIELD(I) = FIELD(I) * SCALING
+    !$acc kernels
+    !$acc loop independent
+    DO i = 1, npts
+      field(i) = field(i) * scaling
     ENDDO
-    !$ACC END KERNELS
+    !$acc END kernels
 
-    ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
-    !$ACC END DATA
+    ! copy "field" back to host and free memory on device
+    !$acc end data
 
-#ifdef TIMING
-    CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+#ifdef timing
+    CALL watch_stop(tictoc, mpi_comm_self)
 
-    STATS(6) = STATS(6) + TICTOC
-#endif
+    info(6) = info(6) + tictoc
+#ENDIF
 
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD. IF DESIRED, REMOVE MEAN AND SET ACTUAL STANDARD DEVIATION TO DESIRED VALUE.
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+    ! compute mean and variance of the whole random field. THEN rescale, if desired, discrete std. dev. to its continuous counterpart
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-    ALLOCATE(VAR(0:WORLD_SIZE - 1), MU(0:WORLD_SIZE - 1), NPOINTS(0:WORLD_SIZE - 1))
+    ALLOCATE(var(0:world_size - 1), mu(0:world_size - 1), npoints(0:world_size - 1))
 
-    ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD FOR EACH SINGLE PROCESS
-    VAR(WORLD_RANK) = VARIANCE(FIELD)
-    MU(WORLD_RANK)  = MEAN(FIELD)
+    ! variance and mean for each single process
+    var(world_rank) = variance(field)
+    mu(world_rank)  = mean(field)
 
-    ! NUMBER OF GRID POINTS PER PROCESS
-    NPOINTS(WORLD_RANK) = NPTS
+    ! number of grid points per process
+    npoints(world_rank) = npts
 
-    ! SHARE RESULTS
-    CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, VAR, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-    CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, MU, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-    CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+    ! share results
+    CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, real_type, mpi_comm_world, ierr)
+    CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, real_type, mpi_comm_world, ierr)
+    CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
-    ! COMPUTE TOTAL VARIANCE ("STATS(3)") AND MEAN ("STATS(4)")
-    CALL PARALLEL_VARIANCE(VAR, MU, NPOINTS, STATS(3), STATS(4))
+    ! return total variance in "info(3)" and mean in "info(4)"
+    CALL parallel_variance(var, mu, npoints, info(3), info(4))
 
-    ! RETURN STANDARD DEVIATION
-    STATS(3) = SQRT(STATS(3))
+    ! return standard deviation
+    info(3) = SQRT(info(3))
 
-    ! DO WE NEED TO RESCALE THE RANDOM FIELD TO DESIRED (I.E. CONTINUOUS) STANDARD DEVIATION?
-    ! IF (RESCALE .EQ. 1) THEN
-    !
-    !   SCALING = SIGMA / STATS(3)
-    !
-    !   DO I = 1, NPTS
-    !     FIELD(I) = FIELD(I) * SCALING - STATS(4)
-    !   ENDDO
-    !
-    !   STATS(3) = SIGMA
-    !   STATS(4) = 0._FPP
-    !
-    ! ENDIF
+    IF (rescale .eq. 1) THEN
 
-    DEALLOCATE(VAR, MU, NPOINTS)
+      scaling = sigma / info(3)
 
-    ! APPLY TAPER/MUTE
-    DO I = 1, SIZE(POI, 2)
-      CALL TAPERING(X, Y, Z, FIELD, POI(:, I), MUTE, TAPER)
+      DO i = 1, npts
+        field(i) = field(i) * scaling - info(4)
+      ENDDO
+
+      info(3) = sigma
+      info(4) = 0._f_real
+
+    ENDIF
+
+    DEALLOCATE(var, mu, npoints)
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+    ! taper/mute random field at desired locations.
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+
+    DO i = 1, SIZE(poi, 2)
+      CALL tapering(x, y, z, field, poi(:, i), mute, taper)
     ENDDO
 
-    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+    CALL mpi_barrier(mpi_comm_world, ierr)
 
-  END SUBROUTINE SCARF3D_UNSTRUCTURED_SPEC
+  END SUBROUTINE scarf3d_unstructured_srm
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE SCARF3D_STRUCTURED_SPEC(NC, FC, DS, FS, FE, DH, ACF, CL, SIGMA, HURST, SEED, POI, MUTE, TAPER, FIELD, STATS)
+  SUBROUTINE scarf3d_structured_srm(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, field, info)
 
-    ! GLOBAL INDICES AND COMMUNICATOR SUBGROUPPING COULD BE HANDLED ELEGANTLY IF VIRTUAL TOPOLOGIES ARE USED IN CALLING PROGRAM.
-    ! HOWEVER WE ASSUME THAT THESE ARE NOT USED AND THEREFORE WE ADOPT A SIMPLER APPROACH BASED ON COLLECTIVE CALLS.
+    ! Purpose:
+    ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
+    ! heterogeneity may be influenced by the size of the external mesh (determined by the near-corner 'nc' and far-corner 'fc') and
+    ! the minimum desired grid-step 'dh'. Harmonics contribution outside the corrisponding interval [kmin kmax] will be rejected if
+    ! minimum and actual external grid-steps do not coincide.
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   04/05/20                  original version
+    !
 
-    REAL(FPP),                   DIMENSION(3),     INTENT(IN)  :: NC, FC
-    REAL(FPP),                                     INTENT(IN)  :: DS                   !< STRUCTURED GRID-STEP
-    INTEGER(IPP),                DIMENSION(3),     INTENT(IN)  :: FS, FE               !< FIRST/LAST STRUCTURED GRID INDICES
-    REAL(FPP),                                     INTENT(IN)  :: DH                   !< MIN GRID-STEP
-    INTEGER(IPP),                                  INTENT(IN)  :: ACF                  !< AUTOCORRELATION FUNCTION: "VK" OR "GAUSS"
-    REAL(FPP),                   DIMENSION(3),     INTENT(IN)  :: CL                   !< CORRELATION LENGTH
-    REAL(FPP),                                     INTENT(IN)  :: SIGMA                !< STANDARD DEVIATION
-    REAL(FPP),                                     INTENT(IN)  :: HURST                !< HURST EXPONENT
-    INTEGER(IPP),                                  INTENT(IN)  :: SEED                 !< SEED NUMBER
-    REAL(FPP),                   DIMENSION(:,:),   INTENT(IN)  :: POI                  !< LOCATION OF POINT(S)-OF-INTEREST
-    REAL(FPP),                                     INTENT(IN)  :: MUTE                 !< NUMBER OF POINTS WHERE MUTING IS APPLIED
-    REAL(FPP),                                     INTENT(IN)  :: TAPER                !< NUMBER OF POINTS WHERE TAPERING IS APPLIED
-    REAL(FPP),                   DIMENSION(:,:,:), INTENT(OUT) :: FIELD                !< VELOCITY FIELD TO BE PERTURBED
-    REAL(FPP),                   DIMENSION(6),     INTENT(OUT) :: STATS                !< ERRORS AND TIMING FOR PERFORMANCE ANALYSIS
-    INTEGER(IPP)                                               :: I, J, K, L
-    INTEGER(IPP)                                               :: IERR
-    INTEGER(C_INT)                                             :: C_SEED
-    INTEGER(IPP),                DIMENSION(3)                  :: NPTS
-    INTEGER(IPP),  ALLOCATABLE,  DIMENSION(:)                  :: NPOINTS
-    REAL(FPP)                                                  :: SCALING
-    REAL(FPP)                                                  :: KMAX, KMIN, KC
-    REAL(FPP)                                                  :: U, D                 !< USED TO COMPUTE THE COVARIANCE FUNCTION
-    REAL(FPP)                                                  :: PHI, THETA
-    REAL(FPP)                                                  :: V1, V2, V3
-    REAL(FPP)                                                  :: A, B, ARG
-    REAL(FPP)                                                  :: X, Y, Z
-    REAL(REAL64)                                               :: TICTOC
-    REAL(C_FPP),                 DIMENSION(2)                  :: R
-    REAL(FPP),                   DIMENSION(3)                  :: SPAN
-    REAL(FPP),                   DIMENSION(3)                  :: MIN_EXTENT, MAX_EXTENT
-    REAL(FPP),      ALLOCATABLE, DIMENSION(:)                  :: MU, VAR
+    REAL(f_real),                DIMENSION(3),     INTENT(IN)  :: nc, fc          !< min/max extent of external grid, control min wavenumber
+    REAL(f_real),                                  INTENT(IN)  :: ds              !< current grid-step of external grid, control corner wavenumber
+    INTEGER(f_int),              DIMENSION(3),     INTENT(IN)  :: fs, fe          !< first/last external structured grid index
+    REAL(f_real),                                  INTENT(IN)  :: dh              !< minimum grid-step of external grid, control max wavenumber
+    INTEGER(f_int),                                INTENT(IN)  :: acf             !< autocorrelation function: 0=vk, 1=gauss
+    REAL(f_real),                DIMENSION(3),     INTENT(IN)  :: cl              !< correlation length
+    REAL(f_real),                                  INTENT(IN)  :: sigma           !< standard deviation
+    REAL(f_real),                                  INTENT(IN)  :: hurst           !< hurst exponent
+    INTEGER(f_int),                                INTENT(IN)  :: seed            !< seed number
+    REAL(f_real),                DIMENSION(:,:),   INTENT(IN)  :: poi             !< location of point(s)-of-interest where muting/tapering is applied
+    REAL(f_real),                                  INTENT(IN)  :: mute            !< radius for mutin
+    REAL(f_real),                                  INTENT(IN)  :: taper           !< radius for tapering
+    INTEGER(f_int),                                INTENT(IN)  :: rescale         !< flag for rescaling random field to desired sigma
+    REAL(f_real),                DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
+    REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and timing for performance analysis
+    INTEGER(f_int)                                             :: i, j, k, l
+    INTEGER(f_int)                                             :: ierr
+    INTEGER(c_int)                                             :: c_seed
+    INTEGER(f_int),              DIMENSION(3)                  :: npts
+    INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                  :: npoints
+    REAL(f_real)                                               :: scaling
+    REAL(f_real)                                               :: kmax, kmin, kc
+    REAL(f_real)                                               :: u, d
+    REAL(f_real)                                               :: phi, theta
+    REAL(f_real)                                               :: v1, v2, v3
+    REAL(f_real)                                               :: a, b, arg
+    REAL(f_real)                                               :: x, y, z
+    REAL(f_dble)                                               :: tictoc
+    REAL(c_real),                DIMENSION(2)                  :: r
+    REAL(f_real),                DIMENSION(3)                  :: span
+    REAL(f_real),                DIMENSION(3)                  :: min_extent, max_extent
+    REAL(f_real),   ALLOCATABLE, DIMENSION(:)                  :: mu, var
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    CALL MPI_COMM_SIZE(MPI_COMM_WORLD, WORLD_SIZE, IERR)
-    CALL MPI_COMM_RANK(MPI_COMM_WORLD, WORLD_RANK, IERR)
+    CALL mpi_comm_SIZE(mpi_comm_world, world_size, ierr)
+    CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
-    if (world_rank == 0) then
-      print*, 'input params @ STRUCTURED-SPEC'
-      print*, 'NC ', nc
-      print*, 'FC ', fc
-      print*, 'DS ', ds
-      print*, 'FS ', fs
-      print*, 'FE ', fe
-      print*, 'DH ', dh
-      print*, 'ACF ', acf
-      print*, 'CL ', cl
-      print*, 'SIGMA ', sigma
-      print*, 'HURST ', hurst
-      print*, 'SEED ', seed
-      print*, 'POI ', size(poi)
-      print*, 'MUTE ', mute
-      print*, 'TAPER ', taper
-    endif
-    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+    IF (world_rank == 0) THEN
+      print*, 'input params @ structured-spec'
+      print*, 'nc ', nc
+      print*, 'fc ', fc
+      print*, 'ds ', ds
+      print*, 'fs ', fs
+      print*, 'fe ', fe
+      print*, 'dh ', dh
+      print*, 'acf ', acf
+      print*, 'cl ', cl
+      print*, 'sigma ', sigma
+      print*, 'hurst ', hurst
+      print*, 'seed ', seed
+      print*, 'poi ', SIZE(poi)
+      print*, 'mute ', mute
+      print*, 'taper ', taper
+    ENDIF
+    CALL mpi_barrier(mpi_comm_world, ierr)
 
 
-    STATS = 0._FPP
+    info(:) = 0._f_real
 
-    ! INITIALISE RANDOM GENERATOR
-    C_SEED = SEED
-    CALL SET_SEED(C_SEED)
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! SET MIN/MAX RADIAL WAVENUMBER SUCH THAT "V1", "V2", "V3" BELOW ARE IN THE RANGE ["KMIN" "KMAX"] WHEN THE TRIGONOMETRIC TERMS
-    ! EQUAL UNITY. THIS IS ACHIEVED BY TAKING THE LARGEST "KMIN*CL" AND THE SMALLEST "KMAX*CL". "CL" IS CONSIDERED IN THE CALCULATIONS
-    ! BECAUSE THE RADIAL AVENUMBER "K" IS DIVIDED BY "CL" (SEE .EQ. 8 OF RAESS ET AL., 2019)
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    MIN_EXTENT = NC
-    MAX_EXTENT = FC
-
-    ! (GLOBAL) MODEL LIMITS
-    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MIN_EXTENT, 3, REAL_TYPE, MPI_MIN, MPI_COMM_WORLD, IERR)
-    CALL MPI_ALLREDUCE(MPI_IN_PLACE, MAX_EXTENT, 3, REAL_TYPE, MPI_MAX, MPI_COMM_WORLD, IERR)
-
-    ! GLOBAL EFFECTIVE GRID SIZE
-    SPAN = MAX_EXTENT - MIN_EXTENT
-
-    KMIN = 2._FPP * PI * MAXVAL(CL / SPAN)
-
-    KMAX = PI / DH * MINVAL(CL)
-
-    ! CORNER WAVENUMBER FOR FILTERING SPECTRUM IS CONTROLLED BY MESH GRID-STEP
-    KC = PI / DS * MINVAL(CL) !* SQRT(3._FPP)
+    ! initialise random generator
+    c_seed = seed
+    CALL set_seed(c_seed)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! CHECK IF THE FOLLOWING CONDITIONS FOR A CORRECT WAVENUMBER REPRESENTATION ARE VIOLATED:
-    ! 1) KMIN < 1/CL
-    ! 2) KMAX > 1/CL, OR DS <= CL / 2 (FRENJE & JUHLIN, 2000)
+    ! set min/max radial wavenumber such that "v1", "v2", "v3" below are in the range ["kmin" "kmax"] when the trigonometric terms
+    ! equal 1. This is achieved by taking the largest "kmin*cl" and the smallest "kmax*cl". "cl" is considered in the calculations
+    ! because the radial avenumber "k" is divided by "cl" (see Eq.8 of Raess et al., 2019)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._FPP * PI / SPAN .GE. 1._FPP / CL)) STATS(1) = 1._FPP
+    ! model limits (for each process) along each axis
+    min_extent = nc
+    max_extent = fc
 
-    IF (ANY(DS .GT. CL / 2._FPP)) STATS(2) = 1._FPP
+    ! (global) model limits
+    CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
+    CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
-    !IF (WORLD_RANK == 0) PRINT*, 'KMAX ', KMIN, KMAX
+    ! global effective grid size
+    span = max_extent - min_extent
 
-    ! SET SCALING FACTOR
-    SCALING = SIGMA / SQRT(REAL(NHARM, FPP))
+    kmin = 2._f_real * pi * maxval(cl / span)
 
-    ! NUMBER OF POINTS WHERE RANDOM FIELD MUST BE CALCULATED
-    NPTS(:) = FE(:) - FS(:) + 1
+    kmax = pi / dh * minval(cl)
 
-    ! INITIALISE RANDOM FIELD
-    FIELD(:,:,:) = 0._FPP
+    ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
+    kc = pi / ds * minval(cl)
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! COMPUTE RANDOM FIELD DIRECTLY AT EACH GRID POINT. USE UNIFORM DISTRIBUTION IN THE RANGE [0 1] AS MAJORANT FUNCTION.
+    ! check if the following conditions for a correct wavenumber representation are violated:
+    ! 1) kmin < 1/cl
+    ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ! LOOP OVER HARMONICS
-    ! OPENACC: "FIELD" IS COPIED IN&OUT, ALL THE OTHERS ARE ONLY COPIED IN. "ARG" IS CREATED LOCALLY ON THE ACCELERATOR
-    !$ACC DATA COPY(FIELD) COPYIN(DS, SCALING, NPTS, FS, A, B, V1, V2, V3)
-    DO L = 1, NHARM
+    IF (ANY(2._f_real * pi / span .ge. 1._f_real / cl)) info(1) = 1._f_real
 
-      !IF ((MOD(L, 100) == 0) .AND. (WORLD_RANK == 0)) PRINT*, WORLD_RANK, L
+    IF (ANY(ds .gt. cl / 2._f_real)) info(2) = 1._f_real
 
-#ifdef TIMING
-      CALL WATCH_START(TICTOC, MPI_COMM_SELF)
-#endif
+    ! set scaling factor
+    scaling = sigma / SQRT(REAL(nharm, f_real))
+
+    ! number of points where random field must be calculated
+    npts(:) = fe(:) - fs(:) + 1
+
+    ! initialise random field
+    field(:,:,:) = 0._f_real
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    ! compute random field directly at each grid point. Use uniform distribution in the range [0 1] as majorant function.
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    ! loop over harmonics
+    ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
+    !$acc data copy(field) copyin(ds, scaling, npts, fs, a, b, v1, v2, v3)
+    DO l = 1, nharm
+
+#ifdef timing
+      CALL watch_start(tictoc, mpi_comm_self)
+#ENDIF
 
       DO
 
-        ! FIRST SET OF RANDOM NUMBERS
-        CALL SRNG(R)
+        ! first set of random numbers
+        CALL srng(r)
 
-        ! RANDOM VARIABLE "K`" MUST SPAN THE RANGE [KMIN, KMAX]
-        U = R(1) * (KMAX - KMIN) + KMIN
+        ! random variable "k`" must span the range [kmin, kmax]
+        u = r(1) * (kmax - kmin) + kmin
 
-        ! EVALUATE ORIGINAL PDF
-        IF (ACF .EQ. 0) THEN
-          D = U**2 / (1._FPP + U**2)**(1.5_FPP + HURST)
+        ! evaluate original pdf
+        IF (acf .eq. 0) THEN
+          d = u**2 / (1._f_real + u**2)**(1.5_fpp + hurst)
         ELSE
-          D = U**2 * EXP(-0.25_FPP * U**2) / SQRT(PI)
+          d = u**2 * EXP(-0.25_fpp * u**2) / SQRT(pi)
         ENDIF
 
-        ! TAKE "K" AND EXIT IF INEQUALITY R < D IS VERIFIED
-        IF (R(2) .LT. D) EXIT
+        ! take "k" and EXIT if inequality r < d is verified
+        IF (r(2) .lt. d) EXIT
 
       ENDDO
 
-      ! SECOND SET OF RANDOM NUMBERS
-      CALL SRNG(R)
+      ! second set of random numbers
+      CALL srng(r)
 
-      ! NEGLECT CONTRIBUTION OF CURRENT HARMONIC IF WAVENUMBER "U" WAS LARGER THAN CORNER WAVENUMBER "KC"
-      IF (U .GT. KC) CYCLE
+      ! neglect contribution of current harmonic if wavenumber "u" was larger than corner wavenumber "kc" (always false is "ds" = "dh")
+      IF (u .gt. kc) CYCLE
 
-      ! COMPUTE AZIMUTH AND POLAR ANGLES
-      PHI   = R(1) * 2._FPP * PI
-      THETA = ACOS(1._FPP - 2._FPP * R(2))
+      ! compute azimuth and polar angles
+      phi   = r(1) * 2._f_real * pi
+      theta = ACOS(1._f_real - 2._f_real * r(2))
 
-      V1 = U * SIN(PHI) * SIN(THETA) / CL(1)
-      V2 = U * COS(PHI) * SIN(THETA) / CL(2)
-      V3 = U * COS(THETA)            / CL(3)
+      v1 = u * SIN(phi) * SIN(theta) / cl(1)
+      v2 = u * COS(phi) * SIN(theta) / cl(2)
+      v3 = u * COS(theta)            / cl(3)
 
-      ! COMPUTE HARMONICS COEFFICIENT "A" AND "B"
-      ! CALL NORMDIST(R)
+      ! compute harmonics coefficient "a" and "b"
+      ! CALL normdist(r)
       !
-      ! A = R(1)
-      ! B = R(2)
+      ! a = r(1)
+      ! b = r(2)
 
-      ! BOX-MUELLER TRANSFORM
-      CALL SRNG(R)
-      A = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+      ! box-mueller transform
+      CALL srng(r)
+      a = SQRT(-2._f_real * log(r(1))) * COS(2._f_real * pi * r(2))
 
-      CALL SRNG(R)
-      B = SQRT(-2._FPP * LOG(R(1))) * COS(2._FPP * PI * R(2))
+      CALL srng(r)
+      b = SQRT(-2._f_real * log(r(1))) * COS(2._f_real * pi * r(2))
 
 
-#ifdef TIMING
-      CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+#ifdef timing
+      CALL watch_stop(tictoc, mpi_comm_self)
 
-      STATS(5) = STATS(5) + TICTOC
+      info(5) = info(5) + tictoc
 
-      CALL WATCH_START(TICTOC, MPI_COMM_SELF)
-#endif
+      CALL watch_start(tictoc, mpi_comm_self)
+#ENDIF
 
-      !$ACC WAIT
+      !$acc wait
 
-      ! UPDATE SELECTED VARIABLES IN GPU MEMORY
-      !$ACC UPDATE DEVICE(A, B, V1, V2, V3)
+      ! update selected variables in gpu memory
+      !$acc update device(a, b, v1, v2, v3)
 
-      !$ACC PARALLEL LOOP PRIVATE(X, Y, Z, ARG) COLLAPSE(3) ASYNC
-      DO K = 1, NPTS(3)
-        DO J = 1, NPTS(2)
-          DO I = 1, NPTS(1)
-            X              = (I + FS(1) - 2) * DS
-            Y              = (J + FS(2) - 2) * DS
-            Z              = (K + FS(3) - 2) * DS
-            ARG            = V1 * X + V2 * Y + V3 * Z
-            FIELD(I, J, K) = FIELD(I, J, K) + A * SIN(ARG) + B * COS(ARG)
+      !$acc parallel loop PRIVATE(x, y, z, arg) collapse(3) async
+      DO k = 1, npts(3)
+        DO j = 1, npts(2)
+          DO i = 1, npts(1)
+            x              = (i + fs(1) - 2) * ds
+            y              = (j + fs(2) - 2) * ds
+            z              = (k + fs(3) - 2) * ds
+            arg            = v1 * x + v2 * y + v3 * z
+            field(i, j, k) = field(i, j, k) + a * SIN(arg) + b * COS(arg)
           ENDDO
         ENDDO
       ENDDO
-      !$ACC END PARALLEL LOOP
+      !$acc END parallel loop
 
-      ! !$ACC KERNELS ASYNC
-      ! !$ACC LOOP INDEPENDENT PRIVATE(X, Y, Z, ARG)
-      ! DO K = 1, NPTS(3)
-      !  Z = (K + FS(3) - 2) * DS
-      !  DO J = 1, NPTS(2)
-      !    Y = (J + FS(2) - 2) * DS
-      !    DO I = 1, NPTS(1)
-      !      X              = (I + FS(1) - 2) * DS
-      !      ARG            = V1 * X + V2 * Y + V3 * Z
-      !      FIELD(I, J, K) = FIELD(I, J, K) + A * SIN(ARG) + B * COS(ARG)
+      ! !$acc kernels async
+      ! !$acc loop independent PRIVATE(x, y, z, arg)
+      ! DO k = 1, npts(3)
+      !  z = (k + fs(3) - 2) * ds
+      !  DO j = 1, npts(2)
+      !    y = (j + fs(2) - 2) * ds
+      !    DO i = 1, npts(1)
+      !      x              = (i + fs(1) - 2) * ds
+      !      arg            = v1 * x + v2 * y + v3 * z
+      !      field(i, j, k) = field(i, j, k) + a * SIN(arg) + b * COS(arg)
       !    ENDDO
       !  ENDDO
       ! ENDDO
-      ! !$ACC END KERNELS
+      ! !$acc END kernels
 
 
-#ifdef TIMING
-      CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+#ifdef timing
+      CALL watch_stop(tictoc, mpi_comm_self)
 
-      STATS(6) = STATS(6) + TICTOC
-#endif
+      info(6) = info(6) + tictoc
+#ENDIF
 
     ENDDO
-    ! END LOOP OVER HARMONICS
+    ! END loop over harmonics
 
-#ifdef TIMING
-    CALL WATCH_START(TICTOC, MPI_COMM_SELF)
-#endif
+#ifdef timing
+    CALL watch_start(tictoc, mpi_comm_self)
+#ENDIF
 
-    !$ACC WAIT
+    !$acc wait
 
-    ! NORMALISE RANDOM FIELD
-    !$ACC PARALLEL LOOP COLLAPSE(3)
-    DO K = 1, NPTS(3)
-      DO J = 1, NPTS(2)
-        DO I = 1, NPTS(1)
-          FIELD(I, J, K) = FIELD(I, J, K) * SCALING
+    ! normalise random field
+    !$acc parallel loop collapse(3)
+    DO k = 1, npts(3)
+      DO j = 1, npts(2)
+        DO i = 1, npts(1)
+          field(i, j, k) = field(i, j, k) * scaling
         ENDDO
       ENDDO
     ENDDO
-    !$ACC END PARALLEL LOOP
+    !$acc END parallel loop
 
-    ! !$ACC KERNELS
-    ! !$ACC LOOP INDEPENDENT
-    ! DO K = 1, NPTS(3)
-    !  DO J = 1, NPTS(2)
-    !    DO I = 1, NPTS(1)
-    !      FIELD(I, J, K) = FIELD(I, J, K) * SCALING
+    ! !$acc kernels
+    ! !$acc loop independent
+    ! DO k = 1, npts(3)
+    !  DO j = 1, npts(2)
+    !    DO i = 1, npts(1)
+    !      field(i, j, k) = field(i, j, k) * scaling
     !    ENDDO
     !  ENDDO
     ! ENDDO
-    ! !$ACC END KERNELS
+    ! !$acc END kernels
 
-    ! COPY "FIELD" BACK TO HOST AND FREE MEMORY ON DEVICE
-    !$ACC END DATA
+    ! copy "field" back to host and free memory on device
+    !$acc END data
 
-#ifdef TIMING
-    CALL WATCH_STOP(TICTOC, MPI_COMM_SELF)
+#ifdef timing
+    CALL watch_stop(tictoc, mpi_comm_self)
 
-    STATS(6) = STATS(6) + TICTOC
-#endif
+    info(6) = info(6) + tictoc
+#ENDIF
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD. IF DESIRED, REMOVE MEAN AND SET ACTUAL STANDARD DEVIATION TO DESIRED VALUE.
+    ! compute variance and mean of random field. if desired, remove mean and set actual standard deviation to desired value.
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    ALLOCATE(VAR(0:WORLD_SIZE - 1), MU(0:WORLD_SIZE - 1), NPOINTS(0:WORLD_SIZE - 1))
+    ALLOCATE(var(0:world_size - 1), mu(0:world_size - 1), npoints(0:world_size - 1))
 
-    ! COMPUTE VARIANCE AND MEAN OF RANDOM FIELD FOR EACH SINGLE PROCESS
-    VAR(WORLD_RANK) = VARIANCE(FIELD)
-    MU(WORLD_RANK)  = MEAN(FIELD)
+    ! compute variance and mean of random field for each single process
+    var(world_rank) = variance(field)
+    mu(world_rank)  = mean(field)
 
-    ! NUMBER OF GRID POINTS PER PROCESS
-    NPOINTS(WORLD_RANK) = NPTS(1) * NPTS(2) * NPTS(3)
+    ! number of grid points per process
+    npoints(world_rank) = npts(1) * npts(2) * npts(3)
 
-    ! SHARE RESULTS
-    CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, VAR, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-    CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, MU, 1, REAL_TYPE, MPI_COMM_WORLD, IERR)
-    CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, NPOINTS, 1, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+    ! share results
+    CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, real_type, mpi_comm_world, ierr)
+    CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, real_type, mpi_comm_world, ierr)
+    CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
-    ! COMPUTE TOTAL VARIANCE ("STATS(3)") AND MEAN ("STATS(4)")
-    CALL PARALLEL_VARIANCE(VAR, MU, NPOINTS, STATS(3), STATS(4))
+    ! compute total variance ("info(3)") and mean ("info(4)")
+    CALL parallel_variance(var, mu, npoints, info(3), info(4))
 
-    ! RETURN STANDARD DEVIATION
-    STATS(3) = SQRT(STATS(3))
+    ! return standard deviation
+    info(3) = SQRT(info(3))
 
-    DEALLOCATE(VAR, MU, NPOINTS)
+    DEALLOCATE(var, mu, npoints)
 
-    ! APPLY TAPER/MUTE
-    DO I = 1, SIZE(POI, 2)
-      CALL TAPERING(DS, FS, FE, FIELD, POI(:, I), MUTE, TAPER)
+    ! apply taper/mute
+    DO i = 1, SIZE(poi, 2)
+      CALL tapering(ds, fs, fe, field, poi(:, i), mute, taper)
     ENDDO
 
-    CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+    CALL mpi_barrier(mpi_comm_world, ierr)
 
-  END SUBROUTINE SCARF3D_STRUCTURED_SPEC
+  END SUBROUTINE scarf3d_structured_srm
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
 
-END MODULE SCARFLIB_SPEC
+END MODULE scarflib_spec
