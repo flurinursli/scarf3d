@@ -1,3 +1,14 @@
+/*
+Purpose:
+  To provide an header file for the SCARF3D library in C/C++
+
+Revisions:
+    Date                    Description of change
+    ====                    =====================
+  04/05/20                  original version
+
+*/
+
 #ifndef SCARF3D_H_
 
 #define SCARF3D_H_
@@ -13,23 +24,6 @@ typedef float fpp;
 #ifdef __cplusplus
 extern "C"{
 #endif
-
-// declare FORTRAN subroutines
-// extern void struct_initialize(const int fs[], const int fe[], const fpp* ds, const int* acf, const fpp cl[], const fpp* sigma,
-//                               const int* solver, const fpp* hurst, const fpp* dh, const fpp* poi, const int* npoi, const fpp* mute,
-//                               const fpp* taper, const int* rescale, const int* pad);
-//
-// extern void unstruct_initialize(const int* npts, const fpp* x, const fpp* y, const fpp* z, const fpp* dh, const int* acf, const fpp cl[], const fpp* sigma,
-//                                 const int* solver, const fpp* hurst, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper, const int* rescale,
-//                                 const int* pad);
-//
-// extern void execute(const int* seed, fpp** field, fpp stats[]);
-//
-// extern void finalize();
-//
-// extern void io_one(const int* npts, const fpp** field, const char fname[], const int* nwriters);
-//
-// extern void io_slice(const int* npts, const int* direction, const int* plane, const fpp** field, const char fname[]);
 
 enum algorithm {fft, spec};
 
@@ -52,12 +46,8 @@ struct scarf_opt{
 void scarf_opt_init(struct scarf_opt * var);
 
 void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const int acf, const fpp cl[], const fpp sigma, struct scarf_opt *var);
-                             //const int* solver, const fpp* hurst, const fpp* dh, const fpp* poi, const int* npoi, const fpp* mute,
-                             //const fpp* taper, const int* rescale, const int* pad);
 
 void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma, struct scarf_opt *var);
-                               //const int* solver, const fpp* hurst, const fpp* ds, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,
-                               //const int* rescale, const int* pad);
 
 void scarf_execute(const int seed, fpp* field, fpp stats[]);
 
@@ -65,8 +55,9 @@ void scarf_finalize();
 
 void scarf_io_one(const int* npts, const fpp* field, const char fname[], const int* nwriters);
 
-void scarf_io_slice(const int* npts, const int direction, const int plane, const fpp* field, const char fname[]);
+void scarf_io_slice(const int* npts, const char axis[], const int plane, const fpp* field, const char fname[]);
 
+// define C++ class
 #ifdef __cplusplus
 }
 
@@ -122,9 +113,9 @@ namespace Scarf3D
       };
 
       // IO model slice
-      void io(const int npts[], const int direction, const int plane, const fpp* field, const char fname[])
+      void io(const int npts[], const char axis[], const int plane, const fpp* field, const char fname[])
       {
-        scarf_io_slice(npts, direction, plane, field, fname);
+        scarf_io_slice(npts, axis, plane, field, fname);
       };
 
   };

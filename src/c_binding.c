@@ -28,13 +28,15 @@ extern void finalize();
 
 extern void io_one(const int* npts, const fpp** field, const char fname[], const int* nwriters);
 
-extern void io_slice(const int* npts, const int* direction, const int* plane, const fpp** field, const char fname[]);
+extern void io_slice(const int* npts, const char axis[], const int* plane, const fpp** field, const char fname[]);
 
 // end FORTRAN subroutines
 
 // define C functions
 
 void scarf_opt_init(struct scarf_opt * var){
+
+printf("hoi2\n");
 
   var -> solver  = 0;
   var -> hurst   = 0;
@@ -46,12 +48,15 @@ void scarf_opt_init(struct scarf_opt * var){
   var -> taper   = 0;
   var -> rescale = 0;
   var -> pad     = 0;
+  printf("hoi3\n");
   var -> nc[0]   = 0;
   var -> nc[1]   = 0;
   var -> nc[2]   = 0;
   var -> fc[0]   = 0;
   var -> fc[1]   = 0;
   var -> fc[2]   = 0;
+
+printf("hoi4\n");
 
 }
 
@@ -132,8 +137,8 @@ void scarf_io_one(const int npts[], const fpp* field, const char fname[], const 
 
 }
 
-void scarf_io_slice(const int npts[], const int direction, const int plane, const fpp* field, const char fname[]){
+void scarf_io_slice(const int npts[], const char axis[], const int plane, const fpp* field, const char fname[]){
 
-  io_slice(npts, &direction, &plane, &field, fname);
+  io_slice(npts, axis, &plane, &field, fname);
 
 }

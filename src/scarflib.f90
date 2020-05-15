@@ -1,59 +1,65 @@
-MODULE SCARFLIB
+MODULE m_scarflib
 
-  ! THIS MODULE IS INTENDED TO BE USED AS WRAPPER FOR THE SCARF3D LIBRARY
+  ! Purpose:
+  !   To provide an interface for subroutines at the core of the SCARF3D library
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !
 
-  USE, NON_INTRINSIC :: MPI
-  USE, NON_INTRINSIC :: SCARFLIB_COMMON
-  USE, NON_INTRINSIC :: SCARFLIB_FFT
-  USE, NON_INTRINSIC :: SCARFLIB_SPEC
+  !USE, NON_INTRINSIC :: mpi                     !< this is included in common???
+  USE, NON_INTRINSIC :: m_scarflib_common
+  USE, NON_INTRINSIC :: m_scarflib_fim
+  USE, NON_INTRINSIC :: m_scarflib_srm
 
-
-  IMPLICIT NONE
+  IMPLICIT none
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  ! DECLARE ALL PRIVATE, INCLUDING ALSO PUBLIC VARIABLES AND SUBROUTINES ACCESSED FROM OTHER MODULES VIA HOST-ASSOCIATION
+  ! declare all private, including also public variables and subroutines accessed from other modules via host-association
   PRIVATE
 
-  ! THESE ARE THE ONLY SUBROUTINES/VARIABLES ACCESSIBLE BY CALLING PROGRAM
-  PUBLIC :: SCARF_INITIALIZE, SCARF_EXECUTE, SCARF_FINALIZE, SCARF_IO
-  !PUBLIC :: SCARF_OBJ
+  ! these are the only bits and pieces accessible by an external calling program
+  PUBLIC :: scarf_initialize, scarf_execute, scarf_finalize, scarf_io
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTERFACE SCARF_INITIALIZE
-    MODULE PROCEDURE INITIALIZE_STRUCTURED, INITIALIZE_UNSTRUCTURED
+  INTERFACE scarf_initialize
+    MODULE PROCEDURE initialize_structured, initialize_unstructured
   END INTERFACE
 
-  INTERFACE SCARF_EXECUTE
-    MODULE PROCEDURE EXECUTE_STRUCTURED, EXECUTE_UNSTRUCTURED
+  INTERFACE scarf_execute
+    MODULE PROCEDURE execute_structured, execute_unstructured
   END INTERFACE
 
-  INTERFACE SCARF_IO
-    MODULE PROCEDURE SCARF_IO_SLICE, SCARF_IO_ONE
+  INTERFACE scarf_io
+    MODULE PROCEDURE scarf_io_slice, scarf_io_one
   END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  TYPE SCARF_OBJ
+  ! derived datatype containing input parameters and output statistics
+  TYPE scarf_obj
 
-    INTEGER(IPP)                                       :: ACF
-    INTEGER(IPP)                                       :: RESCALE
-    INTEGER(IPP)                                       :: PAD
-    INTEGER(IPP)                                       :: METHOD
-    INTEGER(IPP),                       DIMENSION(3)   :: FS, FE
-    REAL(FPP)                                          :: DS, DH
-    REAL(FPP)                                          :: SIGMA, HURST
-    REAL(FPP)                                          :: MUTE, TAPER
-    REAL(FPP),                          DIMENSION(3)   :: CL
-    REAL(FPP),                          DIMENSION(3)   :: NC, FC
-    REAL(FPP),                 POINTER, DIMENSION(:)   :: X  => NULL(), Y => NULL(), Z => NULL()
-    REAL(FPP),    ALLOCATABLE,          DIMENSION(:)   :: STATS
-    REAL(FPP),    ALLOCATABLE,          DIMENSION(:,:) :: POI
+    INTEGER(f_int)                                       :: acf
+    INTEGER(f_int)                                       :: rescale
+    INTEGER(f_int)                                       :: pad
+    INTEGER(f_int)                                       :: method
+    INTEGER(f_int),                       DIMENSION(3)   :: fs, fe
+    REAL(f_real)                                         :: ds, dh
+    REAL(f_real)                                         :: sigma, hurst
+    REAL(f_real)                                         :: mute, taper
+    REAL(f_real),                         DIMENSION(3)   :: cl
+    REAL(f_real),                         DIMENSION(3)   :: nc, fc
+    REAL(f_real),                POINTER, DIMENSION(:)   :: x => NULL(), y => NULL(), z => NULL()
+    REAL(f_real),   ALLOCATABLE,          DIMENSION(:)   :: stats
+    REAL(f_real),   ALLOCATABLE,          DIMENSION(:,:) :: poi
 
-  END TYPE SCARF_OBJ
+  END TYPE scarf_obj
 
-  TYPE(SCARF_OBJ) :: OBJ
+  TYPE(scarf_obj) :: obj
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -63,301 +69,391 @@ MODULE SCARFLIB
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INITIALIZE_STRUCTURED(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, MUTE, TAPER, RESCALE, PAD, NC, FC)
+    SUBROUTINE initialize_structured(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, mute, taper, rescale, pad, nc, fc)
 
-      INTEGER(IPP),   DIMENSION(3),             INTENT(IN) :: FS, FE
-      REAL(FPP),                                INTENT(IN) :: DS
-      INTEGER(IPP),                             INTENT(IN) :: ACF
-      REAL(FPP),      DIMENSION(3),             INTENT(IN) :: CL
-      REAL(FPP),                                INTENT(IN) :: SIGMA
-      INTEGER(IPP),                   OPTIONAL, INTENT(IN) :: METHOD
-      REAL(FPP),                      OPTIONAL, INTENT(IN) :: HURST
-      REAL(FPP),                      OPTIONAL, INTENT(IN) :: DH                    !< MAXIMUM GRID-STEP (CONTROLS MAX WAVENUMBER)
-      REAL(FPP),      DIMENSION(:,:), OPTIONAL, INTENT(IN) :: POI
-      REAL(FPP),                      OPTIONAL, INTENT(IN) :: MUTE, TAPER
-      INTEGER(IPP),                   OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      REAL(FPP),      DIMENSION(3),   OPTIONAL, INTENT(IN) :: NC, FC                !< NEAR CORNER, FAR CORNER
+      ! Purpose:
+      !   To setup most of the parameters needed to compute random fields: structured mesh version. Parameters concerning the external
+      !   grid refer to calling process view.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int), DIMENSION(3),             INTENT(IN) :: fs, fe         !< first/last index of external grid
+      REAL(f_real),                             INTENT(IN) :: ds             !< grid-step external grid (controls max resolvable wavenumber)
+      INTEGER(f_int),                           INTENT(IN) :: acf            !< autocorrelation function (0=von karman, 1=gaussian)
+      REAL(f_real),   DIMENSION(3),             INTENT(IN) :: cl             !< correlation length
+      REAL(f_real),                             INTENT(IN) :: sigma          !< standard deviation
+      INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: method         !< algorithm of choice (empty=0=fim, 1=srm)
+      REAL(f_real),                   OPTIONAL, INTENT(IN) :: hurst          !< hurst exponent (needed only for acf=0)
+      REAL(f_real),                   OPTIONAL, INTENT(IN) :: dh             !< min grid-step external grid (controls max absolute wavenumber)
+      REAL(f_real),   DIMENSION(:,:), OPTIONAL, INTENT(IN) :: poi            !< points where taper/muting should be applied
+      REAL(f_real),                   OPTIONAL, INTENT(IN) :: mute, taper    !< radius for taper/muting
+      INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: rescale        !< rescale discrete std.dev. to continuous one
+      INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: pad            !< pad internal grid (fim only, empty=0=no, 1=yes)
+      REAL(f_real),   DIMENSION(3),   OPTIONAL, INTENT(IN) :: nc, fc         !< min/max extent external grid (empty = use fs,fe)
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      OBJ%FS  = FS
-      OBJ%FE  = FE
-      OBJ%DS  = DS
+      obj%fs  = fs
+      obj%fe  = fe
+      obj%ds  = ds
 
-      OBJ%DH    = DS                      !< DEFAULT FFT GRID-STEP EQUALS HALF MESH GRID-STEP
-      OBJ%ACF   = ACF
-      OBJ%CL    = CL
-      OBJ%SIGMA = SIGMA
+      ! by default minimum grid-step of external grid equals current grid-step: this implies Kc = Kmax
+      obj%dh    = ds
+      obj%acf   = acf
+      obj%cl    = cl
+      obj%sigma = sigma
 
-      OBJ%METHOD = 0                      !< DEFAULT IS FFT METHOD
+      obj%method = 0                       !< default to FIM algorithm
 
-      OBJ%HURST = 0._FPP
+      obj%hurst = 0._f_real
 
-      OBJ%MUTE    = -999._FPP
-      OBJ%TAPER   = -999._FPP
-      OBJ%RESCALE = 0
-      OBJ%PAD     = 0
+      obj%mute    = -999._f_real
+      obj%taper   = -999._f_real
+      obj%rescale = 0
+      obj%pad     = 0
 
-      OBJ%NC      = (FS - 1) * DS          !< DEFAULT "NC" AND "FC" COINCIDE WITH MESH
-      OBJ%FC      = (FE - 1) * DS
+      obj%nc      = (fs - 1) * ds          !< by default, "nc" and "fc" are given by "fs" and "fe"
+      obj%fc      = (fe - 1) * ds
 
-      ALLOCATE(OBJ%POI(0,0))
+      ALLOCATE(obj%poi(0,0))               !< by default, there are no points where tapering/muting should be applied
 
-      IF (PRESENT(METHOD))  OBJ%METHOD  = METHOD
-      IF (PRESENT(HURST))   OBJ%HURST   = HURST
-      IF (PRESENT(DH))      OBJ%DH      = DH
-      IF (PRESENT(MUTE))    OBJ%MUTE    = MUTE
-      IF (PRESENT(TAPER))   OBJ%TAPER   = TAPER
-      IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
-      IF (PRESENT(PAD))     OBJ%PAD     = PAD
-      IF (PRESENT(POI))     OBJ%POI     = POI
-      IF (PRESENT(NC))      OBJ%NC      = NC
-      IF (PRESENT(FC))      OBJ%FC      = FC
+      ! override default values
+      IF (PRESENT(method))  obj%method  = method
+      IF (PRESENT(hurst))   obj%hurst   = hurst
+      IF (PRESENT(dh))      obj%dh      = dh
+      IF (PRESENT(mute))    obj%mute    = mute
+      IF (PRESENT(taper))   obj%taper   = taper
+      IF (PRESENT(rescale)) obj%rescale = rescale
+      IF (PRESENT(pad))     obj%pad     = pad
+      IF (PRESENT(poi))     obj%poi     = poi
+      IF (PRESENT(nc))      obj%nc      = nc
+      IF (PRESENT(fc))      obj%fc      = fc
 
-      IF (OBJ%METHOD .EQ. 0) THEN
-        ALLOCATE(OBJ%STATS(8))
-      ELSEIF (OBJ%METHOD .EQ. 1) THEN
-        ALLOCATE(OBJ%STATS(6))
+      IF (obj%method .eq. 0) THEN
+        ALLOCATE(obj%stats(8))
+      ELSEIF (obj%method .eq. 1) THEN
+        ALLOCATE(obj%stats(6))
       ENDIF
 
-    END SUBROUTINE INITIALIZE_STRUCTURED
+    END SUBROUTINE initialize_structured
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE INITIALIZE_UNSTRUCTURED(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, MUTE, TAPER, RESCALE, PAD, NC, FC)
+    SUBROUTINE initialize_unstructured(x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, mute, taper, rescale, pad, nc, fc)
 
-      REAL(FPP),      DIMENSION(:),   TARGET,           INTENT(IN) :: X, Y, Z
-      REAL(FPP),                                        INTENT(IN) :: DH                 !< FFT GRID-STEP (CONTROLS MAX WAVENUMBER)
-      INTEGER(IPP),                                     INTENT(IN) :: ACF
-      REAL(FPP),      DIMENSION(3),                     INTENT(IN) :: CL
-      REAL(FPP),                                        INTENT(IN) :: SIGMA
-      INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: METHOD
-      REAL(FPP),                              OPTIONAL, INTENT(IN) :: HURST
-      REAL(FPP),                              OPTIONAL, INTENT(IN) :: DS
-      REAL(FPP),      DIMENSION(:,:),         OPTIONAL, INTENT(IN) :: POI
-      REAL(FPP),                              OPTIONAL, INTENT(IN) :: MUTE, TAPER
-      INTEGER(IPP),                           OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      REAL(FPP),      DIMENSION(3),           OPTIONAL, INTENT(IN) :: NC, FC             !< NEAR CORNER, FAR CORNER
+      ! Purpose:
+      !   To setup most of the parameters needed to compute random fields: unstructured mesh version. Parameters concerning the external
+      !   grid refer to calling process view.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      REAL(f_real),   DIMENSION(:),   TARGET,           INTENT(IN) :: x, y, z            !< external grid nodes
+      REAL(f_real),                                     INTENT(IN) :: dh                 !< min grid-step external grid (controls max absolute wavenumber)
+      INTEGER(f_int),                                   INTENT(IN) :: acf                !< autocorrelation function (0=von karman, 1=gaussian)
+      REAL(f_real),   DIMENSION(3),                     INTENT(IN) :: cl                 !< correlation length
+      REAL(f_real),                                     INTENT(IN) :: sigma              !< continuous tandard deviation
+      INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: method             !< algorithm of choice (empty=0=fim, 1=srm)
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: hurst              !< hurst exponent (needed only for acf=0)
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: ds                 !< grid-step external grid (controls max resolvable wavenumber)
+      REAL(f_real),   DIMENSION(:,:),         OPTIONAL, INTENT(IN) :: poi                !< points where taper/muting should be applied
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: mute, taper        !< radius for taper/muting
+      INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: rescale            !< rescale discrete std.dev. to continuous one
+      INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: pad                !< pad internal grid (FIM only, empty=0=no, 1=yes)
+      REAL(f_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc             !< near corner, far corner
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      OBJ%X     => X
-      OBJ%Y     => Y
-      OBJ%Z     => Z
+      obj%x     => x
+      obj%y     => y
+      obj%z     => z
 
-      OBJ%DH    = DH
-      OBJ%ACF   = ACF
-      OBJ%CL    = CL
-      OBJ%SIGMA = SIGMA
+      obj%dh    = dh
+      obj%acf   = acf
+      obj%cl    = cl
+      obj%sigma = sigma
 
-      OBJ%DS     = DH                     !< DEFAULT MESH GRID-STEP EQUALS FFT GRID-STEP
+      ! by default current grid-step of external grid equals min grid-step: this implies Kc = Kmax
+      obj%ds     = dh
 
-      OBJ%METHOD = 0                      !< DEFAULT IS FFT METHOD
+      obj%method = 0                        !< default to FIM algorithm
 
-      OBJ%HURST = 0._FPP
+      obj%hurst = 0._f_real
 
-      OBJ%MUTE    = -999._FPP
-      OBJ%TAPER   = -999._FPP
-      OBJ%RESCALE = 0
-      OBJ%PAD     = 0
+      obj%mute    = -999._f_real
+      obj%taper   = -999._f_real
+      obj%rescale = 0
+      obj%pad     = 0
 
-      OBJ%NC      = [MINVAL(X, DIM = 1), MINVAL(Y, DIM = 1), MINVAL(Z, DIM = 1)]        !< DEFAULT "NC" AND "FC" COINCIDE WITH MESH
-      OBJ%FC      = [MAXVAL(X, DIM = 1), MAXVAL(Y, DIM = 1), MAXVAL(Z, DIM = 1)]
+      ! by default, "nc" and "fc" are determined by input grid nodes
+      obj%nc      = [MINVAL(x, dim = 1), MINVAL(y, dim = 1), MINVAL(z, dim = 1)]
+      obj%fc      = [MAXVAL(x, dim = 1), MAXVAL(y, dim = 1), MAXVAL(z, dim = 1)]
 
-      ALLOCATE(OBJ%POI(0,0))
+      ALLOCATE(obj%poi(0,0))                 !< by default, there are no points where tapering/muting should be applied
 
-      IF (PRESENT(METHOD))  OBJ%METHOD  = METHOD
-      IF (PRESENT(HURST))   OBJ%HURST   = HURST
-      IF (PRESENT(DS))      OBJ%DS      = DS
-      IF (PRESENT(MUTE))    OBJ%MUTE    = MUTE
-      IF (PRESENT(TAPER))   OBJ%TAPER   = TAPER
-      IF (PRESENT(RESCALE)) OBJ%RESCALE = RESCALE
-      IF (PRESENT(PAD))     OBJ%PAD     = PAD
-      IF (PRESENT(POI))     OBJ%POI     = POI
-      IF (PRESENT(NC))      OBJ%NC      = NC
-      IF (PRESENT(FC))      OBJ%FC      = FC
+      ! override default values
+      IF (PRESENT(method))  obj%method  = method
+      IF (PRESENT(hurst))   obj%hurst   = hurst
+      IF (PRESENT(ds))      obj%ds      = ds
+      IF (PRESENT(mute))    obj%mute    = mute
+      IF (PRESENT(taper))   obj%taper   = taper
+      IF (PRESENT(rescale)) obj%rescale = rescale
+      IF (PRESENT(pad))     obj%pad     = pad
+      IF (PRESENT(poi))     obj%poi     = poi
+      IF (PRESENT(nc))      obj%nc      = nc
+      IF (PRESENT(fc))      obj%fc      = fc
 
-      IF (OBJ%METHOD .EQ. 0) THEN
-        ALLOCATE(OBJ%STATS(8))
-      ELSEIF (OBJ%METHOD .EQ. 1) THEN
-        ALLOCATE(OBJ%STATS(6))
+      IF (obj%method .eq. 0) THEN
+        ALLOCATE(obj%stats(8))
+      ELSEIF (obj%method .eq. 1) THEN
+        ALLOCATE(obj%stats(6))
       ENDIF
 
-    END SUBROUTINE INITIALIZE_UNSTRUCTURED
+    END SUBROUTINE initialize_unstructured
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXECUTE_UNSTRUCTURED(SEED, FIELD, STATS)
+    SUBROUTINE execute_unstructured(seed, field, stats)
 
-      INTEGER(IPP),               INTENT(IN)  :: SEED
-      REAL(FPP),    DIMENSION(:), INTENT(OUT) :: FIELD
-      REAL(FPP),    DIMENSION(8), INTENT(OUT) :: STATS
+      ! Purpose:
+      !   To launch random field calculations for unstructured meshes
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      STATS = 0._FPP
-
-      IF (OBJ%METHOD .EQ. 0) THEN
-
-        CALL SCARF3D_FFT(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED,   &
-                         OBJ%POI, OBJ%MUTE, OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
-
-        STATS = OBJ%STATS
-
-      ELSEIF (OBJ%METHOD .EQ. 1) THEN
-
-        CALL SCARF3D_SPEC(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%X, OBJ%Y, OBJ%Z, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED,  &
-                          OBJ%POI, OBJ%MUTE, OBJ%TAPER, FIELD, OBJ%STATS)
-
-        STATS(1:6) = OBJ%STATS(:)
-
-      ENDIF
-
-    END SUBROUTINE EXECUTE_UNSTRUCTURED
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE EXECUTE_STRUCTURED(SEED, FIELD, STATS)
-
-      INTEGER(IPP),                   INTENT(IN)  :: SEED
-      REAL(FPP),    DIMENSION(:,:,:), INTENT(OUT) :: FIELD
-      REAL(FPP),    DIMENSION(8),     INTENT(OUT) :: STATS
+      INTEGER(f_int),               INTENT(IN)  :: seed         !< seed number
+      REAL(f_real),   DIMENSION(:), INTENT(OUT) :: field        !< random field
+      REAL(f_real),   DIMENSION(8), INTENT(OUT) :: stats        !< vector with accuracy (1:2), std.dev. (3), mean(4) and timing flags (5:6/8)
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      STATS = 0._FPP
+      stats(:) = 0._f_real
 
-      IF (OBJ%METHOD .EQ. 0) THEN
+      IF (obj%method .eq. 0) THEN
 
-        CALL SCARF3D_FFT(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, &
-                         OBJ%MUTE, OBJ%TAPER, OBJ%RESCALE, OBJ%PAD, FIELD, OBJ%STATS)
+        CALL scarf3d_fim(obj%nc, obj%fc, obj%ds, obj%x, obj%y, obj%z, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed,   &
+                         obj%poi, obj%mute, obj%taper, obj%rescale, obj%pad, field, obj%stats)
 
-        STATS = OBJ%STATS
+        stats = obj%stats
 
-      ELSEIF (OBJ%METHOD .EQ. 1) THEN
+      ELSEIF (obj%method .eq. 1) THEN
 
-        CALL SCARF3D_SPEC(OBJ%NC, OBJ%FC, OBJ%DS, OBJ%FS, OBJ%FE, OBJ%DH, OBJ%ACF, OBJ%CL, OBJ%SIGMA, OBJ%HURST, SEED, OBJ%POI, &
-                          OBJ%MUTE, OBJ%TAPER, FIELD, OBJ%STATS)
+        CALL scarf3d_srm(obj%nc, obj%fc, obj%ds, obj%x, obj%y, obj%z, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed,  &
+                          obj%poi, obj%mute, obj%taper, obj%rescale, field, obj%stats)
 
-        STATS(1:6) = OBJ%STATS(:)
+        stats(1:6) = obj%stats(:)
 
       ENDIF
 
-    END SUBROUTINE EXECUTE_STRUCTURED
+    END SUBROUTINE execute_unstructured
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_FINALIZE()
+    SUBROUTINE execute_structured(seed, field, stats)
+
+      ! Purpose:
+      !   To launch random field calculations for structured meshes
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),                   INTENT(IN)  :: seed         !< seed number
+      REAL(f_real),   DIMENSION(:,:,:), INTENT(OUT) :: field        !< random field
+      REAL(f_real),   DIMENSION(8),     INTENT(OUT) :: stats        !< vector with accuracy (1:2), std.dev. (3), mean(4) and timing flags (5:6/8)
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      IF (ALLOCATED(OBJ%POI))   DEALLOCATE(OBJ%POI)
-      IF (ALLOCATED(OBJ%STATS)) DEALLOCATE(OBJ%STATS)
+      stats(:) = 0._f_real
 
-      NULLIFY(OBJ%X, OBJ%Y, OBJ%Z)
+      IF (obj%method .eq. 0) THEN
 
-    END SUBROUTINE SCARF_FINALIZE
+        CALL scarf3d_fim(obj%nc, obj%fc, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%poi, &
+                         obj%mute, obj%taper, obj%rescale, obj%pad, field, obj%stats)
+
+        stats = obj%stats
+
+      ELSEIF (obj%method .eq. 1) THEN
+
+        CALL scarf3d_srm(obj%nc, obj%fc, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%poi, &
+                          obj%mute, obj%taper, obj%rescale, field, obj%stats)
+
+        stats(1:6) = obj%stats(:)
+
+      ENDIF
+
+    END SUBROUTINE execute_structured
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_SLICE(N, DIRECTION, PLANE, FIELD, FILENAME)
+    SUBROUTINE scarf_finalize()
 
-      INTEGER(IPP),     DIMENSION(3),     INTENT(IN) :: N
-      INTEGER(IPP),                       INTENT(IN) :: DIRECTION
-      INTEGER(IPP),                       INTENT(IN) :: PLANE
-      REAL(FPP),        DIMENSION(:,:,:), INTENT(IN) :: FIELD
-      CHARACTER(LEN=*),                   INTENT(IN) :: FILENAME
-      INTEGER(IPP)                                   :: RANK, NP, IERR
+      ! Purpose:
+      !   To release resources allocated by the library.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! GET RANK NUMBER
-      CALL MPI_COMM_RANK(MPI_COMM_WORLD, RANK, IERR)
+      IF (ALLOCATED(obj%poi))   DEALLOCATE(obj%poi)
+      IF (ALLOCATED(obj%stats)) DEALLOCATE(obj%stats)
 
-      ! GET NUMBER OF TASKS
-      CALL MPI_COMM_SIZE(MPI_COMM_WORLD, NP, IERR)
+      NULLIFY(obj%x, obj%y, obj%z)
 
-      ! THESE ARE GLOBAL VARIABLES STORED IN "SCARFLIB_COMMON"
-      ALLOCATE(GS(3, 0:NP - 1), GE(3, 0:NP - 1))
-
-      ! STORE GLOBAL INDICES
-      GS(:, RANK) = OBJ%FS
-      GE(:, RANK) = OBJ%FE
-
-      NPTS = N
-
-      ! SHARE INFO AMONGST ALL PROCESSES
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-
-      CALL WRITE_SLICE(DIRECTION, PLANE, FIELD, FILENAME)
-
-      DEALLOCATE(GS, GE)
-
-    END SUBROUTINE SCARF_IO_SLICE
+    END SUBROUTINE scarf_finalize
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SCARF_IO_ONE(N, FIELD, FILENAME, NWRITERS)
+    SUBROUTINE scarf_io_slice(n, axis, plane, field, filename)
 
-      INTEGER(IPP),     DIMENSION(3),               INTENT(IN) :: N
-      REAL(FPP),        DIMENSION(:,:,:),           INTENT(IN) :: FIELD
-      CHARACTER(LEN=*),                             INTENT(IN) :: FILENAME
-      INTEGER(IPP),                       OPTIONAL, INTENT(IN) :: NWRITERS
-      INTEGER(IPP)                                             :: RANK, NP, NW, IERR
+      ! Purpose:
+      !   To write to disk slices of random field perpendicular to cartesian axes. Works for structured meshes only.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),   DIMENSION(3),     INTENT(IN) :: n                  !< grid points in the global mesh
+      CHARACTER(LEN=1),                   INTENT(IN) :: axis               !< axis perpendicular to the slice
+      INTEGER(f_int),                     INTENT(IN) :: plane              !< slice location in terms of grid nodes
+      REAL(f_real),     DIMENSION(:,:,:), INTENT(IN) :: field              !< random field
+      CHARACTER(LEN=*),                   INTENT(IN) :: filename           !< output file name
+      INTEGER(f_int)                                 :: rank, np, ierr, cut
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! GET RANK NUMBER
-      CALL MPI_COMM_RANK(MPI_COMM_WORLD, RANK, IERR)
+      ! get rank number
+      CALL mpi_comm_rank(mpi_comm_world, rank, ierr)
 
-      ! GET NUMBER OF TASKS
-      CALL MPI_COMM_SIZE(MPI_COMM_WORLD, NP, IERR)
+      ! get number of tasks
+      CALL mpi_comm_size(mpi_comm_world, np, ierr)
 
-      ! THESE ARE GLOBAL VARIABLES STORED IN "SCARFLIB_COMMON"
-      ALLOCATE(GS(3, 0:NP - 1), GE(3, 0:NP - 1))
+      ! these are global variables stored in "m_scarflib_common" and used during slicing
+      ALLOCATE(gs(3, 0:np - 1), ge(3, 0:np - 1))
 
-      ! STORE GLOBAL INDICES
-      GS(:, RANK) = OBJ%FS
-      GE(:, RANK) = OBJ%FE
+      ! store process-dependent grid nodes into global variable
+      gs(:, rank) = obj%fs
+      ge(:, rank) = obj%fe
 
-      NPTS = N
+      ! store total (process-independent) grid nodes into gloabl variable (defined in  "m_scarflib_common")
+      npts = n
 
-      ! SHARE INFO AMONGST ALL PROCESSES
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GS, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
-      CALL MPI_ALLGATHER(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, GE, 3, MPI_INTEGER, MPI_COMM_WORLD, IERR)
+      ! share info amongst all processes
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
 
-      ! DEFAULT CASE IS TO USE ONE WRITER ONLY
-      NW = 1
+      ! IF (ierr .ne. 0) THEN
+      !   stderr%code('error code', ierr)
+      !   stderr%tree('m_scarflib -> scarf_io_slice -> mpi_allgather')
+      ! ENDIF
 
-      ! WE CANNOT HAVE MORE WRITERS THAN AVAILABLE PROCESSES
-      IF (PRESENT(NWRITERS)) NW = MIN(NP, NWRITERS)
+      SELECT CASE(axis)
+      CASE('x')
+        cut = 1
+      CASE('y')
+        cut = 2
+      CASE('z')
+        cut = 3
+      CASE DEFAULT
+        cut = 0
+      END SELECT
 
-      CALL WRITE_ONE(FIELD, FILENAME, NW)
+      !IF (plane .gt. npts(cut)) stderr%logic('plane', plane)
+      !IF (cut .eq. 0)           stderr%arg('axis', axis)
 
-      DEALLOCATE(GS, GE)
+      !IF (stderr%new) stderr%tree('m_scarflib -> scarf_io_slice')
 
-    END SUBROUTINE SCARF_IO_ONE
+      CALL write_slice(cut, plane, field, filename)
+
+      DEALLOCATE(gs, ge)
+
+    END SUBROUTINE scarf_io_slice
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    SUBROUTINE scarf_io_one(n, field, filename, nwriters)
+
+      ! Purpose:
+      !   To write to disk whole random field in a single file. The number of MPI processes with I/O permit can be defined in the
+      !   arguments list. Works for structured meshes only.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),   DIMENSION(3),               INTENT(IN) :: n                     !< grid points in the global mesh
+      REAL(f_real),     DIMENSION(:,:,:),           INTENT(IN) :: field                 !< random field
+      CHARACTER(len=*),                             INTENT(IN) :: filename              !< output file name
+      INTEGER(f_int),                     OPTIONAL, INTENT(IN) :: nwriters              !< number of concurrent I/O processes (empty = 1)
+      INTEGER(f_int)                                           :: rank, np, nw, ierr
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! get rank number
+      CALL mpi_comm_rank(mpi_comm_world, rank, ierr)
+
+      ! get number of tasks
+      CALL mpi_comm_size(mpi_comm_world, np, ierr)
+
+      ! these are global variables stored in "scarflib_common"
+      ALLOCATE(gs(3, 0:np - 1), ge(3, 0:np - 1))
+
+      ! store global indices
+      gs(:, rank) = obj%fs
+      ge(:, rank) = obj%fe
+
+      npts = n
+
+      ! share info amongst all processes
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
+
+      ! default case is to USE one writer only
+      nw = 1
+
+      ! we cannot have more writers than available processes
+      IF (PRESENT(nwriters)) nw = MIN(np, nwriters)
+
+      CALL write_one(field, filename, nw)
+
+      DEALLOCATE(gs, ge)
+
+    END SUBROUTINE scarf_io_one
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-END MODULE SCARFLIB
+END MODULE m_scarflib

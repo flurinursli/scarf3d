@@ -21,7 +21,7 @@ MODULE m_scarflib_srm
 
   PRIVATE
 
-  PUBLIC :: scarf3d_spec
+  PUBLIC :: scarf3d_srm
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -36,14 +36,14 @@ MODULE m_scarflib_srm
 
     SUBROUTINE srng(rand) BIND(c, name="srng")
       USE, INTRINSIC     :: iso_c_binding
-      USE, NON_INTRINSIC :: scarflib_common
+      USE, NON_INTRINSIC :: m_scarflib_common
       IMPLICIT none
       REAL(c_real), DIMENSION(2), INTENT(OUT) :: rand
     END SUBROUTINE srng
 
     SUBROUTINE normdist(rand) BIND(c, name="normdist")
       USE, INTRINSIC     :: iso_c_binding
-      USE, NON_INTRINSIC :: scarflib_common
+      USE, NON_INTRINSIC :: m_scarflib_common
       IMPLICIT none
       REAL(c_real), DIMENSION(2), INTENT(OUT) :: rand
     END SUBROUTINE normdist
@@ -84,7 +84,7 @@ MODULE m_scarflib_srm
     !
 
     REAL(f_real),                DIMENSION(3),   INTENT(IN)  :: nc, fc       !< min/max extent of external grid, control min wavenumber
-    REAL(f_real),                                INTENT(IN)  :: ds           !< current grid-step of external grid, control corner wavenumber
+    REAL(f_real),                                INTENT(IN)  :: ds           !< current grid-step of external grid, control max resolvable wavenumber
     REAL(f_real),                DIMENSION(:),   INTENT(IN)  :: x, y, z      !< position of grid points along x, y, z
     REAL(f_real),                                INTENT(IN)  :: dh           !< minimum grid-step of external grid, control max wavenumber
     INTEGER(f_int),                              INTENT(IN)  :: acf          !< autocorrelation function: 0=vk, 1=gauss
@@ -97,7 +97,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                                INTENT(IN)  :: taper        !< radius for tapering
     INTEGER(f_int),                              INTENT(IN)  :: rescale      !< flag for rescaling random field to desired sigma
     REAL(f_real),                DIMENSION(:),   INTENT(OUT) :: field        !< random field at x,y,z location
-    REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and timing for performance analysis
+    REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and TIMING for performance analysis
     INTEGER(f_int)                                           :: i, l
     INTEGER(f_int)                                           :: npts
     INTEGER(f_int)                                           :: ierr
@@ -197,9 +197,9 @@ MODULE m_scarflib_srm
     !$acc data copy(field) copyin(x, y, z, scaling, npts, a, b, v1, v2, v3)
     DO l = 1, nharm
 
-#ifdef timing
+#ifdef TIMING
       CALL watch_start(tictoc, mpi_comm_self)
-#ENDIF
+#endif
 
       DO
 
@@ -211,9 +211,9 @@ MODULE m_scarflib_srm
 
         ! evaluate original pdf
         IF (acf .eq. 0) THEN
-          d = k**2 / (1._f_real + k**2)**(1.5_fpp + hurst)
+          d = k**2 / (1._f_real + k**2)**(1.5_f_real + hurst)
         ELSE
-          d = k**2 * EXP(-0.25_fpp * k**2) / SQRT(pi)
+          d = k**2 * EXP(-0.25_f_real * k**2) / SQRT(pi)
         ENDIF
 
         ! take "k" and exit if inequality r < d is verified
@@ -248,14 +248,13 @@ MODULE m_scarflib_srm
       CALL srng(r)
       b = SQRT(-2._f_real * log(r(1))) * COS(2._f_real * pi * r(2))
 
-
-#ifdef timing
+#ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
       info(5) = info(5) + tictoc
 
       CALL watch_start(tictoc, mpi_comm_self)
-#ENDIF
+#endif
 
       !$acc wait
 
@@ -278,18 +277,18 @@ MODULE m_scarflib_srm
       !$acc end kernels
 
 
-#ifdef timing
+#ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
       info(6) = info(6) + tictoc
-#ENDIF
+#endif
 
     ENDDO
     ! END loop over harmonics
 
-#ifdef timing
+#ifdef TIMING
     CALL watch_start(tictoc, mpi_comm_self)
-#ENDIF
+#endif
 
     !$acc wait
 
@@ -310,11 +309,11 @@ MODULE m_scarflib_srm
     ! copy "field" back to host and free memory on device
     !$acc end data
 
-#ifdef timing
+#ifdef TIMING
     CALL watch_stop(tictoc, mpi_comm_self)
 
     info(6) = info(6) + tictoc
-#ENDIF
+#endif
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
     ! compute mean and variance of the whole random field. THEN rescale, if desired, discrete std. dev. to its continuous counterpart
@@ -355,9 +354,9 @@ MODULE m_scarflib_srm
 
     DEALLOCATE(var, mu, npoints)
 
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! taper/mute random field at desired locations.
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     DO i = 1, SIZE(poi, 2)
       CALL tapering(x, y, z, field, poi(:, i), mute, taper)
@@ -371,7 +370,7 @@ MODULE m_scarflib_srm
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE scarf3d_structured_srm(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, field, info)
+  SUBROUTINE scarf3d_structured_srm(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, field, info)
 
     ! Purpose:
     ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
@@ -386,7 +385,7 @@ MODULE m_scarflib_srm
     !
 
     REAL(f_real),                DIMENSION(3),     INTENT(IN)  :: nc, fc          !< min/max extent of external grid, control min wavenumber
-    REAL(f_real),                                  INTENT(IN)  :: ds              !< current grid-step of external grid, control corner wavenumber
+    REAL(f_real),                                  INTENT(IN)  :: ds              !< current grid-step of external grid, control max resolvable wavenumber
     INTEGER(f_int),              DIMENSION(3),     INTENT(IN)  :: fs, fe          !< first/last external structured grid index
     REAL(f_real),                                  INTENT(IN)  :: dh              !< minimum grid-step of external grid, control max wavenumber
     INTEGER(f_int),                                INTENT(IN)  :: acf             !< autocorrelation function: 0=vk, 1=gauss
@@ -399,7 +398,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                                  INTENT(IN)  :: taper           !< radius for tapering
     INTEGER(f_int),                                INTENT(IN)  :: rescale         !< flag for rescaling random field to desired sigma
     REAL(f_real),                DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
-    REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and timing for performance analysis
+    REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and TIMING for performance analysis
     INTEGER(f_int)                                             :: i, j, k, l
     INTEGER(f_int)                                             :: ierr
     INTEGER(c_int)                                             :: c_seed
@@ -501,9 +500,9 @@ MODULE m_scarflib_srm
     !$acc data copy(field) copyin(ds, scaling, npts, fs, a, b, v1, v2, v3)
     DO l = 1, nharm
 
-#ifdef timing
+#ifdef TIMING
       CALL watch_start(tictoc, mpi_comm_self)
-#ENDIF
+#endif
 
       DO
 
@@ -515,12 +514,12 @@ MODULE m_scarflib_srm
 
         ! evaluate original pdf
         IF (acf .eq. 0) THEN
-          d = u**2 / (1._f_real + u**2)**(1.5_fpp + hurst)
+          d = u**2 / (1._f_real + u**2)**(1.5_f_real + hurst)
         ELSE
-          d = u**2 * EXP(-0.25_fpp * u**2) / SQRT(pi)
+          d = u**2 * EXP(-0.25_f_real * u**2) / SQRT(pi)
         ENDIF
 
-        ! take "k" and EXIT if inequality r < d is verified
+        ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
 
       ENDDO
@@ -553,20 +552,20 @@ MODULE m_scarflib_srm
       b = SQRT(-2._f_real * log(r(1))) * COS(2._f_real * pi * r(2))
 
 
-#ifdef timing
+#ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
       info(5) = info(5) + tictoc
 
       CALL watch_start(tictoc, mpi_comm_self)
-#ENDIF
+#endif
 
       !$acc wait
 
       ! update selected variables in gpu memory
       !$acc update device(a, b, v1, v2, v3)
 
-      !$acc parallel loop PRIVATE(x, y, z, arg) collapse(3) async
+      !$acc parallel loop private(x, y, z, arg) collapse(3) async
       DO k = 1, npts(3)
         DO j = 1, npts(2)
           DO i = 1, npts(1)
@@ -578,10 +577,10 @@ MODULE m_scarflib_srm
           ENDDO
         ENDDO
       ENDDO
-      !$acc END parallel loop
+      !$acc end parallel loop
 
       ! !$acc kernels async
-      ! !$acc loop independent PRIVATE(x, y, z, arg)
+      ! !$acc loop independent private(x, y, z, arg)
       ! DO k = 1, npts(3)
       !  z = (k + fs(3) - 2) * ds
       !  DO j = 1, npts(2)
@@ -593,21 +592,21 @@ MODULE m_scarflib_srm
       !    ENDDO
       !  ENDDO
       ! ENDDO
-      ! !$acc END kernels
+      ! !$acc end kernels
 
 
-#ifdef timing
+#ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
       info(6) = info(6) + tictoc
-#ENDIF
+#endif
 
     ENDDO
-    ! END loop over harmonics
+    ! end loop over harmonics
 
-#ifdef timing
+#ifdef TIMING
     CALL watch_start(tictoc, mpi_comm_self)
-#ENDIF
+#endif
 
     !$acc wait
 
@@ -620,7 +619,7 @@ MODULE m_scarflib_srm
         ENDDO
       ENDDO
     ENDDO
-    !$acc END parallel loop
+    !$acc end parallel loop
 
     ! !$acc kernels
     ! !$acc loop independent
@@ -631,19 +630,19 @@ MODULE m_scarflib_srm
     !    ENDDO
     !  ENDDO
     ! ENDDO
-    ! !$acc END kernels
+    ! !$acc end kernels
 
     ! copy "field" back to host and free memory on device
-    !$acc END data
+    !$acc end data
 
-#ifdef timing
+#ifdef TIMING
     CALL watch_stop(tictoc, mpi_comm_self)
 
     info(6) = info(6) + tictoc
-#ENDIF
+#endif
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! compute variance and mean of random field. if desired, remove mean and set actual standard deviation to desired value.
+    ! compute mean and variance of the whole random field. THEN rescale, if desired, discrete std. dev. to its continuous counterpart
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     ALLOCATE(var(0:world_size - 1), mu(0:world_size - 1), npoints(0:world_size - 1))
@@ -660,15 +659,35 @@ MODULE m_scarflib_srm
     CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, real_type, mpi_comm_world, ierr)
     CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
-    ! compute total variance ("info(3)") and mean ("info(4)")
+    ! return total variance in "info(3)" and mean in "info(4)"
     CALL parallel_variance(var, mu, npoints, info(3), info(4))
 
     ! return standard deviation
     info(3) = SQRT(info(3))
 
+    IF (rescale .eq. 1) THEN
+
+      scaling = sigma / info(3)
+
+      DO k = 1, npts(3)
+        DO j = 1, npts(2)
+          DO i = 1, npts(1)
+            field(i, j, k) = field(i, j, k) * scaling - info(4)
+          ENDDO
+        ENDDO
+      ENDDO
+
+      info(3) = sigma
+      info(4) = 0._f_real
+
+    ENDIF
+
     DEALLOCATE(var, mu, npoints)
 
-    ! apply taper/mute
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    ! taper/mute random field at desired locations.
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
     DO i = 1, SIZE(poi, 2)
       CALL tapering(ds, fs, fe, field, poi(:, i), mute, taper)
     ENDDO
@@ -682,4 +701,4 @@ MODULE m_scarflib_srm
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
 
-END MODULE scarflib_spec
+END MODULE m_scarflib_srm

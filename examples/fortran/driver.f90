@@ -9,7 +9,7 @@ PROGRAM DRIVER
 
   USE, INTRINSIC     :: ISO_FORTRAN_ENV
   USE, NON_INTRINSIC :: MPI
-  USE, NON_INTRINSIC :: SCARFLIB
+  USE, NON_INTRINSIC :: M_SCARFLIB
   USE, NON_INTRINSIC :: SCARFLIB_AUX
 
   IMPLICIT NONE
@@ -116,9 +116,9 @@ PROGRAM DRIVER
   DO K = FS(3), FE(3)
     DO J = FS(2), FE(2)
       DO I = FS(1), FE(1)
-        X3(I, J, K) = (I - 0.5) * DS
-        Y3(I, J, K) = (J - 0.5) * DS
-        Z3(I, J, K) = (K - 0.5) * DS
+        X3(I, J, K) = (I - 1) * DS
+        Y3(I, J, K) = (J - 1) * DS
+        Z3(I, J, K) = (K - 1) * DS
       ENDDO
     ENDDO
   ENDDO
@@ -162,9 +162,9 @@ PROGRAM DRIVER
 
   CALL WATCH_START(TICTOC)
 
-  CALL SCARF_IO(N, 1, N(1)/2, V3, 'fft_struct_xslice')
-  CALL SCARF_IO(N, 2, N(2)/2, V3, 'fft_struct_yslice')
-  CALL SCARF_IO(N, 3, N(3)/2, V3, 'fft_struct_zslice')
+  CALL SCARF_IO(N, 'x', N(1)/2, V3, 'fft_struct_xslice')
+  CALL SCARF_IO(N, 'y', N(2)/2, V3, 'fft_struct_yslice')
+  CALL SCARF_IO(N, 'z', N(3)/2, V3, 'fft_struct_zslice')
 
   CALL WATCH_STOP(TICTOC)
 
@@ -269,9 +269,9 @@ PROGRAM DRIVER
 
   CALL WATCH_START(TICTOC)
 
-  CALL SCARF_IO(N, 1, N(1)/2, V3, 'spec_struct_xslice')
-  CALL SCARF_IO(N, 2, N(2)/2, V3, 'spec_struct_yslice')
-  CALL SCARF_IO(N, 3, N(3)/2, V3, 'spec_struct_zslice')
+  CALL SCARF_IO(N, 'x', N(1)/2, V3, 'spec_struct_xslice')
+  CALL SCARF_IO(N, 'y', N(2)/2, V3, 'spec_struct_yslice')
+  CALL SCARF_IO(N, 'z', N(3)/2, V3, 'spec_struct_zslice')
 
   CALL WATCH_STOP(TICTOC)
 

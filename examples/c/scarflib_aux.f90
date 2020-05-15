@@ -1,8 +1,8 @@
 MODULE SCARFLIB_AUX
 
   USE, INTRINSIC     :: ISO_C_BINDING
-  USE, NON_INTRINSIC :: MPI
-  USE, NON_INTRINSIC :: SCARFLIB_COMMON
+  !USE, NON_INTRINSIC :: MPI
+  USE, NON_INTRINSIC :: M_SCARFLIB_COMMON
 
   IMPLICIT NONE
 
@@ -25,8 +25,8 @@ MODULE SCARFLIB_AUX
       INTEGER(C_INT),               INTENT(IN)  :: RANK, NTASKS
       INTEGER(C_INT), DIMENSION(3), INTENT(IN)  :: N
       INTEGER(C_INT), DIMENSION(3), INTENT(OUT) :: FS, FE
-      INTEGER(IPP)                              :: TOPO, IERR
-      INTEGER(IPP),   DIMENSION(3)              :: DIMS, COORDS
+      INTEGER(f_int)                              :: TOPO, IERR
+      INTEGER(f_int),   DIMENSION(3)              :: DIMS, COORDS
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -54,17 +54,17 @@ MODULE SCARFLIB_AUX
 
     SUBROUTINE MPI_SPLIT_TASK(N, NTASKS, RANK, FS, FE)
 
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: N                          !< NUMBER OF POINTS TO BE SPLIT
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: RANK                       !< RANK OF CURRENT PREOCESS
-      INTEGER(IPP), DIMENSION(3), INTENT(OUT) :: FS, FE                     !< 1ST/LAST INDICES
-      INTEGER(IPP)                            :: I                          !< COUNTER
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: N                          !< NUMBER OF POINTS TO BE SPLIT
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: RANK                       !< RANK OF CURRENT PREOCESS
+      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: FS, FE                     !< 1ST/LAST INDICES
+      INTEGER(f_int)                            :: I                          !< COUNTER
 
       !------------------------------------------------------------------------------------------------------------------------------
 
       DO I = 1, 3
-        FS(I) = 1 + INT( REAL(N(I), FPP) / REAL(NTASKS(I), FPP) * REAL(RANK(I), FPP) )
-        FE(I) = INT( REAL(N(I), FPP) / REAL(NTASKS(I), FPP) * REAL(RANK(I) + 1, FPP) )
+        FS(I) = 1 + INT( REAL(N(I), f_real) / REAL(NTASKS(I), f_real) * REAL(RANK(I), f_real) )
+        FE(I) = INT( REAL(N(I), f_real) / REAL(NTASKS(I), f_real) * REAL(RANK(I) + 1, f_real) )
       ENDDO
 
     END SUBROUTINE MPI_SPLIT_TASK
@@ -77,22 +77,22 @@ MODULE SCARFLIB_AUX
 
       ! COMPUTE BEST GRID OF PROCESSES
 
-      INTEGER(IPP),              DIMENSION(3), INTENT(OUT) :: DIMS
-      !INTEGER(IPP),                            INTENT(OUT) :: NITER
+      INTEGER(f_int),              DIMENSION(3), INTENT(OUT) :: DIMS
+      !INTEGER(f_int),                            INTENT(OUT) :: NITER
 
-      INTEGER(IPP)                                         :: I, J, K, L, C
-      INTEGER(IPP)                                         :: N2, N3 !, N
-      INTEGER(IPP)                                         :: A, B
-      INTEGER(IPP),              DIMENSION(3)              :: V1, V2
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)            :: LIST
+      INTEGER(f_int)                                         :: I, J, K, L, C
+      INTEGER(f_int)                                         :: N2, N3 !, N
+      INTEGER(f_int)                                         :: A, B
+      INTEGER(f_int),              DIMENSION(3)              :: V1, V2
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: LIST
 
-      REAL(FPP) :: N, NITER
+      REAL(f_real) :: N, NITER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       !NITER = HUGE(1)
-      NITER = HUGE(1._FPP)
+      NITER = HUGE(1._f_real)
 
       C = 0
 
@@ -175,10 +175,10 @@ MODULE SCARFLIB_AUX
 
       LOGICAL FUNCTION MATCH(VEC, IMAX, LIST)
 
-        INTEGER(IPP), DIMENSION(3),   INTENT(IN) :: VEC
-        INTEGER(IPP),                 INTENT(IN) :: IMAX
-        INTEGER(IPP), DIMENSION(:,:), INTENT(IN) :: LIST
-        INTEGER(IPP)                             :: I
+        INTEGER(f_int), DIMENSION(3),   INTENT(IN) :: VEC
+        INTEGER(f_int),                 INTENT(IN) :: IMAX
+        INTEGER(f_int), DIMENSION(:,:), INTENT(IN) :: LIST
+        INTEGER(f_int)                             :: I
 
         !---------------------------------------------------------------------------------------------------------------------------
 
@@ -199,13 +199,13 @@ MODULE SCARFLIB_AUX
 
     SUBROUTINE TEST_CONFIG(DIMS, MEASURE)
 
-      INTEGER(IPP), DIMENSION(3), INTENT(IN)  :: DIMS
-      REAL(FPP),                  INTENT(OUT) :: MEASURE
-      REAL(FPP),    DIMENSION(3)              :: SIDE
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: DIMS
+      REAL(f_real),                  INTENT(OUT) :: MEASURE
+      REAL(f_real),    DIMENSION(3)              :: SIDE
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      SIDE = REAL(NPTS, FPP) / REAL(DIMS, FPP)
+      SIDE = REAL(NPTS, f_real) / REAL(DIMS, f_real)
 
       MEASURE = ABS(SIDE(1) - SIDE(2)) + ABS(SIDE(1) - SIDE(3)) + ABS(SIDE(2) - SIDE(3))
 
@@ -219,16 +219,16 @@ MODULE SCARFLIB_AUX
 
       ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
 
-      INTEGER(IPP),                              INTENT(IN)  :: N
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: FACTORS
-      INTEGER(IPP)                                           :: I, C, S
-      INTEGER(IPP)                                           :: X
-      INTEGER(IPP), ALLOCATABLE, DIMENSION(:,:)              :: BUFFER
+      INTEGER(f_int),                              INTENT(IN)  :: N
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: FACTORS
+      INTEGER(f_int)                                           :: I, C, S
+      INTEGER(f_int)                                           :: X
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)              :: BUFFER
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! MAX POSSIBLE FACTOR
-      S = FLOOR(SQRT(REAL(N, FPP)))
+      S = FLOOR(SQRT(REAL(N, f_real)))
 
       ALLOCATE(BUFFER(2, S))
 

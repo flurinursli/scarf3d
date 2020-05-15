@@ -1,16 +1,30 @@
-MODULE SCARF3D_C_BINDING
+MODULE m_scarflib_c_binding
 
-  USE, INTRINSIC     :: ISO_C_BINDING
-  USE, NON_INTRINSIC :: SCARFLIB
-  USE, NON_INTRINSIC :: SCARFLIB_COMMON, ONLY: C_FPP, FPP, IPP
+  ! Purpose:
+  !   To allow C wrappers to interface with the FORTRAN library (m_scarflib).
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !
 
-  IMPLICIT NONE
+  USE, INTRINSIC     :: iso_c_binding
+  USE, NON_INTRINSIC :: m_scarflib
+  USE, NON_INTRINSIC :: m_scarflib_common, only: c_real, f_int
+
+  IMPLICIT none
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTEGER(IPP),               PRIVATE :: STRUCTURED
-  INTEGER(IPP),               PRIVATE :: N
-  INTEGER(IPP), DIMENSION(3), PRIVATE :: DIMS
+  ! make all interfaces accessible from the outside
+  PUBLIC
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  INTEGER(f_int),               PRIVATE :: n                     !< number of grid nodes (process view, unstructured grid)
+  INTEGER(f_int), DIMENSION(3), PRIVATE :: dims                  !< number of grid nodes (process view, structured grid)
+  LOGICAL,                      PRIVATE :: structured            !< flag for structured/unstructured grid
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -20,192 +34,249 @@ MODULE SCARF3D_C_BINDING
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE STRUCT_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, POI, NP, MUTE, TAPER, RESCALE, PAD, NC, FC)  &
-    BIND(C, NAME="struct_initialize")
+    SUBROUTINE struct_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, np, mute, taper, rescale, pad, nc, fc)  &
+    BIND(c, name="struct_initialize")
 
-      INTEGER(C_INT), DIMENSION(3),              INTENT(IN) :: FS, FE
-      REAL(C_FPP),                               INTENT(IN) :: DS
-      INTEGER(C_INT),                            INTENT(IN) :: ACF
-      REAL(C_FPP),    DIMENSION(3),              INTENT(IN) :: CL
-      REAL(C_FPP),                               INTENT(IN) :: SIGMA
-      INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: METHOD
-      REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: HURST
-      REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: DH
-      TYPE(C_PTR),                     OPTIONAL, INTENT(IN) :: POI
-      INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: NP
-      REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
-      INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      REAL(C_FPP),    DIMENSION(3),    OPTIONAL, INTENT(IN) :: NC, FC
-      REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
-      REAL(C_FPP),    DIMENSION(0,0),  TARGET               :: VOID
+    ! Purpose:
+    !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   04/05/20                  original version
+    !
+
+      INTEGER(c_int), DIMENSION(3),                     INTENT(IN) :: fs, fe
+      REAL(c_real),                                     INTENT(IN) :: ds
+      INTEGER(c_int),                                   INTENT(IN) :: acf
+      REAL(c_real),   DIMENSION(3),                     INTENT(IN) :: cl
+      REAL(c_real),                                     INTENT(IN) :: sigma
+      INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: method
+      REAL(c_real),                           OPTIONAL, INTENT(IN) :: hurst
+      REAL(c_real),                           OPTIONAL, INTENT(IN) :: dh
+      TYPE(c_ptr),                            OPTIONAL, INTENT(IN) :: poi
+      INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: np
+      REAL(c_real),                           OPTIONAL, INTENT(IN) :: mute, taper
+      INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: rescale, pad
+      REAL(c_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc
+      REAL(c_real),   DIMENSION(:,:), POINTER                      :: ptr => NULL()
+      REAL(c_real),   DIMENSION(0,0), TARGET                       :: void
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      STRUCTURED = 1
+      structured = .true.
 
-      DIMS(:) = FE(:) - FS(:) + 1
+      dims(:) = fe(:) - fs(:) + 1
 
-      IF (PRESENT(POI)) THEN
-        CALL C_F_POINTER(POI, PTR, [3, NP])
+      IF (PRESENT(poi)) THEN
+        CALL c_f_pointer(poi, ptr, [3, np])
       ELSE
-        PTR => VOID
+        ptr => void
       ENDIF
 
-      CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD, HURST, DH, PTR, MUTE, TAPER, RESCALE, PAD, NC, FC)
+      CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, ptr, mute, taper, rescale, pad, nc, fc)
 
-      NULLIFY(PTR)
+      NULLIFY(ptr)
 
-    END SUBROUTINE STRUCT_INITIALIZE
+    END SUBROUTINE struct_initialize
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE UNSTRUCT_INITIALIZE(NPTS, X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, POI, NP, MUTE, TAPER, RESCALE, PAD, NC,  &
-                                   FC) BIND(C, NAME="unstruct_initialize")
+    SUBROUTINE unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, np, mute, taper, rescale, pad, nc,  &
+                                   fc) BIND(c, name="unstruct_initialize")
 
-      INTEGER(C_INT),                            INTENT(IN) :: NPTS
-      REAL(C_FPP),    DIMENSION(NPTS),           INTENT(IN) :: X, Y, Z
-      REAL(C_FPP),                               INTENT(IN) :: DH
-      INTEGER(C_INT),                            INTENT(IN) :: ACF
-      REAL(C_FPP),    DIMENSION(3),              INTENT(IN) :: CL
-      REAL(C_FPP),                               INTENT(IN) :: SIGMA
-      INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: METHOD
-      REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: HURST
-      REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: DS
-      TYPE(C_PTR),                     OPTIONAL, INTENT(IN) :: POI
-      INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: NP
-      REAL(C_FPP),                     OPTIONAL, INTENT(IN) :: MUTE, TAPER
-      INTEGER(C_INT),                  OPTIONAL, INTENT(IN) :: RESCALE, PAD
-      REAL(C_FPP),    DIMENSION(3),    OPTIONAL, INTENT(IN) :: NC, FC
-      REAL(C_FPP),    DIMENSION(:,:),  POINTER              :: PTR
-      REAL(C_FPP),    DIMENSION(0,0),  TARGET               :: VOID
+      ! Purpose:
+      !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(c_int),                                    INTENT(IN) :: npts
+      REAL(c_real),   DIMENSION(npts),                   INTENT(IN) :: x, y, z
+      REAL(c_real),                                      INTENT(IN) :: dh
+      INTEGER(c_int),                                    INTENT(IN) :: acf
+      REAL(c_real),   DIMENSION(3),                      INTENT(IN) :: cl
+      REAL(c_real),                                      INTENT(IN) :: sigma
+      INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: method
+      REAL(c_real),                            OPTIONAL, INTENT(IN) :: hurst
+      REAL(c_real),                            OPTIONAL, INTENT(IN) :: ds
+      TYPE(c_ptr),                             OPTIONAL, INTENT(IN) :: poi
+      INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: np
+      REAL(c_real),                            OPTIONAL, INTENT(IN) :: mute, taper
+      INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: rescale, pad
+      REAL(c_real),   DIMENSION(3),            OPTIONAL, INTENT(IN) :: nc, fc
+      REAL(c_real),   DIMENSION(:,:),  POINTER                      :: ptr => NULL()
+      REAL(c_real),   DIMENSION(0,0),  TARGET                       :: void
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      STRUCTURED = 0
+      structured = .false.
 
-      N = NPTS
+      n = npts
 
-      IF (PRESENT(POI)) THEN
-        CALL C_F_POINTER(POI, PTR, [3, NP])
+      IF (PRESENT(poi)) THEN
+        CALL c_f_pointer(poi, ptr, [3, np])
       ELSE
-        PTR => VOID
+        ptr => void
       ENDIF
 
-      CALL SCARF_INITIALIZE(X, Y, Z, DH, ACF, CL, SIGMA, METHOD, HURST, DS, PTR, MUTE, TAPER, RESCALE, PAD, NC, FC)
+      CALL scarf_initialize(x, y, z, dh, acf, cl, sigma, method, hurst, ds, ptr, mute, taper, rescale, pad, nc, fc)
 
-      NULLIFY(PTR)
+      NULLIFY(ptr)
 
-    END SUBROUTINE UNSTRUCT_INITIALIZE
+    END SUBROUTINE unstruct_initialize
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE EXECUTE(SEED, FIELD, STATS) BIND(C, NAME="execute")
+    SUBROUTINE execute(seed, field, stats) BIND(c, name="execute")
 
-      INTEGER(C_INT),                           INTENT(IN)  :: SEED
-      TYPE(C_PTR),                              INTENT(OUT) :: FIELD
-      REAL(C_FPP),    DIMENSION(8),             INTENT(OUT) :: STATS
-      REAL(C_FPP),    DIMENSION(:),     POINTER             :: F_UNSTRUCT
-      REAL(C_FPP),    DIMENSION(:,:,:), POINTER             :: F_STRUCT
+      ! Purpose:
+      !   To allow C wrapper to interface with "scarf_execute" written in FORTRAN (see m_scarflib for input/output arguments).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(c_int),                           INTENT(IN)  :: seed
+      TYPE(c_ptr),                              INTENT(OUT) :: field
+      REAL(c_real),   DIMENSION(8),             INTENT(OUT) :: stats
+      REAL(c_real),   DIMENSION(:),     POINTER             :: f_unstruct
+      REAL(c_real),   DIMENSION(:,:,:), POINTER             :: f_struct
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      IF (STRUCTURED .EQ. 0) THEN
-        CALL C_F_POINTER(FIELD, F_UNSTRUCT, [N])
-        CALL SCARF_EXECUTE(SEED, F_UNSTRUCT, STATS)
-        NULLIFY(F_UNSTRUCT)
+      IF (structured .eqv. .false.) THEN
+        CALL c_f_pointer(field, f_unstruct, [n])
+        CALL scarf_execute(seed, f_unstruct, stats)
+        NULLIFY(f_unstruct)
       ELSE
-        CALL C_F_POINTER(FIELD, F_STRUCT, [DIMS])
-        CALL SCARF_EXECUTE(SEED, F_STRUCT, STATS)
-        NULLIFY(F_STRUCT)
+        CALL c_f_pointer(field, f_struct, [dims])
+        CALL scarf_execute(seed, f_struct, stats)
+        NULLIFY(f_struct)
       ENDIF
 
-    END SUBROUTINE EXECUTE
+    END SUBROUTINE execute
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE FINALIZE() BIND(C, NAME="finalize")
+    SUBROUTINE finalize() BIND(c, name="finalize")
+
+      ! Purpose:
+      !   To allow C wrapper to interface with "scarf_finalize" written in FORTRAN.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL SCARF_FINALIZE()
+      CALL scarf_finalize()
 
-    END SUBROUTINE FINALIZE
+    END SUBROUTINE finalize
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE IO_ONE(NPTS, FIELD, FOUT, NWRITERS) BIND(C, NAME="io_one")
+    SUBROUTINE io_one(npts, field, fout, nwriters) BIND(c, name="io_one")
 
-      INTEGER(C_INT),                DIMENSION(3),               INTENT(IN) :: NPTS
-      TYPE(C_PTR),                                               INTENT(IN) :: FIELD
-      CHARACTER(C_CHAR),             DIMENSION(*),               INTENT(IN) :: FOUT
-      INTEGER(C_INT),                                  OPTIONAL, INTENT(IN) :: NWRITERS
-      CHARACTER(:),      ALLOCATABLE                                        :: FILENAME
-      INTEGER(IPP)                                                          :: I
-      REAL(C_FPP),                   DIMENSION(:,:,:), POINTER              :: PTR
+      ! Purpose:
+      !   To allow C wrapper to interface with "scarf_io" written in FORTRAN (see m_scarflib for input arguments).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(c_int),                DIMENSION(3),                       INTENT(IN) :: npts
+      TYPE(c_ptr),                                                       INTENT(IN) :: field
+      CHARACTER(c_char),             DIMENSION(*),                       INTENT(IN) :: fout
+      INTEGER(c_int),                                          OPTIONAL, INTENT(IN) :: nwriters
+      CHARACTER(:),      ALLOCATABLE                                                :: filename
+      INTEGER(f_int)                                                                :: i
+      REAL(c_real),                  DIMENSION(:,:,:), POINTER                      :: ptr
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL C_F_POINTER(FIELD, PTR, [DIMS])
+      CALL c_f_pointer(field, ptr, [dims])
 
-      I = 1
+      i = 1
 
-      FILENAME = ""
+      filename = ""
 
-      DO WHILE(FOUT(I) .NE. C_NULL_CHAR)
-        FILENAME = FILENAME // FOUT(I)
-        I        = I + 1
+      DO WHILE(fout(i) .ne. c_null_char)
+        filename = filename // fout(i)
+        i        = i + 1
       ENDDO
 
-      CALL SCARF_IO(NPTS, PTR, FILENAME, NWRITERS)
+      CALL scarf_io(npts, ptr, filename, nwriters)
 
-      NULLIFY(PTR)
+      NULLIFY(ptr)
 
-    END SUBROUTINE IO_ONE
+    END SUBROUTINE io_one
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE IO_SLICE(N, DIRECTION, PLANE, FIELD, FOUT) BIND(C, NAME="io_slice")
+    SUBROUTINE io_slice(n, axis, plane, field, fout) BIND(c, name="io_slice")
 
-      INTEGER(C_INT),                DIMENSION(3),             INTENT(IN) :: N
-      INTEGER(C_INT),                                          INTENT(IN) :: DIRECTION
-      INTEGER(C_INT),                                          INTENT(IN) :: PLANE
-      TYPE(C_PTR),                                             INTENT(IN) :: FIELD
-      CHARACTER(C_CHAR),             DIMENSION(*),             INTENT(IN) :: FOUT
-      CHARACTER(:),      ALLOCATABLE                                      :: FILENAME
-      INTEGER(IPP)                                                        :: I
-      REAL(C_FPP),                   DIMENSION(:,:,:), POINTER            :: PTR
+      ! Purpose:
+      !   To allow C wrapper to interface with "scarf_io" written in FORTRAN (see m_scarflib for input arguments).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(c_int),                DIMENSION(3),             INTENT(IN) :: n
+      CHARACTER(c_char),                                       INTENT(IN) :: axis
+      INTEGER(c_int),                                          INTENT(IN) :: plane
+      TYPE(c_ptr),                                             INTENT(IN) :: field
+      CHARACTER(c_char),             DIMENSION(*),             INTENT(IN) :: fout
+      CHARACTER(len=1)                                                    :: fax
+      CHARACTER(:),      ALLOCATABLE                                      :: filename
+      INTEGER(f_int)                                                      :: i
+      REAL(c_real),                  DIMENSION(:,:,:), POINTER            :: ptr
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL C_F_POINTER(FIELD, PTR, [DIMS])
+      CALL c_f_pointer(field, ptr, [dims])
 
-      I = 1
+      i = 1
 
-      FILENAME = ""
+      filename = ""
 
-      DO WHILE(FOUT(I) .NE. C_NULL_CHAR)
-        FILENAME = FILENAME // FOUT(I)
-        I        = I + 1
+      DO WHILE(fout(i) .ne. c_null_char)
+        filename = filename // fout(i)
+        i        = i + 1
       ENDDO
 
-      CALL SCARF_IO(N, DIRECTION, PLANE, PTR, FILENAME)
+      fax = axis
 
-      NULLIFY(PTR)
+      CALL scarf_io(n, fax, plane, ptr, filename)
 
-    END SUBROUTINE IO_SLICE
+      NULLIFY(ptr)
+
+    END SUBROUTINE io_slice
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-END MODULE SCARF3D_C_BINDING
+END MODULE m_scarflib_c_binding

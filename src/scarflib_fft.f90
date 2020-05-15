@@ -203,8 +203,8 @@ MODULE m_scarflib_fim
       max_extent = fc
 
       ! (global) model limits
-      CALL mpi_allreduce(mpi_in_place, min_extent, 3, f_real, mpi_min, mpi_comm_world, ierr)
-      CALL mpi_allreduce(mpi_in_place, max_extent, 3, f_real, mpi_max, mpi_comm_world, ierr)
+      CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
+      CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
@@ -360,8 +360,8 @@ MODULE m_scarflib_fim
       npoints(world_rank) = PRODUCT(m)
 
       ! share results
-      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, f_real, mpi_comm_world, ierr)
-      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, f_real, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, real_type, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, real_type, mpi_comm_world, ierr)
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
       ! return total variance in "info(3)" and mean in "info(4)"
@@ -381,6 +381,9 @@ MODULE m_scarflib_fim
             ENDDO
           ENDDO
         ENDDO
+
+        info(3) = sigma
+        info(4) = 0._f_real
 
       ENDIF
 
@@ -540,8 +543,8 @@ MODULE m_scarflib_fim
       max_extent = fc
 
       ! (global) model limits
-      CALL mpi_allreduce(mpi_in_place, min_extent, 3, f_real, mpi_min, mpi_comm_world, ierr)
-      CALL mpi_allreduce(mpi_in_place, max_extent, 3, f_real, mpi_max, mpi_comm_world, ierr)
+      CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
+      CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
       ! CYCLE over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
@@ -693,8 +696,8 @@ MODULE m_scarflib_fim
       npoints(world_rank) = PRODUCT(m)
 
       ! share results
-      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, f_real, mpi_comm_world, ierr)
-      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, f_real, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, var, 1, real_type, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, mu, 1, real_type, mpi_comm_world, ierr)
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, npoints, 1, mpi_integer, mpi_comm_world, ierr)
 
       ! return total variance in "info(3)" and mean in "info(4)"
@@ -714,6 +717,9 @@ MODULE m_scarflib_fim
             ENDDO
           ENDDO
         ENDDO
+
+        info(3) = sigma
+        info(4) = 0._f_real
 
       ENDIF
 
@@ -868,7 +874,7 @@ MODULE m_scarflib_fim
       ALLOCATE(rxyz(3, blockwidth * nb), sv(blockwidth * nb))
       ALLOCATE(sxyz_n(3, blockwidth), map_n(blockwidth))
 
-      CALL mpi_type_contiguous(3, f_real, trip, ierr)
+      CALL mpi_type_contiguous(3, real_type, trip, ierr)
       CALL mpi_type_commit(trip, ierr)
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
@@ -912,7 +918,7 @@ MODULE m_scarflib_fim
         CALL interpolate(n, rxyz, delta, sv)
 
         ! collect points that have been interpolated by other processes
-        CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
+        CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, real_type, mpi_comm_world, ierr)
 
         ! copy interpolated data (if any) to right location
         DO i = 1, p1(j - 1) - p0(j - 1) + 1
@@ -952,7 +958,7 @@ MODULE m_scarflib_fim
       CALL interpolate(n, rxyz, delta, sv)
 
       ! backward data
-      CALL mpi_alltoallv(sv, recvcounts, rdispls, f_real, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
+      CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, real_type, mpi_comm_world, ierr)
 
       ! copy interpolated data to right location. limit the maximum iteration index in case "np" not multiple of "blockwidth"
       DO i = 1, p1(nblocks) - p0(nblocks) + 1
@@ -1078,7 +1084,7 @@ MODULE m_scarflib_fim
       ALLOCATE(rxyz(3, maxwidth * nb), sv(maxwidth * nb))
       ALLOCATE(sxyz_n(3, maxwidth), map_n(3, maxwidth))
 
-      CALL mpi_type_contiguous(3, f_real, trip, ierr)
+      CALL mpi_type_contiguous(3, real_type, trip, ierr)
       CALL mpi_type_commit(trip, ierr)
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
@@ -1121,7 +1127,7 @@ MODULE m_scarflib_fim
         CALL interpolate(n, rxyz, delta, sv)
 
         ! backward data
-        CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
+        CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, real_type, mpi_comm_world, ierr)
 
         ! copy interpolated data to right location
         DO i = 1, PRODUCT(p1(:, j - 1) - p0(:, j - 1) + 1)
@@ -1163,7 +1169,7 @@ MODULE m_scarflib_fim
       CALL interpolate(n, rxyz, delta, sv)
 
       ! backward data
-      CALL mpi_alltoallv(sv, recvcounts, rdispls, f_real, rv, sendcounts, sdispls, f_real, mpi_comm_world, ierr)
+      CALL mpi_alltoallv(sv, recvcounts, rdispls, real_type, rv, sendcounts, sdispls, real_type, mpi_comm_world, ierr)
 
       ! copy interpolated data to right location. Limit the maximum iteration index in case "np" not multiple of "blockwidth"
       DO i = 1, PRODUCT(p1(:, nblocks) - p0(:, nblocks) + 1)
@@ -2641,11 +2647,11 @@ MODULE m_scarflib_fim
         ENDIF
 
         ! data to be received
-        CALL mpi_type_create_subarray(3, sizes, subsizes, rstarts, mpi_order_fortran, f_real, from_neg, ierr)
+        CALL mpi_type_create_subarray(3, sizes, subsizes, rstarts, mpi_order_fortran, real_type, from_neg, ierr)
         CALL mpi_type_commit(from_neg, ierr)
 
         ! data to be sent
-        CALL mpi_type_create_subarray(3, sizes, subsizes, sstarts, mpi_order_fortran, f_real, to_pos, ierr)
+        CALL mpi_type_create_subarray(3, sizes, subsizes, sstarts, mpi_order_fortran, real_type, to_pos, ierr)
         CALL mpi_type_commit(to_pos, ierr)
 
         ! exchange halo data with neighbors. since we operate on first and last columns, send "buffer" is disjoint from recv "buffer"

@@ -14,7 +14,7 @@ COMPILER = $(VENDOR)
 PRECISION = single
 
 # compile in debug mode?
-DEBUG = no
+DEBUG = yes
 
 # activate stopwatch for performance analysis
 TIMING = yes

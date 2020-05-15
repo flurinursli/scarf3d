@@ -32,7 +32,7 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {501, 501, 501};
+  const int n[3] = {500, 500, 500};
 
   // grid-step
   const fpp ds = 100.;
@@ -55,7 +55,7 @@ int main(){
 
   const fpp hurst[1] = {0.2};
 
-  const int pad[1] = {1};
+  const int pad[1] = {0};
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
@@ -100,7 +100,6 @@ int main(){
   // ---------------------------------------------------------------------------
   // FFT method test
 
-
   struct scarf_opt options;
 
   scarf_opt_init(&options);
@@ -108,7 +107,6 @@ int main(){
   options.hurst = 0.1;
   //options.nc = ;
   //option.fc = ;
-
 
   scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
 
@@ -131,9 +129,9 @@ int main(){
 
   // IO
   watch_start(&tictoc);
-  scarf_io_slice(n, 1, 400, field, "fft_struct_xslice");
-  scarf_io_slice(n, 2, 250, field, "fft_struct_yslice");
-  scarf_io_slice(n, 3, 100, field, "fft_struct_zslice");
+  scarf_io_slice(n, "x", 400, field, "fft_struct_xslice");
+  scarf_io_slice(n, "y", 250, field, "fft_struct_yslice");
+  scarf_io_slice(n, "z", 100, field, "fft_struct_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -203,9 +201,9 @@ int main(){
 
   // IO
   watch_start(&tictoc);
-  scarf_io_slice(n, 1, 400, field, "spec_struct_xslice");
-  scarf_io_slice(n, 2, 250, field, "spec_struct_yslice");
-  scarf_io_slice(n, 3, 100, field, "spec_struct_zslice");
+  scarf_io_slice(n, "x", 400, field, "spec_struct_xslice");
+  scarf_io_slice(n, "y", 250, field, "spec_struct_yslice");
+  scarf_io_slice(n, "z", 100, field, "spec_struct_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {

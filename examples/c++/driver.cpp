@@ -138,9 +138,9 @@ int main(){
 
     // IO
     watch_start(&tictoc);
-    S.io(n, 1, n[0]/2, field, "fft_struct_xslice");
-    S.io(n, 2, n[1]/2, field, "fft_struct_yslice");
-    S.io(n, 3, n[2]/2, field, "fft_struct_zslice");
+    S.io(n, "x", n[0]/2, field, "fft_struct_xslice");
+    S.io(n, "y", n[1]/2, field, "fft_struct_yslice");
+    S.io(n, "z", n[2]/2, field, "fft_struct_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -223,9 +223,9 @@ int main(){
 
     // IO
     watch_start(&tictoc);
-    S.io(n, 1, 400, field, "spec_struct_xslice");
-    S.io(n, 2, 250, field, "spec_struct_yslice");
-    S.io(n, 3, 100, field, "spec_struct_zslice");
+    S.io(n, "x", 400, field, "spec_struct_xslice");
+    S.io(n, "y", 250, field, "spec_struct_yslice");
+    S.io(n, "z", 100, field, "spec_struct_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {

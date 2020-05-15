@@ -502,7 +502,7 @@ MODULE m_scarflib_common
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE write_slice(direction, plane, v, filename)
+    SUBROUTINE write_slice(axis, plane, v, filename)
 
       ! Purpose:
       !   To write to disk a single file containing a slice of the random field. Each MPI process writes its own part based on the
@@ -515,7 +515,7 @@ MODULE m_scarflib_common
       !   11/05/20                  handle case when min(gs) .ne. 1
       !
 
-      INTEGER(f_int),                                  INTENT(IN) :: direction                          !< axis (1=x,2=y,3=z) cut by the slice
+      INTEGER(f_int),                                  INTENT(IN) :: axis                               !< axis (1=x,2=y,3=z) cut by the slice
       INTEGER(f_int),                                  INTENT(IN) :: plane                              !< slice index in global coordinates
       REAL(f_real),                  DIMENSION(:,:,:), INTENT(IN) :: v                                  !< random field
       CHARACTER(LEN=*),                                INTENT(IN) :: filename                           !< name  of output file
@@ -528,7 +528,7 @@ MODULE m_scarflib_common
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      SELECT CASE(direction)
+      SELECT CASE(axis)
       CASE(1)
         dir  = [2, 3]
       CASE (2)
@@ -543,7 +543,7 @@ MODULE m_scarflib_common
 
       color = 0
 
-      bool = (plane .ge. gs(direction, world_rank)) .and. (plane .le. ge(direction, world_rank))
+      bool = (plane .ge. gs(axis, world_rank)) .and. (plane .le. ge(axis, world_rank))
 
       DO i = 1, 2
         subsizes(i) = SIZE(v, dir(i))
@@ -552,7 +552,7 @@ MODULE m_scarflib_common
       ENDDO
 
       ! global-to-local index mapping
-      c = plane - gs(direction, world_rank) + 1
+      c = plane - gs(axis, world_rank) + 1
 
       ! update color of calling process only if it contains part of the slice
       IF (bool) color = 1
@@ -569,7 +569,7 @@ MODULE m_scarflib_common
 
         ALLOCATE(buffer(subsizes(1), subsizes(2)))
 
-        IF (direction .eq. 1) THEN
+        IF (axis .eq. 1) THEN
 
           DO j = 1, subsizes(2)
             DO i = 1, subsizes(1)
@@ -577,7 +577,7 @@ MODULE m_scarflib_common
             ENDDO
           ENDDO
 
-        ELSEIF (direction .eq. 2) THEN
+        ELSEIF (axis .eq. 2) THEN
 
           DO j = 1, subsizes(2)
             DO i = 1, subsizes(1)
@@ -585,7 +585,7 @@ MODULE m_scarflib_common
             ENDDO
           ENDDO
 
-        ELSEIF (direction .eq. 3) THEN
+        ELSEIF (axis .eq. 3) THEN
 
           DO j = 1, subsizes(2)
             DO i = 1, subsizes(1)
