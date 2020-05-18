@@ -30,22 +30,38 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  int n[3] = {600, 600, 600};
+  const int n[3] = {500, 500, 500};
 
   // grid-step
-  fpp ds = 100.;
+  const fpp ds = 50.;
 
-  fpp x0[3], x1[3];
+  // autocorrelation function (0=von karman/exponential, 1=gaussian)
+  const int acf = 0;
 
-  for (int i = 0; i < 3; i++){
-    x0[i] = 0;
-    x1[i] = (n[i] - 1) * ds;
-  }
+  // correlation length
+  const fpp cl[3] = {2000., 2000., 2000.};
 
-  fpp dh = ds;
+  // standard deviation
+  const fpp sigma = 0.05;
 
-  for (int i = 0; i < 3; i++) n[i] = n[i] / 4;
-  ds = ds * 4;
+  // seed number
+  const int seed = 1235;
+
+  const fpp hurst = 0.25;
+
+  fpp stats[8];
+
+  // fpp x0[3], x1[3];
+  //
+  // for (int i = 0; i < 3; i++){
+  //   x0[i] = 0;
+  //   x1[i] = (n[i] - 1) * ds;
+  // }
+  //
+  // fpp dh = ds;
+  //
+  // for (int i = 0; i < 3; i++) n[i] = n[i] / 4;
+  // ds = ds * 4;
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
@@ -75,30 +91,14 @@ int main(){
     for (int j = 0; j < dims[1]; j++){
       for (int i = 0; i < dims[0]; i++){
         c    = (k * dims[0] * dims[1]) + (j * dims[0]) + i;
-        x[c] = (i + fs[0] - 0.5) * ds;
-        y[c] = (j + fs[1] - 0.5) * ds;
-        z[c] = (k + fs[2] - 0.5) * ds;
+        x[c] = (i + fs[0] - 1) * ds;
+        y[c] = (j + fs[1] - 1) * ds;
+        z[c] = (k + fs[2] - 1) * ds;
       }
     }
   }
 
   const int npts = dims[0] * dims[1] * dims[2];
-
-  fpp stats[8];
-
-  // autocorrelation function (0=von karman/exponential, 1=gaussian)
-  const int acf = 0;
-
-  // correlation length
-  const fpp cl[3] = {5000., 5000., 5000.};
-
-  // standard deviation
-  const fpp sigma = 0.05;
-
-  // seed number
-  const int seed = 1235;
-
-  const fpp hurst[1] = {0.2};
 
   double tictoc;
 
@@ -111,11 +111,11 @@ int main(){
 
   {
 
-    Scarf3D::options.hurst = 0.75;
-    Scarf3D::options.dh    = dh;
+    Scarf3D::options.hurst = hurst;
+    //Scarf3D::options.dh    = dh;
 
-    Scarf3D::options.nc = x0;
-    Scarf3D::options.fc = x1;
+    //Scarf3D::options.nc = x0;
+    //Scarf3D::options.fc = x1;
 
     Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma);
 
@@ -163,13 +163,13 @@ int main(){
 
   {
 
-    Scarf3D::options.hurst = 0.75;
-    Scarf3D::options.ds    = ds;
+    Scarf3D::options.hurst = hurst;
+    //Scarf3D::options.ds    = ds;
 
-    Scarf3D::options.nc = x0;
-    Scarf3D::options.fc = x1;
+    //Scarf3D::options.nc = x0;
+    //Scarf3D::options.fc = x1;
 
-    Scarf3D::Initialize<fft> S(npts, x, y, z, dh, acf, cl, sigma);
+    Scarf3D::Initialize<fft> S(npts, x, y, z, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -202,7 +202,7 @@ int main(){
 
   {
 
-    Scarf3D::options.hurst = 0.2;
+    Scarf3D::options.hurst = hurst;
 
     Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma);
 
@@ -223,9 +223,9 @@ int main(){
 
     // IO
     watch_start(&tictoc);
-    S.io(n, "x", 400, field, "spec_struct_xslice");
-    S.io(n, "y", 250, field, "spec_struct_yslice");
-    S.io(n, "z", 100, field, "spec_struct_zslice");
+    S.io(n, "x", n[0]/2, field, "spec_struct_xslice");
+    S.io(n, "y", n[1]/2, field, "spec_struct_yslice");
+    S.io(n, "z", n[2]/2, field, "spec_struct_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -248,7 +248,7 @@ int main(){
 
   {
 
-    Scarf3D::options.hurst = 0.75;
+    Scarf3D::options.hurst = hurst;
 
     Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma);
 

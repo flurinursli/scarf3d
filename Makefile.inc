@@ -14,7 +14,7 @@ COMPILER = $(VENDOR)
 PRECISION = single
 
 # compile in debug mode?
-DEBUG = yes
+DEBUG = no
 
 # activate stopwatch for performance analysis
 TIMING = yes
@@ -23,7 +23,7 @@ TIMING = yes
 PFS = no
 
 # enable test of spectral method in driver programs
-SPECTRAL = yes
+SPECTRAL = no
 
 # path to external library TRNG4: update also LD_LIBRARY_PATH if necessary
 TRNG_DIR = $(TRNG_PATH)

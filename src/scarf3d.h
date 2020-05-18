@@ -38,8 +38,8 @@ struct scarf_opt{
   fpp taper;
   int rescale;
   int pad;
-  fpp* nc;
-  fpp* fc;
+  fpp * nc;
+  fpp * fc;
 };
 
 // declare C functions

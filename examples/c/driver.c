@@ -35,13 +35,13 @@ int main(){
   const int n[3] = {500, 500, 500};
 
   // grid-step
-  const fpp ds = 100.;
+  const fpp ds = 50.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const fpp cl[3] = {5000., 5000., 5000.};
+  const fpp cl[3] = {2000., 2000., 2000.};
 
   // standard deviation
   const fpp sigma = 0.05;
@@ -53,9 +53,7 @@ int main(){
   // ---------------------------------------------------------------------------
   // Add extra parameters
 
-  const fpp hurst[1] = {0.2};
-
-  const int pad[1] = {0};
+  const fpp hurst = 0.25;
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
@@ -83,9 +81,9 @@ int main(){
     for (int j = 0; j < dims[1]; j++){
       for (int i = 0; i < dims[0]; i++){
         c    = (k * dims[0] * dims[1]) + (j * dims[0]) + i;
-        x[c] = (i + fs[0] - 0.5) * ds;
-        y[c] = (j + fs[1] - 0.5) * ds;
-        z[c] = (k + fs[2] - 0.5) * ds;
+        x[c] = (i + fs[0] - 1) * ds;
+        y[c] = (j + fs[1] - 1) * ds;
+        z[c] = (k + fs[2] - 1) * ds;
       }
     }
   }
@@ -104,9 +102,7 @@ int main(){
 
   scarf_opt_init(&options);
 
-  options.hurst = 0.1;
-  //options.nc = ;
-  //option.fc = ;
+  options.hurst = hurst;
 
   scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
 
@@ -129,9 +125,9 @@ int main(){
 
   // IO
   watch_start(&tictoc);
-  scarf_io_slice(n, "x", 400, field, "fft_struct_xslice");
-  scarf_io_slice(n, "y", 250, field, "fft_struct_yslice");
-  scarf_io_slice(n, "z", 100, field, "fft_struct_zslice");
+  scarf_io_slice(n, "x", n[0]/2, field, "fft_struct_xslice");
+  scarf_io_slice(n, "y", n[1]/2, field, "fft_struct_yslice");
+  scarf_io_slice(n, "z", n[2]/2, field, "fft_struct_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -150,6 +146,7 @@ int main(){
 
   scarf_finalize();
 
+  MPI_Barrier(MPI_COMM_WORLD);
 
   scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, &options);
 
@@ -201,9 +198,9 @@ int main(){
 
   // IO
   watch_start(&tictoc);
-  scarf_io_slice(n, "x", 400, field, "spec_struct_xslice");
-  scarf_io_slice(n, "y", 250, field, "spec_struct_yslice");
-  scarf_io_slice(n, "z", 100, field, "spec_struct_zslice");
+  scarf_io_slice(n, "x", n[0]/2, field, "spec_struct_xslice");
+  scarf_io_slice(n, "y", n[1]/2, field, "spec_struct_yslice");
+  scarf_io_slice(n, "z", n[2]/2, field, "spec_struct_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {

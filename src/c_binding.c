@@ -36,8 +36,6 @@ extern void io_slice(const int* npts, const char axis[], const int* plane, const
 
 void scarf_opt_init(struct scarf_opt * var){
 
-printf("hoi2\n");
-
   var -> solver  = 0;
   var -> hurst   = 0;
   var -> dh      = 0;
@@ -48,15 +46,8 @@ printf("hoi2\n");
   var -> taper   = 0;
   var -> rescale = 0;
   var -> pad     = 0;
-  printf("hoi3\n");
-  var -> nc[0]   = 0;
-  var -> nc[1]   = 0;
-  var -> nc[2]   = 0;
-  var -> fc[0]   = 0;
-  var -> fc[1]   = 0;
-  var -> fc[2]   = 0;
-
-printf("hoi4\n");
+  var -> nc = NULL;
+  var -> fc = NULL;
 
 }
 
@@ -78,10 +69,7 @@ void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const
      if (var->taper > 0) taper = &var->taper;
      if (var->rescale == 1) rescale = &var->rescale;
      if (var->pad == 1) pad = &var->pad;
-     if ( (var->fc[0] - var->nc[0]) > 0 && (var->fc[1] - var->nc[1]) > 0 && (var->fc[2] - var->nc[2]) > 0){
-       fc = var -> fc;
-       nc = var -> nc;
-     }
+     if (var->fc && var->nc){fc = var -> fc; nc = var -> nc;}
    }
 
    // call FORTRAN subroutine
@@ -104,10 +92,7 @@ void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const
     if (var->taper > 0) taper = &var->taper;
     if (var->rescale == 1) rescale = &var->rescale;
     if (var->pad == 1) pad = &var->pad;
-    if ( (var->fc[0] - var->nc[0]) > 0 && (var->fc[1] - var->nc[1]) > 0 && (var->fc[2] - var->nc[2]) > 0){
-      fc = var->fc;
-      nc = var->nc;
-    }
+    if (var->fc && var->nc){fc = var -> fc; nc = var -> nc;}
   }
 
    // call FORTRAN subroutine

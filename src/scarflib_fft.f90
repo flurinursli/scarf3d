@@ -526,7 +526,7 @@ MODULE m_scarflib_fim
         print*, 'sigma ', sigma
         print*, 'hurst ', hurst
         print*, 'seed ', seed
-        print*, 'poi ', SIZE(poi)
+        print*, 'poi ', SIZE(poi), SIZE(poi, 1), SIZE(poi, 2)
         print*, 'mute ', mute
         print*, 'taper ', taper
         print*, 'rescale ', rescale

@@ -69,7 +69,7 @@ MODULE m_scarflib_common
   INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)           :: gs, ge
 
   ! variables
-  REAL(f_real),                               PARAMETER :: pi = 3.141592653589793_f_dble
+  REAL(f_dble),                               PARAMETER :: pi = 3.141592653589793_f_dble
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
