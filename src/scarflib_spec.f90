@@ -251,7 +251,7 @@ MODULE m_scarflib_srm
 #ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
-      info(5) = info(5) + tictoc
+      info(5) = info(5) + REAL(tictoc, f_real)
 
       CALL watch_start(tictoc, mpi_comm_self)
 #endif
@@ -280,7 +280,7 @@ MODULE m_scarflib_srm
 #ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
-      info(6) = info(6) + tictoc
+      info(6) = info(6) + REAL(tictoc, f_real)
 #endif
 
     ENDDO
@@ -312,7 +312,7 @@ MODULE m_scarflib_srm
 #ifdef TIMING
     CALL watch_stop(tictoc, mpi_comm_self)
 
-    info(6) = info(6) + tictoc
+    info(6) = info(6) + REAL(tictoc, f_real)
 #endif
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
@@ -555,7 +555,7 @@ MODULE m_scarflib_srm
 #ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
-      info(5) = info(5) + tictoc
+      info(5) = info(5) + REAL(tictoc, f_real)
 
       CALL watch_start(tictoc, mpi_comm_self)
 #endif
@@ -598,7 +598,7 @@ MODULE m_scarflib_srm
 #ifdef TIMING
       CALL watch_stop(tictoc, mpi_comm_self)
 
-      info(6) = info(6) + tictoc
+      info(6) = info(6) + REAL(tictoc, f_real)
 #endif
 
     ENDDO
@@ -638,7 +638,7 @@ MODULE m_scarflib_srm
 #ifdef TIMING
     CALL watch_stop(tictoc, mpi_comm_self)
 
-    info(6) = info(6) + tictoc
+    info(6) = info(6) + REAL(tictoc, f_real)
 #endif
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *

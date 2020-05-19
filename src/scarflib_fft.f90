@@ -327,7 +327,7 @@ MODULE m_scarflib_fim
 #ifdef TIMING
       CALL watch_stop(tictoc)
 
-      info(7) = tictoc
+      info(7) = REAL(tictoc, f_real)
 #endif
 
       ! define scaling factor
@@ -431,7 +431,7 @@ MODULE m_scarflib_fim
 #ifdef TIMING
       CALL watch_stop(tictoc)
 
-      info(8) = tictoc
+      info(8) = REAL(tictoc, f_real)
 #endif
 
       ! release memory
@@ -546,7 +546,7 @@ MODULE m_scarflib_fim
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
-      ! CYCLE over the three main directions to determine the necessary model size (in number of points) and the absolute position
+      ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
       DO i = 1, 3
 
@@ -663,7 +663,7 @@ MODULE m_scarflib_fim
 #ifdef TIMING
       CALL watch_stop(tictoc)
 
-      info(7) = tictoc
+      info(7) = REAL(tictoc, f_real)
 #endif
 
       ! define scaling factor
@@ -767,7 +767,7 @@ MODULE m_scarflib_fim
 #ifdef TIMING
       CALL watch_stop(tictoc)
 
-      info(8) = tictoc
+      info(8) = REAL(tictoc, f_real)
 #endif
 
       ! release memory
@@ -995,8 +995,8 @@ MODULE m_scarflib_fim
       REAL(f_real),                                      INTENT(IN)  :: ds                             !< external grid grid-step
       INTEGER(f_int),              DIMENSION(3),         INTENT(IN)  :: fs, fe                         !< min/max external grid index
       REAL(f_real),                DIMENSION(:,:,:),     INTENT(OUT) :: field
-      INTEGER(f_int)                                                 :: i, j, c
-      INTEGER(f_int)                                                 :: m, n, np, nb, nx, ny, nz
+      INTEGER(f_int)                                                 :: i, j
+      INTEGER(f_int)                                                 :: m, n, nb, nx, ny, nz
       INTEGER(f_int)                                                 :: maxwidth, blockwidth, nblocks
       INTEGER(f_int)                                                 :: ierr, trip, req
       INTEGER(f_int),              DIMENSION(3)                      :: dum
@@ -1094,7 +1094,7 @@ MODULE m_scarflib_fim
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
       ! collect data
-      CALL order_points(p0(:, 1), p1(:, 1), dh, fs, fe, ds, sxyz, sendcounts, map)
+      CALL order_points(p0(:, 1), p1(:, 1), dh, fs, ds, sxyz, sendcounts, map)
 
       ! determine number of points to be received from each process
       CALL mpi_alltoall(sendcounts, 1, mpi_integer, recvcounts, 1, mpi_integer, mpi_comm_world, ierr)
@@ -1114,7 +1114,7 @@ MODULE m_scarflib_fim
         CALL mpi_ialltoallv(sxyz, sendcounts, sdispls, trip, rxyz, recvcounts, rdispls, trip, mpi_comm_world, req, ierr)
 
         ! collect new data
-        CALL order_points_struct(p0(:, j), p1(:, j), dh, fs, fe, ds, sxyz_n, sendcounts_n, map_n)
+        CALL order_points(p0(:, j), p1(:, j), dh, fs, ds, sxyz_n, sendcounts_n, map_n)
         CALL mpi_alltoall(sendcounts_n, 1, mpi_integer, recvcounts_n, 1, mpi_integer, mpi_comm_world, ierr)
 
         ! wait for old data
@@ -1264,7 +1264,7 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE order_points_struct(p0, p1, dh, fs, fe, ds, xyz, sendcounts, map)
+    SUBROUTINE order_points_struct(p0, p1, dh, fs, ds, xyz, sendcounts, map)
 
       ! Purpose:
       ! To reorder external grid nodes to be sent to each process in rank-increasing order, storing indices of the nearest internal
@@ -1281,13 +1281,12 @@ MODULE m_scarflib_fim
 
       INTEGER(f_int), DIMENSION(3),          INTENT(IN)  :: p0, p1              !< first/last index (internal FFT grid) of points to be sent
       REAL(f_real),                          INTENT(IN)  :: dh                  !< grid step of internal (FFT) grid
-      INTEGER(f_int), DIMENSION(3),          INTENT(IN)  :: fs, fe              !< first/last index of external grid for calling process
+      INTEGER(f_int), DIMENSION(3),          INTENT(IN)  :: fs                  !< first index of external grid for calling process
       REAL(f_real),                          INTENT(IN)  :: ds                  !< grid-step external grid
       REAL(f_real),   DIMENSION(:,:),        INTENT(OUT) :: xyz                 !< list with nearest internal grid nodes
       INTEGER(f_int), DIMENSION(:),          INTENT(OUT) :: sendcounts          !< number of points to be sent to each process
       INTEGER(f_int), DIMENSION(:,:),        INTENT(OUT) :: map                 !< position of a point inside vector
       INTEGER(f_int)                                     :: l, p, n, c
-      INTEGER(f_int)                                     :: nx, nxy
       INTEGER(f_int)                                     :: i0, j0, k0
       INTEGER(f_int), DIMENSION(3)                       :: const, m
       LOGICAL                                            :: bool
@@ -2175,7 +2174,7 @@ MODULE m_scarflib_fim
 #ifdef TIMING
       CALL watch_stop(tictoc)
 
-      time(1) = tictoc
+      time(1) = REAL(tictoc, f_real)
 
       CALL watch_start(tictoc)
 #endif
@@ -2186,7 +2185,7 @@ MODULE m_scarflib_fim
 #ifdef TIMING
       CALL watch_stop(tictoc)
 
-      time(2) = tictoc
+      time(2) = REAL(tictoc, f_real)
 #endif
 
     END SUBROUTINE compute_spectrum
@@ -2333,12 +2332,12 @@ MODULE m_scarflib_fim
         SUBROUTINE exchange_conjg
 
           COMPLEX(f_real), DIMENSION(fs(2):fe(2),fs(3):fe(3)) :: buffer, sendbuf
-          INTEGER(f_int)                                      :: j, k, p, l, c, cy, cz
+          INTEGER(f_int)                                      :: j, k, p, l, cy, cz
           INTEGER(f_int)                                      :: js, je, ks, ke
           INTEGER(f_int)                                      :: j0, j1, k0, k1
           INTEGER(f_int)                                      :: ierr
           INTEGER(f_int), DIMENSION(2)                        :: rsizes, rsubsizes, rstarts
-          INTEGER(f_int), DIMENSION(3)                        :: ssizes, ssubsizes, sstarts
+          INTEGER(f_int), DIMENSION(3)                        :: ssizes
           INTEGER(f_int), DIMENSION(0:ntasks-1)               :: sendcounts, recvcounts
           INTEGER(f_int), DIMENSION(0:ntasks-1)               :: sdispls, rdispls
           INTEGER(f_int), DIMENSION(0:ntasks-1)               :: sendtypes, recvtypes
@@ -2688,9 +2687,12 @@ MODULE m_scarflib_fim
       INTEGER(f_int)                                :: p
       INTEGER(f_int)                                :: i0, j0, k0
       REAL(f_real)                                  :: i, j, k
-      REAL(f_real)                                  :: px, py, pz, ipx, ipy
-      REAL(f_real)                                  :: a, b
-      REAL(f_real),   DIMENSION(2,2)                :: f
+      ! bilinear
+      ! {
+      ! REAL(f_real)                                  :: px, py, pz, ipx, ipy
+      ! REAL(f_real)                                  :: a, b
+      ! REAL(f_real),   DIMENSION(2,2)                :: f
+      ! }
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -2845,7 +2847,7 @@ MODULE m_scarflib_fim
             v1 = [a, fact2(:, j)]
 
             ! skip to next pair if current triplet already analysed ("v1" is already in "list")
-            IF (match(v1, c, list) .eqv. .true.) CYCLE
+            IF (match() .eqv. .true.) CYCLE
 
             c = c + 1
 
@@ -2893,23 +2895,20 @@ MODULE m_scarflib_fim
 
       CONTAINS
 
-      LOGICAL FUNCTION match(vec, imax, list)
+        LOGICAL FUNCTION match()
 
-        INTEGER(f_int), DIMENSION(3),   INTENT(IN) :: vec
-        INTEGER(f_int),                 INTENT(IN) :: imax
-        INTEGER(f_int), DIMENSION(:,:), INTENT(IN) :: list
-        INTEGER(f_int)                             :: i
+          INTEGER(f_int) :: i
 
-        !---------------------------------------------------------------------------------------------------------------------------
+          !-------------------------------------------------------------------------------------------------------------------------
 
-        match = .false.
+          match = .false.
 
-        DO i = 1, imax
-          match = ANY(v1(1) .eq. list(:, i)) .and. ANY(v1(2) .eq. list(:, i)) .and. ANY(v1(3) .eq. list(:, i))
-          IF (match .eqv. .true.) exit
-        ENDDO
+          DO i = 1, c
+            match = ANY(v1(1) .eq. list(:, i)) .and. ANY(v1(2) .eq. list(:, i)) .and. ANY(v1(3) .eq. list(:, i))
+            IF (match .eqv. .true.) EXIT
+          ENDDO
 
-      END FUNCTION match
+        END FUNCTION match
 
     END SUBROUTINE best_config
 
@@ -3017,7 +3016,7 @@ MODULE m_scarflib_fim
 
       side = REAL(npts, f_real) / REAL(dims, f_real)
 
-      measure = abs(side(1) - side(2)) + abs(side(1) - side(3)) + abs(side(2) - side(3))
+      measure = ABS(side(1) - side(2)) + ABS(side(1) - side(3)) + ABS(side(2) - side(3))
 
     END SUBROUTINE cost_fun
 

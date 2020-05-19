@@ -33,32 +33,32 @@ int main(){
   const int n[3] = {500, 500, 500};
 
   // grid-step
-  const fpp ds = 50.;
+  const real ds = 50.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const fpp cl[3] = {2000., 2000., 2000.};
+  const real cl[3] = {2000., 2000., 2000.};
 
   // standard deviation
-  const fpp sigma = 0.05;
+  const real sigma = 0.05;
 
   // seed number
   const int seed = 1235;
 
-  const fpp hurst = 0.25;
+  const real hurst = 0.25;
 
-  fpp stats[8];
+  real stats[8];
 
-  // fpp x0[3], x1[3];
+  // real x0[3], x1[3];
   //
   // for (int i = 0; i < 3; i++){
   //   x0[i] = 0;
   //   x1[i] = (n[i] - 1) * ds;
   // }
   //
-  // fpp dh = ds;
+  // real dh = ds;
   //
   // for (int i = 0; i < 3; i++) n[i] = n[i] / 4;
   // ds = ds * 4;
@@ -80,10 +80,10 @@ int main(){
     dims[i] = (fe[i] - fs[i] + 1);
   }
 
-  fpp* x     = new fpp[dims[0]*dims[1]*dims[2]];
-  fpp* y     = new fpp[dims[0]*dims[1]*dims[2]];
-  fpp* z     = new fpp[dims[0]*dims[1]*dims[2]];
-  fpp* field = new fpp[dims[0]*dims[1]*dims[2]];
+  real* x     = new real[dims[0]*dims[1]*dims[2]];
+  real* y     = new real[dims[0]*dims[1]*dims[2]];
+  real* z     = new real[dims[0]*dims[1]*dims[2]];
+  real* field = new real[dims[0]*dims[1]*dims[2]];
 
   long c;
 
@@ -109,6 +109,12 @@ int main(){
   // ---------------------------------------------------------------------------
   // ===========================================================================
 
+  if (world_rank == 0){
+    std::cout << ""                                                             << std::endl;
+    std::cout << "************************************************************" << std::endl;
+    std::cout << "************************ FIM method ************************" << std::endl;
+  }
+
   {
 
     Scarf3D::options.hurst = hurst;
@@ -124,16 +130,17 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << "" << std::endl;
-      std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                : " << (int) stats[0]   << std::endl;
-      std::cout << "Grid-step too large?             : " << (int) stats[1]   << std::endl;
-      std::cout << "Standard deviation               : " << (float) stats[2] << std::endl;
-      std::cout << "Mean value                       : " << (float) stats[3] << std::endl;
-      std::cout << "Timing for spectrum              : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for symmetry              : " << (float) stats[5] << std::endl;
-      std::cout << "Timing for IFFT                  : " << (float) stats[6] << std::endl;
-      std::cout << "Timing for interpolation         : " << (float) stats[7] << std::endl;
+      std::cout << ""                                                                << std::endl;
+      std::cout << "Summary structured mesh"                                         << std::endl;
+      std::cout << "  i)   test completed in       : " << (float) tictoc   << " sec" << std::endl;
+      std::cout << "  ii)  domain too small?       : " << (int) stats[0]             << std::endl;
+      std::cout << "  iii) grid-step too large?    : " << (int) stats[1]             << std::endl;
+      std::cout << "  iv)  standard deviation      : " << (float) stats[2]           << std::endl;
+      std::cout << "  v)   mean value              : " << (float) stats[3]           << std::endl;
+      std::cout << "  vi)  timing for spectrum     : " << (float) stats[4] << " sec" << std::endl;
+      std::cout << "  vii) timing for symmetry     : " << (float) stats[5] << " sec" << std::endl;
+      std::cout << "  viii)timing for ifft         : " << (float) stats[6] << " sec" << std::endl;
+      std::cout << "  ix)  timing for interpolation: " << (float) stats[7] << " sec" << std::endl;
     }
 
     // IO
@@ -144,7 +151,7 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Slice(s) written in              : " << (float) tictoc << std::endl;
+       std::cout << "  x)   slice(s) written in     : " << (float) tictoc << " sec" << std::endl;
     }
 
     int nwriters[1] = {3};
@@ -154,7 +161,7 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Whole file written in            : " << (float) tictoc << std::endl;
+      std::cout << "  xi)  whole file written in   : " << (float) tictoc << " sec" << std::endl;
     }
 
     // call destructor explicitly
@@ -176,16 +183,17 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << "" << std::endl;
-      std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                  : " << (int) stats[0]   << std::endl;
-      std::cout << "Grid-step too large?               : " << (int) stats[1]   << std::endl;
-      std::cout << "Standard deviation                 : " << (float) stats[2] << std::endl;
-      std::cout << "Mean value                         : " << (float) stats[3] << std::endl;
-      std::cout << "Timing for spectrum                : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for symmetry                : " << (float) stats[5] << std::endl;
-      std::cout << "Timing for IFFT                    : " << (float) stats[6] << std::endl;
-      std::cout << "Timing for interpolation           : " << (float) stats[7] << std::endl;
+      std::cout << ""                                                                << std::endl;
+      std::cout << "Summary unstructured mesh"                                       << std::endl;
+      std::cout << "  i)   test completed in       : " << (float) tictoc   << " sec" << std::endl;
+      std::cout << "  ii)  domain too small?       : " << (int) stats[0]             << std::endl;
+      std::cout << "  iii) grid-step too large?    : " << (int) stats[1]             << std::endl;
+      std::cout << "  iv)  standard deviation      : " << (float) stats[2]           << std::endl;
+      std::cout << "  v)   mean value              : " << (float) stats[3]           << std::endl;
+      std::cout << "  vi)  timing for spectrum     : " << (float) stats[4] << " sec" << std::endl;
+      std::cout << "  vii) timing for symmetry     : " << (float) stats[5] << " sec" << std::endl;
+      std::cout << "  viii)timing for ifft         : " << (float) stats[6] << " sec" << std::endl;
+      std::cout << "  ix)  timing for interpolation: " << (float) stats[7] << " sec" << std::endl;
     }
 
     // call destructor explicitly
@@ -200,6 +208,12 @@ int main(){
 
 #ifdef SPECTRAL
 
+  if (world_rank == 0){
+    std::cout << ""                                                             << std::endl;
+    std::cout << "************************************************************" << std::endl;
+    std::cout << "************************ SRM method ************************" << std::endl;
+  }
+
   {
 
     Scarf3D::options.hurst = hurst;
@@ -211,14 +225,15 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << "" << std::endl;
-      std::cout << "Structured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                : " << (int) stats[0]   << std::endl;
-      std::cout << "Grid-step too large?             : " << (int) stats[1]   << std::endl;
-      std::cout << "Standard deviation               : " << (float) stats[2] << std::endl;
-      std::cout << "Mean value                       : " << (float) stats[3] << std::endl;
-      std::cout << "Timing for CPU execution         : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for GPU execution         : " << (float) stats[5] << std::endl;
+      std::cout << ""                                                             << std::endl;
+      std::cout << "Summary structured mesh"                                      << std::endl;
+      std::cout << "  i)   test completed in    : " << (float) tictoc   << " sec" << std::endl;
+      std::cout << "  ii)  domain too small?    : " << (int) stats[0]             << std::endl;
+      std::cout << "  iii) grid-step too large? : " << (int) stats[1]             << std::endl;
+      std::cout << "  iv)  standard deviation   : " << (float) stats[2]           << std::endl;
+      std::cout << "  v)   mean value           : " << (float) stats[3]           << std::endl;
+      std::cout << "  vi)  CPU main loop        : " << (float) stats[4] << " sec" << std::endl;
+      std::cout << "  vii) GPU main loop        : " << (float) stats[5] << " sec" << std::endl;
     }
 
     // IO
@@ -229,7 +244,7 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Slice(s) written in              : " << (float) tictoc << std::endl;
+      std::cout << "  viii)slice(s) written in  : " << (float) tictoc << " sec" << std::endl;
     }
 
     int nwriters[1] = {3};
@@ -239,7 +254,7 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "Whole file written in            : " << (float) tictoc << std::endl;
+      std::cout << "  ix)  whole file written in: " << (float) tictoc << " sec" << std::endl;
     }
 
     // call destructor explicitly
@@ -257,14 +272,15 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << "" << std::endl;
-      std::cout << "Unstructured Mesh Test completed in: " << (float) tictoc   << std::endl;
-      std::cout << "Domain too small?                  : " << (int) stats[0]   << std::endl;
-      std::cout << "Grid-step too large?               : " << (int) stats[1]   << std::endl;
-      std::cout << "Standard deviation                 : " << (float) stats[2] << std::endl;
-      std::cout << "Mean value                         : " << (float) stats[3] << std::endl;
-      std::cout << "Timing for CPU execution           : " << (float) stats[4] << std::endl;
-      std::cout << "Timing for GPU execution           : " << (float) stats[5] << std::endl;
+      std::cout << ""                                                            << std::endl;
+      std::cout << "Summary unstructured mesh"                                   << std::endl;
+      std::cout << "  i)   test completed in   : " << (float) tictoc   << " sec" << std::endl;
+      std::cout << "  ii)  domain too small?   : " << (int) stats[0]             << std::endl;
+      std::cout << "  iii) grid-step too large?: " << (int) stats[1]             << std::endl;
+      std::cout << "  iv)  standard deviation  : " << (float) stats[2]           << std::endl;
+      std::cout << "  v)   mean value          : " << (float) stats[3]           << std::endl;
+      std::cout << "  vi)  CPU main loop       : " << (float) stats[4] << " sec" << std::endl;
+      std::cout << "  vii) GPU main loop       : " << (float) stats[5] << " sec" << std::endl;
     }
 
     // call destructor explicitly

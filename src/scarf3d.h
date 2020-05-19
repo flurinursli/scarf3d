@@ -14,11 +14,11 @@ Revisions:
 #define SCARF3D_H_
 
 #ifdef DOUBLE_PREC
-typedef double fpp;
-//using fpp = double;
+typedef double real;
+//using real = double;
 #else
-typedef float fpp;
-//using fpp = float;
+typedef float real;
+//using real = float;
 #endif
 
 #ifdef __cplusplus
@@ -29,33 +29,33 @@ enum algorithm {fft, spec};
 
 struct scarf_opt{
   int solver;
-  fpp hurst;
-  fpp dh;
-  fpp ds;
-  fpp* poi;
+  real hurst;
+  real dh;
+  real ds;
+  real* poi;
   int npoi;
-  fpp mute;
-  fpp taper;
+  real mute;
+  real taper;
   int rescale;
   int pad;
-  fpp * nc;
-  fpp * fc;
+  real * nc;
+  real * fc;
 };
 
 // declare C functions
 void scarf_opt_init(struct scarf_opt * var);
 
-void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const int acf, const fpp cl[], const fpp sigma, struct scarf_opt *var);
+void scarf_struct_initialize(const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
 
-void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma, struct scarf_opt *var);
+void scarf_unstruct_initialize(const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
 
-void scarf_execute(const int seed, fpp* field, fpp stats[]);
+void scarf_execute(const int seed, real* field, real stats[]);
 
 void scarf_finalize();
 
-void scarf_io_one(const int* npts, const fpp* field, const char fname[], const int* nwriters);
+void scarf_io_one(const int* npts, const real* field, const char fname[], const int* nwriters);
 
-void scarf_io_slice(const int* npts, const char axis[], const int plane, const fpp* field, const char fname[]);
+void scarf_io_slice(const int* npts, const char axis[], const int plane, const real* field, const char fname[]);
 
 // define C++ class
 #ifdef __cplusplus
@@ -74,7 +74,7 @@ namespace Scarf3D
     public:
 
       // constructor structured mesh
-      Initialize(const int fs[], const int fe[], const fpp ds, const int acf, const fpp cl[], const fpp sigma)
+      Initialize(const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma)
       {
 
         if (method == spec) options.solver = 1;
@@ -84,7 +84,7 @@ namespace Scarf3D
       };
 
       // constructor unstructured mesh
-      Initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma)
+      Initialize(const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma)
       {
 
         if (method == spec) options.solver = 1;
@@ -101,19 +101,19 @@ namespace Scarf3D
       };
 
       // simulate random field
-      void execute(const int seed, fpp* field, fpp stats[])
+      void execute(const int seed, real* field, real stats[])
       {
         scarf_execute(seed, field, stats);
       };
 
       // IO whole model
-      void io(const int npts[], const fpp* field, const char fname[], const int* nwriters = nullptr)
+      void io(const int npts[], const real* field, const char fname[], const int* nwriters = nullptr)
       {
         scarf_io_one(npts, field, fname, nwriters);
       };
 
       // IO model slice
-      void io(const int npts[], const char axis[], const int plane, const fpp* field, const char fname[])
+      void io(const int npts[], const char axis[], const int plane, const real* field, const char fname[])
       {
         scarf_io_slice(npts, axis, plane, field, fname);
       };

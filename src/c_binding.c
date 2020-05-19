@@ -1,34 +1,24 @@
 #include <stdlib.h>
 #include "scarf3d.h"
 
-
-// #ifdef DOUBLE_PREC
-// typedef double fpp;
-// //using fpp = double;
-// #else
-// typedef float fpp;
-// //using fpp = float;
-// #endif
-
-
 // C functions are declared (prototyped) in "scarf3d.h"
 
 // declare FORTRAN subroutines
-extern void struct_initialize(const int fs[], const int fe[], const fpp* ds, const int* acf, const fpp cl[], const fpp* sigma,
-                              const int* solver, const fpp* hurst, const fpp* dh, const fpp* poi, const int* npoi, const fpp* mute,
-                              const fpp* taper, const int* rescale, const int* pad, const fpp nc[], const fpp fc[]);
+extern void struct_initialize(const int fs[], const int fe[], const real* ds, const int* acf, const real cl[], const real* sigma,
+                              const int* solver, const real* hurst, const real* dh, const real* poi, const int* npoi, const real* mute,
+                              const real* taper, const int* rescale, const int* pad, const real nc[], const real fc[]);
 
-extern void unstruct_initialize(const int* npts, const fpp* x, const fpp* y, const fpp* z, const fpp* dh, const int* acf, const fpp cl[], const fpp* sigma,
-                                const int* solver, const fpp* hurst, const fpp* ds, const fpp* poi, const int* npoi, const fpp* mute, const fpp* taper,
-                                const int* rescale, const int* pad, const fpp nc[], const fpp fc[]);
+extern void unstruct_initialize(const int* npts, const real* x, const real* y, const real* z, const real* dh, const int* acf, const real cl[], const real* sigma,
+                                const int* solver, const real* hurst, const real* ds, const real* poi, const int* npoi, const real* mute, const real* taper,
+                                const int* rescale, const int* pad, const real nc[], const real fc[]);
 
-extern void execute(const int* seed, fpp** field, fpp stats[]);
+extern void execute(const int* seed, real** field, real stats[]);
 
 extern void finalize();
 
-extern void io_one(const int* npts, const fpp** field, const char fname[], const int* nwriters);
+extern void io_one(const int* npts, const real** field, const char fname[], const int* nwriters);
 
-extern void io_slice(const int* npts, const char axis[], const int* plane, const fpp** field, const char fname[]);
+extern void io_slice(const int* npts, const char axis[], const int* plane, const real** field, const char fname[]);
 
 // end FORTRAN subroutines
 
@@ -51,13 +41,11 @@ void scarf_opt_init(struct scarf_opt * var){
 
 }
 
-
-
-// Note: many arguments are defined as pointers because they are OPTIONAL on the FORTRAN side.
-void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const int acf, const fpp cl[], const fpp sigma, struct scarf_opt *var){
+// Note: many arguments are defined as pointers because they are optional on the FORTRAN side.
+void scarf_struct_initialize(const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
 
    int *solver = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
-   fpp *hurst = NULL, *dh = NULL, *poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
+   real *hurst = NULL, *dh = NULL, *poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
 
    if (var){
      if (var->solver == 1) solver = &var->solver;
@@ -77,10 +65,10 @@ void scarf_struct_initialize(const int fs[], const int fe[], const fpp ds, const
 
 }
 
-void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const fpp* z, const fpp dh, const int acf, const fpp cl[], const fpp sigma, struct scarf_opt *var){
+void scarf_unstruct_initialize(const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
 
   int *solver = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
-  fpp *hurst = NULL, *ds = NULL, *poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
+  real *hurst = NULL, *ds = NULL, *poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
 
   if (var){
     if (var->solver == 1) solver = &var->solver;
@@ -100,7 +88,7 @@ void scarf_unstruct_initialize(const int npts, const fpp* x, const fpp* y, const
 
 }
 
-void scarf_execute(const int seed, fpp* field, fpp stats[]){
+void scarf_execute(const int seed, real* field, real stats[]){
 
    // call FORTRAN subroutine
    execute(&seed, &field, stats);
@@ -116,13 +104,13 @@ void scarf_finalize(){
 
 // define C I/O functions
 
-void scarf_io_one(const int npts[], const fpp* field, const char fname[], const int* nwriters){
+void scarf_io_one(const int npts[], const real* field, const char fname[], const int* nwriters){
 
   io_one(npts, &field, fname, nwriters);
 
 }
 
-void scarf_io_slice(const int npts[], const char axis[], const int plane, const fpp* field, const char fname[]){
+void scarf_io_slice(const int npts[], const char axis[], const int plane, const real* field, const char fname[]){
 
   io_slice(npts, axis, &plane, &field, fname);
 

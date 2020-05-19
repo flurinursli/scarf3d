@@ -11,10 +11,10 @@ CC  = mpicc
 COMPILER = $(VENDOR)
 
 # compile library in single or double precision
-PRECISION = single
+PRECISION = double
 
 # compile in debug mode?
-DEBUG = no
+DEBUG = yes
 
 # activate stopwatch for performance analysis
 TIMING = yes

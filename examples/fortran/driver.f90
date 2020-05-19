@@ -1,358 +1,307 @@
-PROGRAM DRIVER
+PROGRAM driver
 
-  ! driver program for scarf3d
-  ! compile: mpif90 -O3 scarflib_fft2.f90 scarflib_spec.f90 scarflib.f90 driver.f90 *.f -I/home/walter/Backedup/Software/fftw-3.3.8/include
-  !                 -L/home/walter/Backedup/Software/fftw-3.3.8/lib -lfftw3 -fcheck=all -fbacktrace -fopenacc
-  !
-  ! the product of "dims" below should be equal to the number of processes
+  USE, INTRINSIC     :: iso_fortran_env, stdout => output_unit
+  USE, NON_INTRINSIC :: mpi
+  USE, NON_INTRINSIC :: m_scarflib
+  USE, NON_INTRINSIC :: m_scarflib_aux
 
-
-  USE, INTRINSIC     :: ISO_FORTRAN_ENV
-  USE, NON_INTRINSIC :: MPI
-  USE, NON_INTRINSIC :: M_SCARFLIB
-  USE, NON_INTRINSIC :: SCARFLIB_AUX
-
-  IMPLICIT NONE
+  IMPLICIT none
 
 #ifdef DOUBLE_PREC
-  INTEGER,     PARAMETER :: IP = INT32
-  INTEGER(IP), PARAMETER :: FP = REAL64
+  INTEGER, PARAMETER :: f_int = int32
+  INTEGER, PARAMETER :: f_real = real64
 #else
-  INTEGER,     PARAMETER :: IP = INT32
-  INTEGER(IP), PARAMETER :: FP = REAL32
+  INTEGER, PARAMETER :: f_int = int32
+  INTEGER, PARAMETER :: f_real = real32
 #endif
+  INTEGER, PARAMETER :: f_sgle = real32
+  INTEGER, PARAMETER :: f_dble = real64
 
-  INTEGER(IP)                                         :: I, J, K
-  INTEGER(IP)                                         :: RANK, NTASKS, IERR
-  INTEGER(IP)                                         :: ACF, RESCALE, PAD, SEED
-  INTEGER(IP),              DIMENSION(3)              :: N, FS, FE
-  REAL(FP)                                            :: DS, DH, SIGMA, HURST, MUTE, TAPER
-  REAL(FP),                 DIMENSION(3)              :: CL
-  REAL(FP),                 DIMENSION(8)              :: STATS
-  REAL(REAL64)                                        :: TICTOC
-  REAL(FP),                 DIMENSION(3,2)            :: POI
-  REAL(FP),                 DIMENSION(:,:,:), POINTER :: X3, Y3, Z3, V3
-  REAL(FP),    ALLOCATABLE, DIMENSION(:),     TARGET  :: X1, Y1, Z1, V1
+
+  INTEGER(f_int)                                         :: i, j, k
+  INTEGER(f_int)                                         :: rank, ntasks, ierr
+  INTEGER(f_int)                                         :: acf, rescale, pad, seed
+  INTEGER(f_int),              DIMENSION(3)              :: n, fs, fe
+  REAL(f_real)                                           :: ds, dh, sigma, hurst, mute, taper
+  REAL(f_real),                DIMENSION(3)              :: cl
+  REAL(f_real),                DIMENSION(8)              :: stats
+  REAL(f_dble)                                           :: tictoc
+  REAL(f_real),                DIMENSION(3,2)            :: poi
+  REAL(f_real),                DIMENSION(:,:,:), POINTER :: x3, y3, z3, v3
+  REAL(f_real),   ALLOCATABLE, DIMENSION(:),     TARGET  :: x1, y1, z1, v1
 
   !--------------------------------------------------------------------------------------------------------------------------------
 
-  ! INITIALISE MPI
-  CALL MPI_INIT(IERR)
+  ! initialise mpi
+  CALL mpi_init(ierr)
 
-  ! GET RANK NUMBER
-  CALL MPI_COMM_RANK(MPI_COMM_WORLD, RANK, IERR)
+  ! get rank number
+  CALL mpi_comm_rank(mpi_comm_world, rank, ierr)
 
-  ! GET NUMBER OF TASKS
-  CALL MPI_COMM_SIZE(MPI_COMM_WORLD, NTASKS, IERR)
+  ! get number of tasks
+  CALL mpi_comm_size(mpi_comm_world, ntasks, ierr)
 
-  CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+  CALL mpi_barrier(mpi_comm_world, ierr)
 
   !---------------------------------------------------------------------------------------------------------------------------------
-  ! INPUT SECTION
+  ! input section
   !---------------------------------------------------------------------------------------------------------------------------------
 
-  ! NUMBER OF POINTS FOR WHOLE MODEL
-  !N = [2000*2, 3200*2, 1200*2]
-  N = [500, 500, 500]
+  ! number of points for whole model
+  !n = [2000*2, 3200*2, 1200*2]
+  n = [500, 500, 500]
 
-  ! GRID STEP
-  DS = 50._FP
+  ! grid step
+  ds = 50._f_real
 
-  DH = 50._FP
+  dh = 50._f_real
 
-  ! AUTOCORRELATION (0=VON KARMAN/EXPONENTIAL, 1=GAUSSIAN)
-  ACF = 0
+  ! autocorrelation (0=von karman/exponential, 1=gaussian)
+  acf = 0
 
-  ! CORRELATION LENGTH
-  CL = [2000._FP, 2000._FP, 2000._FP]
+  ! correlation length
+  cl = [2000._f_real, 2000._f_real, 2000._f_real]
 
-  ! STANDARD DEVIATION (SIGMA%/100)
-  SIGMA = 0.05_FP
+  ! standard deviation (sigma%/100)
+  sigma = 0.05_f_real
 
-  ! HURST EXPONENT (NOT USED FOR GAUSSIAN ACF)
-  HURST = 0.25_FP
+  ! hurst exponent (not used for gaussian acf)
+  hurst = 0.25_f_real
 
-  ! SEED NUMBER
-  SEED = 1235
+  ! seed number
+  seed = 1235
 
-  ! SET POSITION OF POINT-OF-INTEREST (MUTING/TAPERING), SAME UNITS AS "DH"
-  POI(:, 1) = [400., 250., 100.] * DS
-  POI(:, 2) = [350., 200.,  50.] * DS
+  ! set position of point-of-interest (muting/tapering), same units as "dh"
+  poi(:, 1) = [400., 250., 100.] * ds
+  poi(:, 2) = [350., 200.,  50.] * ds
 
-  ! RADIUS FOR MUTING (AT POI), SAME UNITS AS "DH"
-  MUTE = 1000. !1000.
+  ! radius for muting (at poi), same units as "dh"
+  mute = 1000. !1000.
 
-  ! RADIUS FOR TAPERING (AT POI + MUTE), SAME UNITS AS "DH"
-  TAPER = 5000. !5000.
+  ! radius for tapering (at poi + mute), same units as "dh"
+  taper = 5000. !5000.
 
-  ! RESCALE TO DESIRED (CONTINUOUS) SIGMA
-  RESCALE = 0
+  ! rescale to desired (continuous) sigma
+  rescale = 0
 
-  ! EXPAND GRID TO HANDLE FFT PERIODICITY
-  PAD = 0
+  ! expand grid to handle fft periodicity
+  pad = 0
 
-  ! END INPUT SECTION
+  ! end input section
   !---------------------------------------------------------------------------------------------------------------------------------
 
   ! ================================================================================================================================-
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! CREATE SAMPLE STRUCTURED MESH
+  ! create sample structured mesh
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================-
 
-  CALL SAMPLE_MESH(RANK, NTASKS, N, FS, FE)
+  CALL sample_mesh(rank, ntasks, n, fs, fe)
 
-  ! ALLOCATE MEMORY FOR MESH
-  ALLOCATE(V1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(X1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(Y1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
-  ALLOCATE(Z1((FE(1) - FS(1) + 1) * (FE(2) - FS(2) + 1) * (FE(3) - FS(3) + 1)))
+  ! allocate memory for mesh
+  ALLOCATE(v1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
+  ALLOCATE(x1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
+  ALLOCATE(y1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
+  ALLOCATE(z1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
 
-  X3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => X1
-  Y3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Y1
-  Z3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => Z1
-  V3(FS(1):FE(1), FS(2):FE(2), FS(3):FE(3)) => V1
+  x3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => x1
+  y3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => y1
+  z3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => z1
+  v3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => v1
 
-  DO K = FS(3), FE(3)
-    DO J = FS(2), FE(2)
-      DO I = FS(1), FE(1)
-        X3(I, J, K) = (I - 1) * DS
-        Y3(I, J, K) = (J - 1) * DS
-        Z3(I, J, K) = (K - 1) * DS
+  DO k = fs(3), fe(3)
+    DO j = fs(2), fe(2)
+      DO i = fs(1), fe(1)
+        x3(i, j, k) = (i - 1) * ds
+        y3(i, j, k) = (j - 1) * ds
+        z3(i, j, k) = (k - 1) * ds
       ENDDO
     ENDDO
   ENDDO
 
   ! ================================================================================================================================-
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! FFT METHOD TESTS
+  ! fft method tests
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================-
 
-  IF (RANK .EQ. 0) PRINT*, ''
-  IF (RANK .EQ. 0) PRINT*, '**********************************************'
-  IF (RANK .EQ. 0) PRINT*, '***************** FFT METHOD *****************'
+  IF (rank .eq. 0) WRITE(stdout, *) ''
+  IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'
+  IF (rank .eq. 0) WRITE(stdout, *) '************************ FIM method ************************'
 
-  ! STRUCTURED MESH TEST
-  CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 0, HURST = HURST, PAD = 0, DH = DH)
-  !PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 0, HURST = HURST, PAD = 1)
-  ! PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 0, HURST = HURST, POI = POI, MUTE = MUTE, TAPER = TAPER, PAD = 1)
-  ! PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 0, HURST = HURST, RESCALE = 1, PAD = 1)
+  ! structured mesh test
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst)
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  CALL SCARF_EXECUTE(SEED, V3, STATS)
+  CALL scarf_execute(seed, v3, stats)
 
-  CALL WATCH_STOP(TICTOC)
+  CALL watch_stop(tictoc)
 
-  CALL MPI_ALLREDUCE(MPI_IN_PLACE, STATS, 8, MPI_REAL, MPI_MAX, MPI_COMM_WORLD, IERR)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-  IF (RANK .EQ. 0) THEN
-    PRINT*, ''
-    PRINT*, 'STRUCTURED MESH TEST COMPLETED IN: ', REAL(TICTOC, REAL32)
-    PRINT*, 'DOMAIN TOO SMALL?                : ', NINT(STATS(1))
-    PRINT*, 'GRID-STEP TOO LARGE?             : ', NINT(STATS(2))
-    PRINT*, 'STANDARD DEVIATION               : ', REAL(STATS(3), KIND=REAL32)
-    PRINT*, 'MEAN VALUE                       : ', REAL(STATS(4), KIND=REAL32)
-    PRINT*, 'TIMING FOR SPECTRUM              : ', REAL(STATS(5), KIND=REAL32)
-    PRINT*, 'TIMING FOR SYMMETRY              : ', REAL(STATS(6), KIND=REAL32)
-    PRINT*, 'TIMING FOR IFFT                  : ', REAL(STATS(7), KIND=REAL32)
-    PRINT*, 'TIMING FOR INTERPOLATION         : ', REAL(STATS(8), KIND=REAL32)
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) 'Summary structured mesh'
+    WRITE(stdout, *) '  i)   test completed in       : ', REAL(tictoc, f_sgle),   ' sec'
+    WRITE(stdout, *) '  ii)  domain too small?       : ', NINT(stats(1))
+    WRITE(stdout, *) '  iii) grid-step too large?    : ', NINT(stats(2))
+    WRITE(stdout, *) '  iv)  standard deviation      : ', REAL(stats(3), f_sgle)
+    WRITE(stdout, *) '  vi)  mean value              : ', REAL(stats(4), f_sgle)
+    WRITE(stdout, *) '  vii) timing for spectrum     : ', REAL(stats(5), f_sgle), ' sec'
+    WRITE(stdout, *) '  viii)timing for symmetry     : ', REAL(stats(6), f_sgle), ' sec'
+    WRITE(stdout, *) '  ix)  timing for ifft         : ', REAL(stats(7), f_sgle), ' sec'
+    WRITE(stdout, *) '  x)   timing for interpolation: ', REAL(stats(8), f_sgle), ' sec'
   ENDIF
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  CALL SCARF_IO(N, 'x', N(1)/2, V3, 'fft_struct_xslice')
-  CALL SCARF_IO(N, 'y', N(2)/2, V3, 'fft_struct_yslice')
-  CALL SCARF_IO(N, 'z', N(3)/2, V3, 'fft_struct_zslice')
+  CALL scarf_io(n, 'x', n(1)/2, v3, 'fft_struct_xslice')
+  CALL scarf_io(n, 'y', n(2)/2, v3, 'fft_struct_yslice')
+  CALL scarf_io(n, 'z', n(3)/2, v3, 'fft_struct_zslice')
 
-  CALL WATCH_STOP(TICTOC)
+  CALL watch_stop(tictoc)
+  IF (rank .eq. 0) WRITE(stdout, *) '  xi)  slice(s) written in     : ', REAL(tictoc, f_sgle), ' sec'
 
-  IF (RANK .EQ. 0) PRINT*, 'SLICE(S) WRITTEN IN              : ', REAL(TICTOC, REAL32)
+  CALL watch_start(tictoc)
 
-  CALL WATCH_START(TICTOC)
+  CALL scarf_io(n, v3, 'fft_struct_whole', 3)
 
-  CALL SCARF_IO(N, V3, 'fft_struct_whole', 3)
+  CALL watch_stop(tictoc)
 
-  CALL WATCH_STOP(TICTOC)
+  IF (rank .eq. 0) WRITE(stdout, *) '  xii) whole file written in   : ', REAL(tictoc, f_sgle), ' sec'
 
-  IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN            : ', REAL(TICTOC, REAL32)
+  CALL scarf_finalize()
 
-  CALL SCARF_FINALIZE()
+  ! unstructured mesh test
+  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 0, hurst = hurst)
 
-  ! UNSTRUCTURED MESH TEST
-  CALL SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD = 0, HURST = HURST, PAD = 0, DS = DS)
-  !PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD = 0, HURST = HURST, PAD = 1)
-  ! PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD, HURST, POI = POI, MUTE = MUTE, TAPER = TAPER, PAD = 1)
-  ! PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD, HURST, RESCALE = 1, PAD = 1)
+  CALL watch_start(tictoc)
 
-  CALL WATCH_START(TICTOC)
+  CALL scarf_execute(seed, v1, stats)
 
-  CALL SCARF_EXECUTE(SEED, V1, STATS)
+  CALL watch_stop(tictoc)
 
-  CALL WATCH_STOP(TICTOC)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-  CALL MPI_ALLREDUCE(MPI_IN_PLACE, STATS, 8, MPI_REAL, MPI_MAX, MPI_COMM_WORLD, IERR)
-
-  IF (RANK .EQ. 0) THEN
-    PRINT*, ''
-    PRINT*, 'UNSTRUCTURED MESH TEST COMPLETED IN: ', REAL(TICTOC, REAL32)
-    PRINT*, 'DOMAIN TOO SMALL?                  : ', NINT(STATS(1))
-    PRINT*, 'GRID-STEP TOO LARGE?               : ', NINT(STATS(2))
-    PRINT*, 'STANDARD DEVIATION                 : ', REAL(STATS(3), KIND=REAL32)
-    PRINT*, 'MEAN VALUE                         : ', REAL(STATS(4), KIND=REAL32)
-    PRINT*, 'TIMING FOR SPECTRUM                : ', REAL(STATS(5), KIND=REAL32)
-    PRINT*, 'TIMING FOR SYMMETRY                : ', REAL(STATS(6), KIND=REAL32)
-    PRINT*, 'TIMING FOR IFFT                    : ', REAL(STATS(7), KIND=REAL32)
-    PRINT*, 'TIMING FOR INTERPOLATION           : ', REAL(STATS(8), KIND=REAL32)
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) 'Summary unstructured mesh'
+    WRITE(stdout, *) '  i)   test completed in       : ', REAL(tictoc, f_sgle),   ' sec'
+    WRITE(stdout, *) '  ii)  domain too small?       : ', NINT(stats(1))
+    WRITE(stdout, *) '  iii) grid-step too large?    : ', NINT(stats(2))
+    WRITE(stdout, *) '  iv)  standard deviation      : ', REAL(stats(3), f_sgle)
+    WRITE(stdout, *) '  v)   mean value              : ', REAL(stats(4), f_sgle)
+    WRITE(stdout, *) '  vi)  timing for spectrum     : ', REAL(stats(5), f_sgle), ' sec'
+    WRITE(stdout, *) '  vii) timing for symmetry     : ', REAL(stats(6), f_sgle), ' sec'
+    WRITE(stdout, *) '  viii)timing for ifft         : ', REAL(stats(7), f_sgle), ' sec'
+    WRITE(stdout, *) '  ix)  timing for interpolation: ', REAL(stats(8), f_sgle), ' sec'
   ENDIF
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  ! PARAMS%FS = FS
-  ! PARAMS%FE = FE
-
-  ! CALL SCARF_IO(N, 1, 400, V3, 'fft_unstruct_xslice')
-  ! CALL SCARF_IO(N, 2, 250, V3, 'fft_unstruct_yslice')
-  ! CALL SCARF_IO(N, 3, 100, V3, 'fft_unstruct_zslice')
-  !
-  ! CALL WATCH_STOP(TICTOC)
-  !
-  ! IF (RANK .EQ. 0) PRINT*, 'SLICE(S) WRITTEN IN                : ', REAL(TICTOC, REAL32)
-  !
-  ! CALL WATCH_START(TICTOC)
-  !
-  ! CALL SCARF_IO(N, V3, 'fft_unstruct_whole', 3)
-  !
-  ! CALL WATCH_STOP(TICTOC)
-  !
-  ! IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN              : ', REAL(TICTOC, REAL32)
-
-  CALL SCARF_FINALIZE()
+  CALL scarf_finalize()
 
   ! ================================================================================================================================-
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! SPECTRAL METHOD TESTS
+  ! spectral method tests
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================-
 
-#ifdef SPECTRAL
+#ifdef spectral
 
-  IF (RANK .EQ. 0) PRINT*, ''
-  IF (RANK .EQ. 0) PRINT*, '**********************************************'
-  IF (RANK .EQ. 0) PRINT*, '************** SPECTRAL METHOD ***************'
+  IF (rank .eq. 0) WRITE(stdout, *) ''
+  IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'
+  IF (rank .eq. 0) WRITE(stdout, *) '************************ SRM method ************************'
 
-  ! STRUCTURED MESH TEST
-  CALL SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 1, HURST = HURST, DH = DH)
-  !PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 1, HURST = HURST)
-  ! PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 1, HURST = HURST, POI = POI, MUTE = MUTE, TAPER = TAPER)
-  ! PARAMS = SCARF_INITIALIZE(FS, FE, DS, ACF, CL, SIGMA, METHOD = 1, HURST = HURST)
+  ! structured mesh test
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst)
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  CALL SCARF_EXECUTE(SEED, V3, STATS)
+  CALL scarf_execute(seed, v3, stats)
 
-  CALL WATCH_STOP(TICTOC)
+  CALL watch_stop(tictoc)
 
-  CALL MPI_ALLREDUCE(MPI_IN_PLACE, STATS, 8, MPI_REAL, MPI_MAX, MPI_COMM_WORLD, IERR)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-  IF (RANK .EQ. 0) THEN
-    PRINT*, ''
-    PRINT*, 'STRUCTURED MESH TEST COMPLETED IN: ', REAL(TICTOC, REAL32)
-    PRINT*, 'DOMAIN TOO SMALL?                : ', NINT(STATS(1))
-    PRINT*, 'GRID-STEP TOO LARGE?             : ', NINT(STATS(2))
-    PRINT*, 'STANDARD DEVIATION               : ', REAL(STATS(3), KIND=REAL32)
-    PRINT*, 'MEAN VALUE                       : ', REAL(STATS(4), KIND=REAL32)
-    PRINT*, 'TIMING FOR CPU EXECUTION         : ', REAL(STATS(5), KIND=REAL32)
-    PRINT*, 'TIMING FOR GPU EXECUTION         : ', REAL(STATS(6), KIND=REAL32)
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) 'Summary structured mesh'
+    WRITE(stdout, *) '  i)   test completed in    : ', REAL(tictoc, f_sgle),   ' sec'
+    WRITE(stdout, *) '  ii)  domain too small?    : ', NINT(stats(1))
+    WRITE(stdout, *) '  iii) grid-step too large? : ', NINT(stats(2))
+    WRITE(stdout, *) '  iv)  standard deviation   : ', REAL(stats(3), f_sgle)
+    WRITE(stdout, *) '  vi)  mean value           : ', REAL(stats(4), f_sgle)
+    WRITE(stdout, *) '  vii) CPU main loop        : ', REAL(stats(5), f_sgle), ' sec'
+    WRITE(stdout, *) '  viii)GPU main loop        : ', REAL(stats(6), f_sgle), ' sec'
   ENDIF
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  CALL SCARF_IO(N, 'x', N(1)/2, V3, 'spec_struct_xslice')
-  CALL SCARF_IO(N, 'y', N(2)/2, V3, 'spec_struct_yslice')
-  CALL SCARF_IO(N, 'z', N(3)/2, V3, 'spec_struct_zslice')
+  CALL scarf_io(n, 'x', n(1)/2, v3, 'spec_struct_xslice')
+  CALL scarf_io(n, 'y', n(2)/2, v3, 'spec_struct_yslice')
+  CALL scarf_io(n, 'z', n(3)/2, v3, 'spec_struct_zslice')
 
-  CALL WATCH_STOP(TICTOC)
+  CALL watch_stop(tictoc)
 
-  IF (RANK .EQ. 0) PRINT*, 'SLICE(S) WRITTEN IN              : ', REAL(TICTOC, REAL32)
+  IF (rank .eq. 0) WRITE(stdout, *) '  ix)  slice(s) written in  : ', REAL(tictoc, f_sgle), ' sec'
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  CALL SCARF_IO(N, V3, 'spec_struct_whole', 3)
+  CALL scarf_io(n, v3, 'spec_struct_whole', 3)
 
-  CALL WATCH_STOP(TICTOC)
+  CALL watch_stop(tictoc)
 
-  IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN            : ', REAL(TICTOC, REAL32)
+  IF (rank .eq. 0) WRITE(stdout, *) '  x)   whole file written in: ', REAL(tictoc, f_sgle), ' sec'
 
-  CALL SCARF_FINALIZE()
+  CALL scarf_finalize()
 
-  ! UNSTRUCTURED MESH TEST
-  CALL SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD = 1, HURST = HURST, DS = DS)
-  !PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD = 1, HURST = HURST)
-  ! PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD = 1, HURST, POI = POI, MUTE = MUTE, TAPER = TAPER)
-  ! PARAMS = SCARF_INITIALIZE(X1, Y1, Z1, DH, ACF, CL, SIGMA, METHOD = 1, HURST)
+  ! unstructured mesh test
+  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 1, hurst = hurst)
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  CALL SCARF_EXECUTE(SEED, V1, STATS)
+  CALL scarf_execute(seed, v1, stats)
 
-  CALL WATCH_STOP(TICTOC)
+  CALL watch_stop(tictoc)
 
-  CALL MPI_ALLREDUCE(MPI_IN_PLACE, STATS, 8, MPI_REAL, MPI_MAX, MPI_COMM_WORLD, IERR)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-  IF (RANK .EQ. 0) THEN
-    PRINT*, ''
-    PRINT*, 'UNSTRUCTURED MESH TEST COMPLETED IN: ', REAL(TICTOC, REAL32)
-    PRINT*, 'DOMAIN TOO SMALL?                  : ', NINT(STATS(1))
-    PRINT*, 'GRID-STEP TOO LARGE?               : ', NINT(STATS(2))
-    PRINT*, 'STANDARD DEVIATION                 : ', REAL(STATS(3), KIND=REAL32)
-    PRINT*, 'MEAN VALUE                         : ', REAL(STATS(4), KIND=REAL32)
-    PRINT*, 'TIMING FOR CPU EXECUTION           : ', REAL(STATS(5), KIND=REAL32)
-    PRINT*, 'TIMING FOR GPU EXECUTION           : ', REAL(STATS(6), KIND=REAL32)
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) 'Summary unstructured mesh'
+    WRITE(stdout, *) '  i)   test completed in   : ', REAL(tictoc, f_sgle),   ' sec'
+    WRITE(stdout, *) '  ii)  domain too small?   : ', NINT(stats(1))
+    WRITE(stdout, *) '  iii) grid-step too large?: ', NINT(stats(2))
+    WRITE(stdout, *) '  iv)  standard deviation  : ', REAL(stats(3), f_sgle)
+    WRITE(stdout, *) '  vi)  mean value          : ', REAL(stats(4), f_sgle)
+    WRITE(stdout, *) '  vii) CPU main loop       : ', REAL(stats(5), f_sgle), ' sec'
+    WRITE(stdout, *) '  viii)GPU main loop       : ', REAL(stats(6), f_sgle), ' sec'
   ENDIF
 
-  CALL WATCH_START(TICTOC)
+  CALL watch_start(tictoc)
 
-  ! PARAMS%FS = FS
-  ! PARAMS%FE = FE
-
-  ! CALL SCARF_IO(N, 1, 400, V3, 'spec_unstruct_xslice')
-  ! CALL SCARF_IO(N, 2, 250, V3, 'spec_unstruct_yslice')
-  ! CALL SCARF_IO(N, 3, 100, V3, 'spec_unstruct_zslice')
-  !
-  ! CALL WATCH_STOP(TICTOC)
-  !
-  ! IF (RANK .EQ. 0) PRINT*, 'SLICE(S) WRITTEN IN                : ', REAL(TICTOC, REAL32)
-  !
-  ! CALL WATCH_START(TICTOC)
-  !
-  ! CALL SCARF_IO(N, V3, 'spec_unstruct_whole', 3)
-  !
-  ! CALL WATCH_STOP(TICTOC)
-  !
-  ! IF (RANK .EQ. 0) PRINT*, 'WHOLE FILE WRITTEN IN              : ', REAL(TICTOC, REAL32)
-
-  CALL SCARF_FINALIZE()
+  CALL scarf_finalize()
 
 #endif
 
   ! ================================================================================================================================-
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! ALL TESTS DONE, RELEASE MEMORY AND EXIT
+  ! all tests done, release memory and exit
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================-
 
-  NULLIFY(V3, X3, Y3, Z3)
-  DEALLOCATE(V1, X1, Y1, Z1)
+  NULLIFY(v3, x3, y3, z3)
+  DEALLOCATE(v1, x1, y1, z1)
 
-  CALL MPI_BARRIER(MPI_COMM_WORLD, IERR)
+  CALL mpi_barrier(mpi_comm_world, ierr)
 
-  IF (RANK .EQ. 0) THEN
-    PRINT*, ''
-    PRINT*, 'ALL TESTS COMPLETED'
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) 'All tests completed'
   ENDIF
 
-  CALL MPI_FINALIZE(IERR)
+  CALL mpi_finalize(ierr)
 
-END PROGRAM DRIVER
+END PROGRAM driver

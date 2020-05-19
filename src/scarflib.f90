@@ -73,7 +73,7 @@ MODULE m_scarflib
 
       ! Purpose:
       !   To setup most of the parameters needed to compute random fields: structured mesh version. Parameters concerning the external
-      !   grid refer to calling process view.
+      !   grid refer to calling process view. This subroutine acts as an interface with the calling program.
       !
       ! Revisions:
       !     Date                    Description of change
@@ -149,7 +149,7 @@ MODULE m_scarflib
 
       ! Purpose:
       !   To setup most of the parameters needed to compute random fields: unstructured mesh version. Parameters concerning the external
-      !   grid refer to calling process view.
+      !   grid refer to calling process view. This subroutine acts as an interface with the calling program.
       !
       ! Revisions:
       !     Date                    Description of change

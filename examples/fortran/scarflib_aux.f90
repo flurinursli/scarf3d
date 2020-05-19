@@ -1,15 +1,25 @@
-MODULE SCARFLIB_AUX
+MODULE m_scarflib_aux
 
-  !USE, NON_INTRINSIC :: MPI
-  USE, NON_INTRINSIC :: M_SCARFLIB_COMMON
+  ! Purpose:
+  !   To provide routines necessary to set-up a sample driver program.
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !
 
-  IMPLICIT NONE
+  USE, INTRINSIC     :: iso_fortran_env, only: stdout => output_unit
+  USE, NON_INTRINSIC :: m_scarflib_common
+
+  IMPLICIT none
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   PRIVATE
 
-  PUBLIC :: SAMPLE_MESH, WATCH_START, WATCH_STOP
+  PUBLIC :: sample_mesh
+  PUBLIC :: watch_start, watch_stop                      !< these subroutines are defined in "m_scarflib_common"
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -19,253 +29,301 @@ MODULE SCARFLIB_AUX
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE SAMPLE_MESH(RANK, NTASKS, N, FS, FE)
+    SUBROUTINE sample_mesh(rank, ntasks, n, fs, fe)
 
-      INTEGER(f_int),               INTENT(IN)  :: RANK, NTASKS
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: N
-      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: FS, FE
-      INTEGER(f_int)                            :: TOPO, IERR
-      INTEGER(f_int), DIMENSION(3)              :: DIMS, COORDS
+      ! Purpose:
+      !   To create a sample structured mesh to be used in the driver program and to distribute it amonst available processes.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),               INTENT(IN)  :: rank, ntasks
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: n
+      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: fs, fe
+      INTEGER(f_int)                            :: topo, ierr
+      INTEGER(f_int), DIMENSION(3)              :: dims, coords
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! SET GLOBAL VARIABLES IN "SCARFLIB_COMMON" AND NEEDED BY "BEST_CONFIG"
-      WORLD_SIZE = NTASKS
-      NPTS       = N
+      ! set global variables in "scarflib_common" and needed by "best_config"
+      world_size = ntasks
+      npts       = n
 
-      CALL BEST_CONFIG(DIMS)
+      CALL best_config(dims)
 
-      IF (RANK .EQ. 0) PRINT*, 'CPU GRID IN DRIVER PROGRAM: ', DIMS
+      IF (rank .eq. 0) WRITE(stdout, *) 'CPU-grid in driver program: ', dims
 
-      ! CREATE TOPOLOGY
-      CALL MPI_CART_CREATE(MPI_COMM_WORLD, 3, DIMS, [.FALSE., .FALSE., .FALSE.], .TRUE., TOPO, IERR)
+      ! create topology
+      CALL mpi_cart_create(mpi_comm_world, 3, dims, [.false., .false., .false.], .true., topo, ierr)
 
-      CALL MPI_CART_COORDS(TOPO, RANK, 3, COORDS, IERR)
+      CALL mpi_cart_coords(topo, rank, 3, coords, ierr)
 
-      ! SPLIT EACH AXIS AND ASSIGN POINTS TO CURRENT PROCESS
-      CALL MPI_SPLIT_TASK(N, DIMS, COORDS, FS, FE)
+      ! split each axis and assign points to current process
+      CALL mpi_split_task(n, dims, coords, fs, fe)
 
-    END SUBROUTINE SAMPLE_MESH
+    END SUBROUTINE sample_mesh
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE MPI_SPLIT_TASK(N, NTASKS, RANK, FS, FE)
+    SUBROUTINE mpi_split_task(n, ntasks, rank, fs, fe)
 
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: N                          !< NUMBER OF POINTS TO BE SPLIT
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: NTASKS                     !< NUMBER OF MPI PROCESSES
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: RANK                       !< RANK OF CURRENT PREOCESS
-      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: FS, FE                     !< 1ST/LAST INDICES
-      INTEGER(f_int)                            :: I                          !< COUNTER
+      ! Purpose:
+      !   To evenly distribute elements of vector amongst processes, returning first and last index for each process.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: n                          !< number of points to be split
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: ntasks                     !< number of mpi processes
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: rank                       !< rank of current preocess
+      INTEGER(f_int), DIMENSION(3), INTENT(OUT) :: fs, fe                     !< 1st/last indices
+      INTEGER(f_int)                            :: i                          !< counter
 
       !------------------------------------------------------------------------------------------------------------------------------
 
-      DO I = 1, 3
-        FS(I) = 1 + INT( REAL(N(I), f_real) / REAL(NTASKS(I), f_real) * REAL(RANK(I), f_real) )
-        FE(I) = INT( REAL(N(I), f_real) / REAL(NTASKS(I), f_real) * REAL(RANK(I) + 1, f_real) )
+      DO i = 1, 3
+        fs(i) = 1 + INT( REAL(n(i), f_real) / REAL(ntasks(i), f_real) * REAL(rank(i), f_real) )
+        fe(i) = INT( REAL(n(i), f_real) / REAL(ntasks(i), f_real) * REAL(rank(i) + 1, f_real) )
       ENDDO
 
-    END SUBROUTINE MPI_SPLIT_TASK
+    END SUBROUTINE mpi_split_task
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE BEST_CONFIG(DIMS)
+    SUBROUTINE best_config(dims)
 
-      ! COMPUTE BEST GRID OF PROCESSES
+      ! Purpose:
+      ! To return an optimal grid of process according to some specific cost function.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(f_int),              DIMENSION(3), INTENT(OUT) :: DIMS
-      !INTEGER(f_int),                            INTENT(OUT) :: NITER
-
-      INTEGER(f_int)                                         :: I, J, K, L, C
-      INTEGER(f_int)                                         :: N2, N3 !, N
-      INTEGER(f_int)                                         :: A, B
-      INTEGER(f_int),              DIMENSION(3)              :: V1, V2
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: FACT3, FACT2
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: LIST
-
-      REAL(f_real) :: N, NITER
+      INTEGER(f_int),              DIMENSION(3), INTENT(OUT) :: dims
+      INTEGER(f_int)                                         :: i, j, k, l, c
+      INTEGER(f_int)                                         :: n2, n3
+      INTEGER(f_int)                                         :: a, b
+      INTEGER(f_int),              DIMENSION(3)              :: v1, v2
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: fact3, fact2
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)            :: list
+      REAL(f_real)                                           :: val, minimum
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      !NITER = HUGE(1)
-      NITER = HUGE(1._f_real)
+      minimum = HUGE(1._f_real)
 
-      C = 0
+      c = 0
 
-      ! FACTORISE NUMBER OF AVAILABLE PROCESSES
-      CALL FACTORIZATION(WORLD_SIZE, FACT3)
+      ! factorise the number of available processes (return pairs)
+      CALL factorization(world_size, fact3)
 
-      N3 = SIZE(FACT3, 2)
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
+      ! factorise each pair member (thus resulting in a triplet of numbers), evaluate cost function and eventually store triplet
+      ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-      ALLOCATE(LIST(3, N3 * 10))
+      ! number of pairs found
+      n3 = SIZE(fact3, 2)
 
-      LIST(:,:) = 0
+      ! allocate a list where to store all the factorized triplets. Factor of 10 seems to be large enough for 200k processes
+      ALLOCATE(list(3, n3 * 10))
 
-      ! LOOP OVER FACTORISED PROCESSES
-      DO L = 1, N3
+      list(:,:) = 0
 
-        DO K = 1, 2
+      ! loop over factorized processes
+      DO l = 1, n3
 
-          IF (K .EQ. 1) THEN
-            A = FACT3(1, L)
-            B = FACT3(2, L)
+        ! loop over pair members
+        DO k = 1, 2
+
+          IF (k .eq. 1) THEN
+            a = fact3(1, l)
+            b = fact3(2, l)
           ELSE
-            B = FACT3(1, L)
-            A = FACT3(2, L)
+            b = fact3(1, l)
+            a = fact3(2, l)
           ENDIF
 
-          CALL FACTORIZATION(B, FACT2)
+          ! factorization of a number returns a new pair
+          CALL factorization(b, fact2)
 
-          N2 = SIZE(FACT2, 2)
+          n2 = SIZE(fact2, 2)
 
-          DO J = 1, N2
+          ! loop over new pairs
+          DO j = 1, n2
 
-            V1 = [A, FACT2(:, J)]
+            ! build candidate triplet
+            v1 = [a, fact2(:, j)]
 
-            ! SKIP TO NEXT PROCESSES GRID IF ALREADY ANALYSED
-            IF (MATCH(V1, C, LIST) .EQV. .TRUE.) CYCLE
+            ! skip to next pair if current triplet already analysed ("v1" is already in "list")
+            IF (match() .eqv. .true.) CYCLE
 
-            C = C + 1
+            c = c + 1
 
-            ! ADD TO LIST
-            LIST(:, C) = V1
+            ! triplet is new: add it to the list
+            list(:, c) = v1
 
-            DO I = 0, 2
+            ! evaluate cost function for all three possible arrangements (permutations) of the triplet
+            DO i = 0, 2
 
-              V1 = CSHIFT(V1, 1)
+              v1 = CSHIFT(v1, 1)
 
-              CALL TEST_CONFIG(V1, N)
+              ! evaluate cost function
+              CALL cost_fun(v1, val)
 
-              IF (N .LT. NITER) THEN
-                DIMS  = V1
-                NITER = N
+              IF (val .lt. minimum) THEN
+                dims    = v1
+                minimum = val
               ENDIF
 
-              V2 = [V1(1), V1(3), V1(2)]
+              v2 = [v1(1), v1(3), v1(2)]
 
-              CALL TEST_CONFIG(V2, N)
+              CALL cost_fun(v2, val)
 
-              IF (N .LT. NITER) THEN
-                DIMS  = V2
-                NITER = N
+              IF (val .lt. minimum) THEN
+                dims    = v2
+                minimum = val
               ENDIF
 
             ENDDO
-            ! END PERMUTATIONS
+            ! end permutations
 
           ENDDO
-          ! END LOOP OVER FACTOR PAIRS FOR "A/B"
+          ! end loop over factor pairs for "a/b"
 
         ENDDO
-        ! END LOOP OVER "A/B"
+        ! end loop over "a/b"
 
       ENDDO
-      ! END LOOP OVER FACTOR PAIRS FOR "WORLD_SIZE"
+      ! end loop over factor pairs for "world_size"
 
-      DEALLOCATE(FACT3, FACT2, LIST)
+      DEALLOCATE(fact3, fact2, list)
 
       !-----------------------------------------------------------------------------------------------------------------------------
       !-----------------------------------------------------------------------------------------------------------------------------
 
       CONTAINS
 
-      LOGICAL FUNCTION MATCH(VEC, IMAX, LIST)
+      LOGICAL FUNCTION match()
 
-        INTEGER(f_int), DIMENSION(3),   INTENT(IN) :: VEC
-        INTEGER(f_int),                 INTENT(IN) :: IMAX
-        INTEGER(f_int), DIMENSION(:,:), INTENT(IN) :: LIST
-        INTEGER(f_int)                             :: I
+        INTEGER(f_int) :: i
 
         !---------------------------------------------------------------------------------------------------------------------------
 
-        MATCH = .FALSE.
+        match = .false.
 
-        DO I = 1, IMAX
-          MATCH = ANY(V1(1) .EQ. LIST(:, I)) .AND. ANY(V1(2) .EQ. LIST(:, I)) .AND. ANY(V1(3) .EQ. LIST(:, I))
-          IF (MATCH .EQV. .TRUE.) EXIT
+        DO i = 1, c
+          match = ANY(v1(1) .eq. list(:, i)) .and. ANY(v1(2) .eq. list(:, i)) .and. ANY(v1(3) .eq. list(:, i))
+          IF (match .eqv. .true.) EXIT
         ENDDO
 
-      END FUNCTION MATCH
+      END FUNCTION match
 
-    END SUBROUTINE BEST_CONFIG
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    SUBROUTINE TEST_CONFIG(DIMS, MEASURE)
-
-      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: DIMS
-      REAL(f_real),                  INTENT(OUT) :: MEASURE
-      REAL(f_real),    DIMENSION(3)              :: SIDE
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      SIDE = REAL(NPTS, f_real) / REAL(DIMS, f_real)
-
-      MEASURE = ABS(SIDE(1) - SIDE(2)) + ABS(SIDE(1) - SIDE(3)) + ABS(SIDE(2) - SIDE(3))
-
-    END SUBROUTINE TEST_CONFIG
+    END SUBROUTINE best_config
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE FACTORIZATION(N, FACTORS)
+    SUBROUTINE cost_fun(dims, measure)
 
-      ! FACTORISE INTEGER "N" BASED ON TRIAL DIVISION METHOD
+      ! Purpose:
+      ! To return a cost estimate based on the size of a grid block assigned to each process, where the cost is represented by differences
+      ! along each side (the goal is to having blocks in shape of cubes).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
 
-      INTEGER(f_int),                              INTENT(IN)  :: N
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: FACTORS
-      INTEGER(f_int)                                           :: I, C, S
-      INTEGER(f_int)                                           :: X
-      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)              :: BUFFER
+      INTEGER(f_int), DIMENSION(3), INTENT(IN)  :: dims           !< processes in each direction
+      REAL(f_real),                 INTENT(OUT) :: measure        !< cost
+      REAL(f_real),   DIMENSION(3)              :: side           !< grid nodes in a block along each direction
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! MAX POSSIBLE FACTOR
-      S = FLOOR(SQRT(REAL(N, f_real)))
+      side = REAL(npts, f_real) / REAL(dims, f_real)
 
-      ALLOCATE(BUFFER(2, S))
+      measure = ABS(side(1) - side(2)) + ABS(side(1) - side(3)) + ABS(side(2) - side(3))
 
-      BUFFER(:,:) = 0
+    END SUBROUTINE cost_fun
 
-      ! TEST FACTORS
-      DO I = 1, S
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-        X = N / I
+    SUBROUTINE factorization(n, factors)
 
-        IF (MOD(N, I) .EQ. 0) THEN
-          BUFFER(1, I) = I                          !< ADD FACTOR ...
-          BUFFER(2, I) = X                          !< ... AND ITS COMPANION
+      ! Purpose:
+      ! To compute the factorization of an integer number based on the trial division method. For example, for "n=12" the output looks
+      ! like "[1 12; 2 6; 3 4]"
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),                              INTENT(IN)  :: n
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:), INTENT(OUT) :: factors
+      INTEGER(f_int)                                           :: i, c, s
+      INTEGER(f_int)                                           :: x
+      INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)              :: buffer
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! max possible number of factors
+      s = FLOOR(SQRT(REAL(n, f_real)))
+
+      ALLOCATE(buffer(2, s))
+
+      buffer(:,:) = 0
+
+      ! test factors
+      DO i = 1, s
+
+        x = n / i
+
+        IF (MOD(n, i) .eq. 0) THEN
+          buffer(1, i) = i                          !< add factor ...
+          buffer(2, i) = x                          !< ... and its companion
         ENDIF
 
       ENDDO
 
-      ! ACTUAL FACTORS FOUND
-      I = COUNT(BUFFER(1, :) .NE. 0)
+      ! actual factors found
+      i = COUNT(buffer(1, :) .ne. 0)
 
-      ALLOCATE(FACTORS(2, I))
+      ALLOCATE(factors(2, i))
 
-      ! COPY FACTORS TO OUTPUT ARRAY
-      C = 0
-      DO I = 1, S
-        IF (BUFFER(1, I) .NE. 0) THEN
-          C = C + 1
-          FACTORS(:, C) = BUFFER(:, I)
+      ! copy factors to output array
+      c = 0
+      DO i = 1, s
+        IF (buffer(1, i) .ne. 0) THEN
+          c = c + 1
+          factors(:, c) = buffer(:, i)
         ENDIF
       ENDDO
 
-      DEALLOCATE(BUFFER)
+      DEALLOCATE(buffer)
 
-    END SUBROUTINE FACTORIZATION
+    END SUBROUTINE factorization
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
 
-END MODULE SCARFLIB_AUX
+END MODULE m_scarflib_aux

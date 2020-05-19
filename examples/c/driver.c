@@ -35,16 +35,16 @@ int main(){
   const int n[3] = {500, 500, 500};
 
   // grid-step
-  const fpp ds = 50.;
+  const real ds = 50.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const fpp cl[3] = {2000., 2000., 2000.};
+  const real cl[3] = {2000., 2000., 2000.};
 
   // standard deviation
-  const fpp sigma = 0.05;
+  const real sigma = 0.05;
 
   // seed number
   const int seed = 1235;
@@ -53,7 +53,7 @@ int main(){
   // ---------------------------------------------------------------------------
   // Add extra parameters
 
-  const fpp hurst = 0.25;
+  const real hurst = 0.25;
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
@@ -70,10 +70,10 @@ int main(){
     dims[i] = (fe[i] - fs[i] + 1);
   }
 
-  fpp* x     = (fpp*) malloc(dims[0]*dims[1]*dims[2] * sizeof(fpp));
-  fpp* y     = (fpp*) malloc(dims[0]*dims[1]*dims[2] * sizeof(fpp));
-  fpp* z     = (fpp*) malloc(dims[0]*dims[1]*dims[2] * sizeof(fpp));
-  fpp* field = (fpp*) malloc(dims[0]*dims[1]*dims[2] * sizeof(fpp));
+  real* x     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  real* y     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  real* z     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  real* field = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
 
   long c;
 
@@ -90,13 +90,19 @@ int main(){
 
   const int npts = dims[0] * dims[1] * dims[2];
 
-  fpp stats[8];
+  real stats[8];
 
   double tictoc;
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
   // FFT method test
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("************************************************************\n");
+    printf("************************ FIM method ************************\n");
+  }
 
   struct scarf_opt options;
 
@@ -112,15 +118,16 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Structured Mesh Test completed in: %f\n", (float) tictoc);
-    printf("Domain too small?                : %d\n", (int) stats[0]);
-    printf("Grid-step too large?             : %d\n", (int) stats[1]);
-    printf("Standard deviation               : %f\n", (float) stats[2]);
-    printf("Mean value                       : %f\n", (float) stats[3]);
-    printf("Timing for spectrum              : %f\n", (float) stats[4]);
-    printf("Timing for symmetry              : %f\n", (float) stats[5]);
-    printf("Timing for IFFT                  : %f\n", (float) stats[6]);
-    printf("Timing for interpolation         : %f\n", (float) stats[7]);
+    printf("Summary structured mesh\n");
+    printf("  i)   test completed in       : %f sec\n", (float) tictoc);
+    printf("  ii)  domain too small?       : %d\n", (int) stats[0]);
+    printf("  iii) grid-step too large?    : %d\n", (int) stats[1]);
+    printf("  iv)  standard deviation      : %f\n", (float) stats[2]);
+    printf("  v)   mean value              : %f\n", (float) stats[3]);
+    printf("  vi)  timing for spectrum     : %f sec\n", (float) stats[4]);
+    printf("  vii) timing for symmetry     : %f sec\n", (float) stats[5]);
+    printf("  viii)timing for ifft         : %f sec\n", (float) stats[6]);
+    printf("  ix)  timing for interpolation: %f sec\n", (float) stats[7]);
   }
 
   // IO
@@ -131,7 +138,7 @@ int main(){
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("Slice(s) written in              : %f\n", (float) tictoc);
+    printf("  x)   slice(s) written in     : %f sec\n", (float) tictoc);
   }
 
   int nwriters[1] = {3};
@@ -141,7 +148,7 @@ int main(){
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("Whole file written in            : %f\n", (float) tictoc);
+    printf("  xi)  whole file written in   : %f sec\n", (float) tictoc);
   }
 
   scarf_finalize();
@@ -156,15 +163,16 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Unstructured Mesh Test completed in: %f\n", (float) tictoc);
-    printf("Domain too small?                  : %d\n", (int) stats[0]);
-    printf("Grid-step too large?               : %d\n", (int) stats[1]);
-    printf("Standard deviation                 : %f\n", (float) stats[2]);
-    printf("Mean value                         : %f\n", (float) stats[3]);
-    printf("Timing for spectrum                : %f\n", (float) stats[4]);
-    printf("Timing for symmetry                : %f\n", (float) stats[5]);
-    printf("Timing for IFFT                    : %f\n", (float) stats[6]);
-    printf("Timing for interpolation           : %f\n", (float) stats[7]);
+    printf("Summary unstructured mesh\n");
+    printf("  i)   test completed in       : %f sec\n", (float) tictoc);
+    printf("  ii)  domain too small?       : %d\n", (int) stats[0]);
+    printf("  iii) grid-step too large?    : %d\n", (int) stats[1]);
+    printf("  iv)  standard deviation      : %f\n", (float) stats[2]);
+    printf("  v)   mean value              : %f\n", (float) stats[3]);
+    printf("  vi)  timing for spectrum     : %f sec\n", (float) stats[4]);
+    printf("  vii) timing for symmetry     : %f sec\n", (float) stats[5]);
+    printf("  viii)timing for ifft         : %f sec\n", (float) stats[6]);
+    printf("  ix)  timing for interpolation: %f sec\n", (float) stats[7]);
   }
 
   scarf_finalize();
@@ -174,6 +182,12 @@ int main(){
   // SPEC method test
 
 #ifdef SPECTRAL
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("************************************************************\n");
+    printf("************************ SRM method ************************\n");
+  }
 
   scarf_opt_init(&options);
 
@@ -187,13 +201,14 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Structured Mesh Test completed in: %f\n", (float) tictoc);
-    printf("Domain too small?                : %d\n", (int) stats[0]);
-    printf("Grid-step too large?             : %d\n", (int) stats[1]);
-    printf("Standard deviation               : %f\n", (float) stats[2]);
-    printf("Mean value                       : %f\n", (float) stats[3]);
-    printf("Timing for CPU execution         : %f\n", (float) stats[4]);
-    printf("Timing for GPU execution         : %f\n", (float) stats[5]);
+    printf("Summary structured mesh\n");
+    printf("  i)   test completed in    : %f sec\n", (float) tictoc);
+    printf("  ii)  domain too small?    : %d\n", (int) stats[0]);
+    printf("  iii) grid-step too large? : %d\n", (int) stats[1]);
+    printf("  iv)  standard deviation   : %f\n", (float) stats[2]);
+    printf("  v)   mean value           : %f\n", (float) stats[3]);
+    printf("  vi)  CPU main loop        : %f sec\n", (float) stats[4]);
+    printf("  vii) GPU main loop        : %f sec\n", (float) stats[5]);
   }
 
   // IO
@@ -204,7 +219,7 @@ int main(){
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("Slice(s) written in              : %f\n", (float) tictoc);
+    printf("  viii)slice(s) written in  : %f sec\n", (float) tictoc);
   }
 
   watch_start(&tictoc);
@@ -212,7 +227,7 @@ int main(){
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("Whole file written in            : %f\n", (float) tictoc);
+    printf("  ix)  whole file written in: %f sec\n", (float) tictoc);
   }
 
   scarf_finalize();
@@ -225,13 +240,14 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Unstructured Mesh Test completed in: %f\n", (float) tictoc);
-    printf("Domain too small?                  : %d\n", (int) stats[0]);
-    printf("Grid-step too large?               : %d\n", (int) stats[1]);
-    printf("Standard deviation                 : %f\n", (float) stats[2]);
-    printf("Mean value                         : %f\n", (float) stats[3]);
-    printf("Timing for CPU execution           : %f\n", (float) stats[4]);
-    printf("Timing for GPU execution           : %f\n", (float) stats[5]);
+    printf("Summary unstructured mesh\n");
+    printf("  i)   test completed in    : %f sec\n", (float) tictoc);
+    printf("  ii)  domain too small?    : %d\n", (int) stats[0]);
+    printf("  iii) grid-step too large? : %d\n", (int) stats[1]);
+    printf("  iv)  standard deviation   : %f\n", (float) stats[2]);
+    printf("  v)   mean value           : %f\n", (float) stats[3]);
+    printf("  vi)  CPU main loop        : %f sec\n", (float) stats[4]);
+    printf("  vii) GPU main loop        : %f sec\n", (float) stats[5]);
   }
 
   scarf_finalize();

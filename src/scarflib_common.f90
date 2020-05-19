@@ -69,7 +69,7 @@ MODULE m_scarflib_common
   INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)           :: gs, ge
 
   ! variables
-  REAL(f_dble),                               PARAMETER :: pi = 3.141592653589793_f_dble
+  REAL(f_real),                               PARAMETER :: pi = 3.141592653589793_f_real
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
@@ -343,7 +343,7 @@ MODULE m_scarflib_common
         ! loop until all data are received
         DO j = 0, maxtasks - 1
 
-          ! stop receiving IF we have already collected all data for "newcomm"
+          ! stop receiving if we have already collected all data for "newcomm"
           IF (j .le. ntasks - 1) THEN
 
             ! receive data
