@@ -585,14 +585,6 @@ MODULE m_scarflib_fim
       min_extent = bar - diagonal
       max_extent = bar + diagonal
 
-      ! baricenter after rotation
-      obar = MATMUL(matrix, bar)
-
-      ! translation vector to rotate around baricenter in original reference frame
-      bar = bar - obar
-
-      IF (world_rank == 0) print*, 'bar: ', bar
-
 !***
 
 
@@ -629,6 +621,25 @@ MODULE m_scarflib_fim
 
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
       IF (ANY(dh .gt. cl / 2._f_real)) info(2) = 1._f_real
+
+
+!***
+
+      bar = bar + offset
+
+      ! baricenter after rotation
+      obar = MATMUL(matrix, bar)
+
+      ! translation vector to rotate around baricenter in original reference frame
+      bar = bar - obar
+
+      IF (world_rank == 0) print*, 'bar: ', bar
+
+
+!***
+
+
+
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
