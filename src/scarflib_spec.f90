@@ -59,7 +59,7 @@ MODULE m_scarflib_srm
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! number of harmonics in spectral summation
-  INTEGER(f_int), PARAMETER :: nharm = 20000
+  INTEGER(f_int), PARAMETER :: nharm = 10000
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -411,11 +411,14 @@ MODULE m_scarflib_srm
     REAL(f_real)                                               :: v1, v2, v3
     REAL(f_real)                                               :: a, b, arg
     REAL(f_real)                                               :: x, y, z
+    REAL(f_real)                                               :: calpha, salpha, cbeta, sbeta, cgamma, sgamma
     REAL(f_dble)                                               :: tictoc
     REAL(c_real),                DIMENSION(2)                  :: r
     REAL(f_real),                DIMENSION(3)                  :: span
     REAL(f_real),                DIMENSION(3)                  :: min_extent, max_extent
+    REAL(f_real),                DIMENSION(3)                  :: bar, obar
     REAL(f_real),   ALLOCATABLE, DIMENSION(:)                  :: mu, var
+    REAL(f_real),                DIMENSION(3,3)                :: matrix
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
@@ -495,9 +498,35 @@ MODULE m_scarflib_srm
     ! compute random field directly at each grid point. Use uniform distribution in the range [0 1] as majorant function.
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    ! angle about z-axis
+    calpha = cos(20._f_real * pi / 180._f_real)
+    salpha = sin(20._f_real * pi / 180._f_real)
+
+    ! angle about y-axis
+    cbeta = cos(0._f_real * pi / 180._f_real)
+    sbeta = sin(0._f_real * pi / 180._f_real)
+
+    ! angle about x-axis
+    cgamma = cos(0._f_real * pi / 180._f_real)
+    sgamma = sin(0._f_real * pi / 180._f_real)
+
+    matrix(:, 1) = [calpha*cbeta, salpha*cbeta, -sbeta]
+    matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
+    matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
+
+    ! baricenter in original reference frame
+    bar = (max_extent - min_extent) / 2._f_real
+
+    ! baricenter after rotation
+    obar = MATMUL(matrix, bar)
+
+    ! translation vector to rotate around baricenter in original reference frame
+    bar = bar - obar
+
+
     ! loop over harmonics
     ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
-    !$acc data copy(field) copyin(ds, scaling, npts, fs, a, b, v1, v2, v3)
+    !$acc data copy(field) copyin(ds, scaling, npts, fs, a, b, v1, v2, v3, matrix, bar)
     DO l = 1, nharm
 
 #ifdef TIMING
@@ -572,7 +601,10 @@ MODULE m_scarflib_srm
             x              = (i + fs(1) - 2) * ds
             y              = (j + fs(2) - 2) * ds
             z              = (k + fs(3) - 2) * ds
-            arg            = v1 * x + v2 * y + v3 * z
+            !arg            = v1 * (x * calpha + z * salpha) + v2 * y + v3 * (-x * salpha + z * calpha)
+            arg            = v1 * ((matrix(1,1)*x + matrix(1,2)*y + matrix(1,3)*z) + bar(1)) +   &
+                             v2 * ((matrix(2,1)*x + matrix(2,2)*y + matrix(2,3)*z) + bar(2)) +   &
+                             v3 * ((matrix(3,1)*x + matrix(3,2)*y + matrix(3,3)*z) + bar(3))
             field(i, j, k) = field(i, j, k) + a * SIN(arg) + b * COS(arg)
           ENDDO
         ENDDO

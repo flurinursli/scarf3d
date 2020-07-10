@@ -49,7 +49,7 @@ PROGRAM driver
 
   ! number of points for whole model
   !n = [2000*2, 3200*2, 1200*2]
-  n = [500, 500, 500]
+  n = [500, 450, 400]
 
   ! grid step
   ds = 50._f_real
@@ -60,7 +60,7 @@ PROGRAM driver
   acf = 0
 
   ! correlation length
-  cl = [2000._f_real, 2000._f_real, 2000._f_real]
+  cl = [2000._f_real, 500._f_real, 200._f_real]
 
   ! standard deviation (sigma%/100)
   sigma = 0.05_f_real
@@ -208,7 +208,7 @@ PROGRAM driver
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================-
 
-#ifdef spectral
+#ifdef SPECTRAL
 
   IF (rank .eq. 0) WRITE(stdout, *) ''
   IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'

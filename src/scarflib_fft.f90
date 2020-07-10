@@ -91,6 +91,9 @@ MODULE m_scarflib_fim
   ! absolute position of model's first point
   REAL(f_real),                DIMENSION(3)             :: off_axis
 
+  REAL(f_real),                DIMENSION(3)             :: bar
+  REAL(f_real),                DIMENSION(3,3)           :: matrix
+
   ! pointer for fourier transform
   COMPLEX(c_cplx),             DIMENSION(:), POINTER    :: cdum => NULL()
 
@@ -494,11 +497,14 @@ MODULE m_scarflib_fim
       INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                  :: npoints
       LOGICAL,                      DIMENSION(3)                  :: bool
       REAL(f_real)                                                :: scaling
+      REAL(f_real)                                                :: calpha, salpha, cbeta, sbeta, cgamma, sgamma
       REAL(f_dble)                                                :: tictoc
       REAL(f_real),                 DIMENSION(2)                  :: et
       REAL(f_real),                 DIMENSION(3)                  :: min_extent
       REAL(f_real),                 DIMENSION(3)                  :: max_extent
       REAL(f_real),                 DIMENSION(3)                  :: pt
+      REAL(f_real),                 DIMENSION(3)                  :: diagonal, obar
+      REAL(f_real),                 DIMENSION(8)                  :: x, y, z
       REAL(f_real),    ALLOCATABLE, DIMENSION(:)                  :: var, mu
       REAL(f_real),    ALLOCATABLE, DIMENSION(:,:,:)              :: delta, buffer
 
@@ -545,6 +551,50 @@ MODULE m_scarflib_fim
       ! (global) model limits
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
+
+
+
+!***
+
+      ! angle about z-axis
+      calpha = cos(0._f_real * pi / 180._f_real)
+      salpha = sin(0._f_real * pi / 180._f_real)
+
+      ! angle about y-axis
+      cbeta = cos(0._f_real * pi / 180._f_real)
+      sbeta = sin(0._f_real * pi / 180._f_real)
+
+      ! angle about x-axis
+      cgamma = cos(0._f_real * pi / 180._f_real)
+      sgamma = sin(0._f_real * pi / 180._f_real)
+
+      matrix(:, 1) = [calpha*cbeta, salpha*cbeta, -sbeta]
+      matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
+      matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
+
+      ! baricenter in original reference frame
+      bar = (max_extent - min_extent) / 2._f_real
+
+      ! space diagonal
+      diagonal = SQRT( (bar(1) - min_extent(1))**2 + (bar(2) - min_extent(2))**2 + (bar(3) - min_extent(3))**2 )
+
+      ! half space diagonal is radius of inscribed sphere
+      diagonal = diagonal / 2._f_real
+
+      ! set new nc/fc
+      min_extent = bar - diagonal
+      max_extent = bar + diagonal
+
+      ! baricenter after rotation
+      obar = MATMUL(matrix, bar)
+
+      ! translation vector to rotate around baricenter in original reference frame
+      bar = bar - obar
+
+      IF (world_rank == 0) print*, 'bar: ', bar
+
+!***
+
 
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
@@ -615,8 +665,53 @@ MODULE m_scarflib_fim
       ALLOCATE(points_world2rank(0:world_size - 1), points_rank2world(0:world_size - 1))
 
       ! min/max internal grid index containing input points
-      ps = FLOOR(((fs - 1) * ds - off_axis) / dh) + 1
-      pe = FLOOR(((fe - 1) * ds - off_axis) / dh) + 1
+      !ps = FLOOR(((fs - 1) * ds - off_axis) / dh) + 1
+      !pe = FLOOR(((fe - 1) * ds - off_axis) / dh) + 1
+
+!***
+
+      ASSOCIATE(m => matrix, o => off_axis)
+        x(1) = m(1,1)*((fs(1) - 1)*ds - o(1)) + m(1,2)*((fs(2) - 1)*ds - o(2)) + m(1,3)*((fs(3) - 1)*ds - o(3))
+        x(2) = m(1,1)*((fe(1) - 1)*ds - o(1)) + m(1,2)*((fs(2) - 1)*ds - o(2)) + m(1,3)*((fs(3) - 1)*ds - o(3))
+        x(3) = m(1,1)*((fe(1) - 1)*ds - o(1)) + m(1,2)*((fe(2) - 1)*ds - o(2)) + m(1,3)*((fs(3) - 1)*ds - o(3))
+        x(4) = m(1,1)*((fs(1) - 1)*ds - o(1)) + m(1,2)*((fe(2) - 1)*ds - o(2)) + m(1,3)*((fs(3) - 1)*ds - o(3))
+        x(5) = m(1,1)*((fs(1) - 1)*ds - o(1)) + m(1,2)*((fs(2) - 1)*ds - o(2)) + m(1,3)*((fe(3) - 1)*ds - o(3))
+        x(6) = m(1,1)*((fe(1) - 1)*ds - o(1)) + m(1,2)*((fs(2) - 1)*ds - o(2)) + m(1,3)*((fe(3) - 1)*ds - o(3))
+        x(7) = m(1,1)*((fe(1) - 1)*ds - o(1)) + m(1,2)*((fe(2) - 1)*ds - o(2)) + m(1,3)*((fe(3) - 1)*ds - o(3))
+        x(8) = m(1,1)*((fs(1) - 1)*ds - o(1)) + m(1,2)*((fe(2) - 1)*ds - o(2)) + m(1,3)*((fe(3) - 1)*ds - o(3))
+
+        y(1) = m(2,1)*((fs(1) - 1)*ds - o(1)) + m(2,2)*((fs(2) - 1)*ds - o(2)) + m(2,3)*((fs(3) - 1)*ds - o(3))
+        y(2) = m(2,1)*((fe(1) - 1)*ds - o(1)) + m(2,2)*((fs(2) - 1)*ds - o(2)) + m(2,3)*((fs(3) - 1)*ds - o(3))
+        y(3) = m(2,1)*((fe(1) - 1)*ds - o(1)) + m(2,2)*((fe(2) - 1)*ds - o(2)) + m(2,3)*((fs(3) - 1)*ds - o(3))
+        y(4) = m(2,1)*((fs(1) - 1)*ds - o(1)) + m(2,2)*((fe(2) - 1)*ds - o(2)) + m(2,3)*((fs(3) - 1)*ds - o(3))
+        y(5) = m(2,1)*((fs(1) - 1)*ds - o(1)) + m(2,2)*((fs(2) - 1)*ds - o(2)) + m(2,3)*((fe(3) - 1)*ds - o(3))
+        y(6) = m(2,1)*((fe(1) - 1)*ds - o(1)) + m(2,2)*((fs(2) - 1)*ds - o(2)) + m(2,3)*((fe(3) - 1)*ds - o(3))
+        y(7) = m(2,1)*((fe(1) - 1)*ds - o(1)) + m(2,2)*((fe(2) - 1)*ds - o(2)) + m(2,3)*((fe(3) - 1)*ds - o(3))
+        y(8) = m(2,1)*((fs(1) - 1)*ds - o(1)) + m(2,2)*((fe(2) - 1)*ds - o(2)) + m(2,3)*((fe(3) - 1)*ds - o(3))
+
+        z(1) = m(3,1)*((fs(1) - 1)*ds - o(1)) + m(3,2)*((fs(2) - 1)*ds - o(2)) + m(3,3)*((fs(3) - 1)*ds - o(3))
+        z(2) = m(3,1)*((fe(1) - 1)*ds - o(1)) + m(3,2)*((fs(2) - 1)*ds - o(2)) + m(3,3)*((fs(3) - 1)*ds - o(3))
+        z(3) = m(3,1)*((fe(1) - 1)*ds - o(1)) + m(3,2)*((fe(2) - 1)*ds - o(2)) + m(3,3)*((fs(3) - 1)*ds - o(3))
+        z(4) = m(3,1)*((fs(1) - 1)*ds - o(1)) + m(3,2)*((fe(2) - 1)*ds - o(2)) + m(3,3)*((fs(3) - 1)*ds - o(3))
+        z(5) = m(3,1)*((fs(1) - 1)*ds - o(1)) + m(3,2)*((fs(2) - 1)*ds - o(2)) + m(3,3)*((fe(3) - 1)*ds - o(3))
+        z(6) = m(3,1)*((fe(1) - 1)*ds - o(1)) + m(3,2)*((fs(2) - 1)*ds - o(2)) + m(3,3)*((fe(3) - 1)*ds - o(3))
+        z(7) = m(3,1)*((fe(1) - 1)*ds - o(1)) + m(3,2)*((fe(2) - 1)*ds - o(2)) + m(3,3)*((fe(3) - 1)*ds - o(3))
+        z(8) = m(3,1)*((fs(1) - 1)*ds - o(1)) + m(3,2)*((fe(2) - 1)*ds - o(2)) + m(3,3)*((fe(3) - 1)*ds - o(3))
+      END ASSOCIATE
+
+      x = x + bar(1)
+      y = y + bar(2)
+      z = z + bar(3)
+
+      ps(1) = FLOOR(MINVAL(x, dim = 1) / dh) + 1
+      pe(1) = FLOOR(MAXVAL(x, dim = 1) / dh) + 1
+      ps(2) = FLOOR(MINVAL(y, dim = 1) / dh) + 1
+      pe(2) = FLOOR(MAXVAL(y, dim = 1) / dh) + 1
+      ps(3) = FLOOR(MINVAL(z, dim = 1) / dh) + 1
+      pe(3) = FLOOR(MAXVAL(z, dim = 1) / dh) + 1
+
+!***
+
 
       points_rank2world = 0
 
@@ -1299,15 +1394,15 @@ MODULE m_scarflib_fim
 
       ! transform point coordinates into grid indices
       DO k0 = p0(3), p1(3)
-        z(k0) = ((fs(3) - 1 + k0 - 1) * ds - off_axis(3)) / dh + 3._f_real
+        z(k0) = ((fs(3) - 1 + k0 - 1) * ds - off_axis(3)) !/ dh + 3._f_real
       ENDDO
 
       DO j0 = p0(2), p1(2)
-        y(j0) = ((fs(2) - 1 + j0 - 1) * ds - off_axis(2)) / dh + 3._f_real
+        y(j0) = ((fs(2) - 1 + j0 - 1) * ds - off_axis(2)) !/ dh + 3._f_real
       ENDDO
 
       DO i0 = p0(1), p1(1)
-        x(i0) = ((fs(1) - 1 + i0 - 1) * ds - off_axis(1)) / dh + 3._f_real
+        x(i0) = ((fs(1) - 1 + i0 - 1) * ds - off_axis(1)) !/ dh + 3._f_real
       ENDDO
 
       sendcounts(:) = 0
@@ -1330,15 +1425,19 @@ MODULE m_scarflib_fim
 
         DO k0 = p0(3), p1(3)
 
-          k = z(k0) - const(3)
+          !k = z(k0) - const(3)
 
           DO j0 = p0(2), p1(2)
 
-            j = y(j0) - const(2)
+            !j = y(j0) - const(2)
 
             DO i0 = p0(1), p1(1)
 
-              i = x(i0) - const(1)
+              !i = x(i0) - const(1)
+
+              i = ((matrix(1,1)*x(i0) + matrix(1,2)*y(j0) + matrix(1,3)*z(k0)) + bar(1)) / dh + 3._f_real - const(1)
+              j = ((matrix(2,1)*x(i0) + matrix(2,2)*y(j0) + matrix(2,3)*z(k0)) + bar(2)) / dh + 3._f_real - const(2)
+              k = ((matrix(3,1)*x(i0) + matrix(3,2)*y(j0) + matrix(3,3)*z(k0)) + bar(3)) / dh + 3._f_real - const(3)
 
               ! check if point is within block of l-th process
               bool = (i .ge. 1) .and. (i .lt. m(1)) .and. (j .ge. 1) .and. (j .lt. m(2)) .and. (k .ge. 1) .and. (k .lt. m(3))
