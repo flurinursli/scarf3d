@@ -557,8 +557,8 @@ MODULE m_scarflib_fim
 !***
 
       ! angle about z-axis
-      calpha = cos(0._f_real * pi / 180._f_real)
-      salpha = sin(0._f_real * pi / 180._f_real)
+      calpha = cos(20._f_real * pi / 180._f_real)
+      salpha = sin(20._f_real * pi / 180._f_real)
 
       ! angle about y-axis
       cbeta = cos(0._f_real * pi / 180._f_real)
@@ -575,15 +575,14 @@ MODULE m_scarflib_fim
       ! baricenter in original reference frame
       bar = (max_extent - min_extent) / 2._f_real
 
-      ! space diagonal
+      ! half space diagonal
       diagonal = SQRT( (bar(1) - min_extent(1))**2 + (bar(2) - min_extent(2))**2 + (bar(3) - min_extent(3))**2 )
-
-      ! half space diagonal is radius of inscribed sphere
-      diagonal = diagonal / 2._f_real
 
       ! set new nc/fc
       min_extent = bar - diagonal
       max_extent = bar + diagonal
+
+      if (world_rank == 0) print*, 'diagonal ', diagonal, ' -- ', bar
 
 !***
 
