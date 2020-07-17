@@ -30,16 +30,16 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {500, 500, 500};
+  const int n[3] = {500, 450, 400};
 
   // grid-step
-  const real ds = 50.;
+  const real ds = 20.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const real cl[3] = {2000., 2000., 2000.};
+  const real cl[3] = {2000., 200., 100.};
 
   // standard deviation
   const real sigma = 0.05;
@@ -118,6 +118,8 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    Scarf3D::options.alpha = 30;
+    Scarf3D::options.beta  = 20;
     //Scarf3D::options.dh    = dh;
 
     //Scarf3D::options.nc = x0;
@@ -171,6 +173,7 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+
     //Scarf3D::options.ds    = ds;
 
     //Scarf3D::options.nc = x0;
@@ -218,6 +221,8 @@ int main(){
 
     Scarf3D::options.hurst = hurst;
 
+    Scarf3D::options.alpha = 20;
+
     Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
@@ -264,6 +269,9 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+
+    Scarf3D::options.alpha = 50;
+    Scarf3D::options.gamma = 10;
 
     Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma);
 

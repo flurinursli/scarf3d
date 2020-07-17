@@ -69,7 +69,8 @@ MODULE m_scarflib_srm
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE scarf3d_unstructured_srm(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, field, info)
+  SUBROUTINE scarf3d_unstructured_srm(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, alpha,  &
+                                      beta, gamma, field, info)
 
     ! Purpose:
     ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
@@ -96,6 +97,9 @@ MODULE m_scarflib_srm
     REAL(f_real),                                INTENT(IN)  :: mute         !< radius for muting
     REAL(f_real),                                INTENT(IN)  :: taper        !< radius for tapering
     INTEGER(f_int),                              INTENT(IN)  :: rescale      !< flag for rescaling random field to desired sigma
+    REAL(f_real),                                INTENT(IN)  :: alpha        !< angle about z-axis
+    REAL(f_real),                                INTENT(IN)  :: beta         !< angle about y-axis
+    REAL(f_real),                                INTENT(IN)  :: gamma        !< angle about x-axis
     REAL(f_real),                DIMENSION(:),   INTENT(OUT) :: field        !< random field at x,y,z location
     REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and TIMING for performance analysis
     INTEGER(f_int)                                           :: i, l
@@ -109,11 +113,16 @@ MODULE m_scarflib_srm
     REAL(f_real)                                             :: phi, theta
     REAL(f_real)                                             :: v1, v2, v3
     REAL(f_real)                                             :: a, b, arg
+    REAL(f_real)                                             :: calpha, salpha
+    REAL(f_real)                                             :: cbeta, sbeta
+    REAL(f_real)                                             :: cgamma, sgamma
     REAL(f_dble)                                             :: tictoc
     REAL(c_real),                DIMENSION(2)                :: r
     REAL(f_real),                DIMENSION(3)                :: span
     REAL(f_real),                DIMENSION(3)                :: min_extent, max_extent
+    REAL(f_real),                DIMENSION(3)                :: bar, obar
     REAL(f_real),   ALLOCATABLE, DIMENSION(:)                :: mu, var
+    REAL(f_real),                DIMENSION(3,3)              :: matrix
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
@@ -136,6 +145,9 @@ MODULE m_scarflib_srm
       print*, 'poi ', SIZE(poi)
       print*, 'mute ', mute
       print*, 'taper ', taper
+      print*, 'alpha ', alpha
+      print*, 'beta ', beta
+      print*, 'gamma ', gamma
     ENDIF
     CALL mpi_barrier(mpi_comm_world, ierr)
 
@@ -192,9 +204,34 @@ MODULE m_scarflib_srm
     ! compute random field directly at each grid point. USE uniform distribution in the range [0 1] as majorant function.
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    ! angle about z-axis
+    calpha = cos(alpha * pi / 180._f_real)
+    salpha = sin(alpha * pi / 180._f_real)
+
+    ! angle about y-axis
+    cbeta = cos(beta * pi / 180._f_real)
+    sbeta = sin(beta * pi / 180._f_real)
+
+    ! angle about x-axis
+    cgamma = cos(gamma * pi / 180._f_real)
+    sgamma = sin(gamma * pi / 180._f_real)
+
+    matrix(:, 1) = [calpha*cbeta                       , salpha*cbeta                       , -sbeta      ]
+    matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
+    matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
+
+    ! baricenter in original reference frame
+    bar = (max_extent - min_extent) / 2._f_real
+
+    ! baricenter after rotation
+    obar = MATMUL(matrix, bar)
+
+    ! translation vector to rotate around baricenter in original reference frame
+    bar = bar - obar
+
     ! loop over harmonics
     ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
-    !$acc data copy(field) copyin(x, y, z, scaling, npts, a, b, v1, v2, v3)
+    !$acc data copy(field) copyin(x, y, z, scaling, npts, a, b, v1, v2, v3, bar, matrix)
     DO l = 1, nharm
 
 #ifdef TIMING
@@ -271,7 +308,10 @@ MODULE m_scarflib_srm
       !$acc kernels async
       !$acc loop independent private(arg)
       DO i = 1, npts
-        arg = v1 * x(i) + v2 * y(i) + v3 * z(i)
+        !arg = v1 * x(i) + v2 * y(i) + v3 * z(i)
+        arg = v1 * ((matrix(1,1) * x(i) + matrix(1,2) * y(i) + matrix(1,3) * z(i)) + bar(1)) +   &
+              v2 * ((matrix(2,1) * x(i) + matrix(2,2) * y(i) + matrix(2,3) * z(i)) + bar(2)) +   &
+              v3 * ((matrix(3,1) * x(i) + matrix(3,2) * y(i) + matrix(3,3) * z(i)) + bar(3))
         field(i) = field(i) + a * SIN(arg) + b * COS(arg)
       ENDDO
       !$acc end kernels
@@ -370,7 +410,8 @@ MODULE m_scarflib_srm
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  SUBROUTINE scarf3d_structured_srm(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, field, info)
+  SUBROUTINE scarf3d_structured_srm(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, alpha, beta, &
+                                    gamma, field, info)
 
     ! Purpose:
     ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
@@ -397,6 +438,9 @@ MODULE m_scarflib_srm
     REAL(f_real),                                  INTENT(IN)  :: mute            !< radius for mutin
     REAL(f_real),                                  INTENT(IN)  :: taper           !< radius for tapering
     INTEGER(f_int),                                INTENT(IN)  :: rescale         !< flag for rescaling random field to desired sigma
+    REAL(f_real),                                  INTENT(IN)  :: alpha           !< angle about z-axis
+    REAL(f_real),                                  INTENT(IN)  :: beta            !< angle about y-axis
+    REAL(f_real),                                  INTENT(IN)  :: gamma           !< angle about x-axis
     REAL(f_real),                DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
     REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and TIMING for performance analysis
     INTEGER(f_int)                                             :: i, j, k, l
@@ -411,7 +455,9 @@ MODULE m_scarflib_srm
     REAL(f_real)                                               :: v1, v2, v3
     REAL(f_real)                                               :: a, b, arg
     REAL(f_real)                                               :: x, y, z
-    REAL(f_real)                                               :: calpha, salpha, cbeta, sbeta, cgamma, sgamma
+    REAL(f_real)                                               :: calpha, salpha
+    REAL(f_real)                                               :: cbeta, sbeta
+    REAL(f_real)                                               :: cgamma, sgamma
     REAL(f_dble)                                               :: tictoc
     REAL(c_real),                DIMENSION(2)                  :: r
     REAL(f_real),                DIMENSION(3)                  :: span
@@ -422,7 +468,7 @@ MODULE m_scarflib_srm
 
     !-------------------------------------------------------------------------------------------------------------------------------
 
-    CALL mpi_comm_SIZE(mpi_comm_world, world_size, ierr)
+    CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
     CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
     IF (world_rank == 0) THEN
@@ -441,6 +487,9 @@ MODULE m_scarflib_srm
       print*, 'poi ', SIZE(poi)
       print*, 'mute ', mute
       print*, 'taper ', taper
+      print*, 'alpha ', alpha
+      print*, 'beta ', beta
+      print*, 'gamma ', gamma
     ENDIF
     CALL mpi_barrier(mpi_comm_world, ierr)
 
@@ -499,18 +548,18 @@ MODULE m_scarflib_srm
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     ! angle about z-axis
-    calpha = cos(20._f_real * pi / 180._f_real)
-    salpha = sin(20._f_real * pi / 180._f_real)
+    calpha = cos(alpha * pi / 180._f_real)
+    salpha = sin(alpha * pi / 180._f_real)
 
     ! angle about y-axis
-    cbeta = cos(0._f_real * pi / 180._f_real)
-    sbeta = sin(0._f_real * pi / 180._f_real)
+    cbeta = cos(beta * pi / 180._f_real)
+    sbeta = sin(beta * pi / 180._f_real)
 
     ! angle about x-axis
-    cgamma = cos(0._f_real * pi / 180._f_real)
-    sgamma = sin(0._f_real * pi / 180._f_real)
+    cgamma = cos(gamma * pi / 180._f_real)
+    sgamma = sin(gamma * pi / 180._f_real)
 
-    matrix(:, 1) = [calpha*cbeta, salpha*cbeta, -sbeta]
+    matrix(:, 1) = [calpha*cbeta                       , salpha*cbeta                       , -sbeta      ]
     matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
     matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
 
@@ -601,7 +650,7 @@ MODULE m_scarflib_srm
             x              = (i + fs(1) - 2) * ds
             y              = (j + fs(2) - 2) * ds
             z              = (k + fs(3) - 2) * ds
-            !arg            = v1 * (x * calpha + z * salpha) + v2 * y + v3 * (-x * salpha + z * calpha)
+            ! arg            = v1 * x + v2 * y + v3 * z
             arg            = v1 * ((matrix(1,1)*x + matrix(1,2)*y + matrix(1,3)*z) + bar(1)) +   &
                              v2 * ((matrix(2,1)*x + matrix(2,2)*y + matrix(2,3)*z) + bar(2)) +   &
                              v3 * ((matrix(3,1)*x + matrix(3,2)*y + matrix(3,3)*z) + bar(3))

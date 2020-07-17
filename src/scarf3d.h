@@ -40,6 +40,9 @@ struct scarf_opt{
   int pad;
   real * nc;
   real * fc;
+  real alpha;
+  real beta;
+  real gamma;
 };
 
 // declare C functions
@@ -64,7 +67,7 @@ void scarf_io_slice(const int* npts, const char axis[], const int plane, const r
 namespace Scarf3D
 {
 
-  scarf_opt options {0, 0, 0, 0, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr};
+  scarf_opt options {0, 0, 0, 0, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, 0, 0, 0};
 
   template <algorithm method> class Initialize
   {
@@ -97,7 +100,7 @@ namespace Scarf3D
       ~Initialize()
       {
         scarf_finalize();
-        options = {0, 0, 0, 0, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr};
+        options = {0, 0, 0, 0, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, 0, 0, 0};
       };
 
       // simulate random field

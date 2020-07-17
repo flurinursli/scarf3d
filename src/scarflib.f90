@@ -51,6 +51,7 @@ MODULE m_scarflib
     REAL(f_real)                                         :: ds, dh
     REAL(f_real)                                         :: sigma, hurst
     REAL(f_real)                                         :: mute, taper
+    REAL(f_real)                                         :: alpha, beta, gamma
     REAL(f_real),                         DIMENSION(3)   :: cl
     REAL(f_real),                         DIMENSION(3)   :: nc, fc
     REAL(f_real),                POINTER, DIMENSION(:)   :: x => NULL(), y => NULL(), z => NULL()
@@ -69,7 +70,8 @@ MODULE m_scarflib
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE initialize_structured(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, mute, taper, rescale, pad, nc, fc)
+    SUBROUTINE initialize_structured(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, mute, taper, rescale, pad, nc, fc, alpha, &
+                                     beta, gamma)
 
       ! Purpose:
       !   To setup most of the parameters needed to compute random fields: structured mesh version. Parameters concerning the external
@@ -94,6 +96,7 @@ MODULE m_scarflib
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: rescale        !< rescale discrete std.dev. to continuous one
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: pad            !< pad internal grid (fim only, empty=0=no, 1=yes)
       REAL(f_real),   DIMENSION(3),   OPTIONAL, INTENT(IN) :: nc, fc         !< min/max extent external grid (empty = use fs,fe)
+      REAL(f_real),                   OPTIONAL, INTENT(IN) :: alpha, beta, gamma
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -116,6 +119,10 @@ MODULE m_scarflib
       obj%rescale = 0
       obj%pad     = 0
 
+      obj%alpha = 0._f_real
+      obj%beta  = 0._f_real
+      obj%gamma = 0._f_real
+
       obj%nc      = (fs - 1) * ds          !< by default, "nc" and "fc" are given by "fs" and "fe"
       obj%fc      = (fe - 1) * ds
 
@@ -132,6 +139,9 @@ MODULE m_scarflib
       IF (PRESENT(poi))     obj%poi     = poi
       IF (PRESENT(nc))      obj%nc      = nc
       IF (PRESENT(fc))      obj%fc      = fc
+      IF (PRESENT(alpha))   obj%alpha   = alpha
+      IF (PRESENT(beta))    obj%beta    = beta
+      IF (PRESENT(gamma))   obj%gamma   = gamma
 
       IF (obj%method .eq. 0) THEN
         ALLOCATE(obj%stats(8))
@@ -145,7 +155,8 @@ MODULE m_scarflib
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE initialize_unstructured(x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, mute, taper, rescale, pad, nc, fc)
+    SUBROUTINE initialize_unstructured(x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, mute, taper, rescale, pad, nc, fc,  &
+                                       alpha, beta, gamma)
 
       ! Purpose:
       !   To setup most of the parameters needed to compute random fields: unstructured mesh version. Parameters concerning the external
@@ -170,6 +181,7 @@ MODULE m_scarflib
       INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: rescale            !< rescale discrete std.dev. to continuous one
       INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: pad                !< pad internal grid (FIM only, empty=0=no, 1=yes)
       REAL(f_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc             !< near corner, far corner
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: alpha, beta, gamma
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -194,6 +206,10 @@ MODULE m_scarflib
       obj%rescale = 0
       obj%pad     = 0
 
+      obj%alpha = 0._f_real
+      obj%beta  = 0._f_real
+      obj%gamma = 0._f_real
+
       ! by default, "nc" and "fc" are determined by input grid nodes
       obj%nc      = [MINVAL(x, dim = 1), MINVAL(y, dim = 1), MINVAL(z, dim = 1)]
       obj%fc      = [MAXVAL(x, dim = 1), MAXVAL(y, dim = 1), MAXVAL(z, dim = 1)]
@@ -211,6 +227,9 @@ MODULE m_scarflib
       IF (PRESENT(poi))     obj%poi     = poi
       IF (PRESENT(nc))      obj%nc      = nc
       IF (PRESENT(fc))      obj%fc      = fc
+      IF (PRESENT(alpha))   obj%alpha   = alpha
+      IF (PRESENT(beta))    obj%beta    = beta
+      IF (PRESENT(gamma))   obj%gamma   = gamma
 
       IF (obj%method .eq. 0) THEN
         ALLOCATE(obj%stats(8))
@@ -246,14 +265,14 @@ MODULE m_scarflib
       IF (obj%method .eq. 0) THEN
 
         CALL scarf3d_fim(obj%nc, obj%fc, obj%ds, obj%x, obj%y, obj%z, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed,   &
-                         obj%poi, obj%mute, obj%taper, obj%rescale, obj%pad, field, obj%stats)
+                         obj%poi, obj%mute, obj%taper, obj%rescale, obj%pad, obj%alpha, obj%beta, obj%gamma, field, obj%stats)
 
         stats = obj%stats
 
       ELSEIF (obj%method .eq. 1) THEN
 
         CALL scarf3d_srm(obj%nc, obj%fc, obj%ds, obj%x, obj%y, obj%z, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed,  &
-                          obj%poi, obj%mute, obj%taper, obj%rescale, field, obj%stats)
+                          obj%poi, obj%mute, obj%taper, obj%rescale, obj%alpha, obj%beta, obj%gamma, field, obj%stats)
 
         stats(1:6) = obj%stats(:)
 
@@ -287,14 +306,14 @@ MODULE m_scarflib
       IF (obj%method .eq. 0) THEN
 
         CALL scarf3d_fim(obj%nc, obj%fc, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%poi, &
-                         obj%mute, obj%taper, obj%rescale, obj%pad, field, obj%stats)
+                         obj%mute, obj%taper, obj%rescale, obj%pad, obj%alpha, obj%beta, obj%gamma, field, obj%stats)
 
         stats = obj%stats
 
       ELSEIF (obj%method .eq. 1) THEN
 
         CALL scarf3d_srm(obj%nc, obj%fc, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%poi, &
-                          obj%mute, obj%taper, obj%rescale, field, obj%stats)
+                          obj%mute, obj%taper, obj%rescale, obj%alpha, obj%beta, obj%gamma, field, obj%stats)
 
         stats(1:6) = obj%stats(:)
 

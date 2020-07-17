@@ -32,7 +32,7 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {500, 500, 500};
+  const int n[3] = {500, 450, 400};
 
   // grid-step
   const real ds = 50.;
@@ -41,7 +41,7 @@ int main(){
   const int acf = 0;
 
   // correlation length
-  const real cl[3] = {2000., 2000., 2000.};
+  const real cl[3] = {2000., 500., 100.};
 
   // standard deviation
   const real sigma = 0.05;
@@ -109,6 +109,7 @@ int main(){
   scarf_opt_init(&options);
 
   options.hurst = hurst;
+  options.alpha = 30;
 
   scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
 

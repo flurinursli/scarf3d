@@ -34,17 +34,18 @@ MODULE m_scarflib_c_binding
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE struct_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, np, mute, taper, rescale, pad, nc, fc)  &
-    BIND(c, name="struct_initialize")
+    SUBROUTINE struct_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, np, mute, taper, rescale, pad, nc, fc, alpha, &
+                                 beta, gamma) BIND(c, name="struct_initialize")
 
-    ! Purpose:
-    !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
-    !
-    ! Revisions:
-    !     Date                    Description of change
-    !     ====                    =====================
-    !   04/05/20                  original version
-    !
+      ! Purpose:
+      !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !   13/07/20                  added rotation angles
+      !
 
       INTEGER(c_int), DIMENSION(3),                     INTENT(IN) :: fs, fe
       REAL(c_real),                                     INTENT(IN) :: ds
@@ -59,6 +60,7 @@ MODULE m_scarflib_c_binding
       REAL(c_real),                           OPTIONAL, INTENT(IN) :: mute, taper
       INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: rescale, pad
       REAL(c_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc
+      REAL(c_real),                           OPTIONAL, INTENT(IN) :: alpha, beta, gamma
       REAL(c_real),   DIMENSION(:,:), POINTER                      :: ptr => NULL()
       REAL(c_real),   DIMENSION(0,0), TARGET                       :: void
 
@@ -74,7 +76,8 @@ MODULE m_scarflib_c_binding
         ptr => void
       ENDIF
 
-      CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, ptr, mute, taper, rescale, pad, nc, fc)
+      CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, ptr, mute, taper, rescale, pad, nc, fc, alpha, beta, &
+                            gamma)
 
       NULLIFY(ptr)
 
@@ -85,7 +88,7 @@ MODULE m_scarflib_c_binding
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     SUBROUTINE unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, np, mute, taper, rescale, pad, nc,  &
-                                   fc) BIND(c, name="unstruct_initialize")
+                                   fc, alpha, beta, gamma) BIND(c, name="unstruct_initialize")
 
       ! Purpose:
       !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
@@ -94,6 +97,7 @@ MODULE m_scarflib_c_binding
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   13/07/20                  added rotation angles
       !
 
       INTEGER(c_int),                                    INTENT(IN) :: npts
@@ -110,6 +114,7 @@ MODULE m_scarflib_c_binding
       REAL(c_real),                            OPTIONAL, INTENT(IN) :: mute, taper
       INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: rescale, pad
       REAL(c_real),   DIMENSION(3),            OPTIONAL, INTENT(IN) :: nc, fc
+      REAL(c_real),                            OPTIONAL, INTENT(IN) :: alpha, beta, gamma
       REAL(c_real),   DIMENSION(:,:),  POINTER                      :: ptr => NULL()
       REAL(c_real),   DIMENSION(0,0),  TARGET                       :: void
 
@@ -125,7 +130,8 @@ MODULE m_scarflib_c_binding
         ptr => void
       ENDIF
 
-      CALL scarf_initialize(x, y, z, dh, acf, cl, sigma, method, hurst, ds, ptr, mute, taper, rescale, pad, nc, fc)
+      CALL scarf_initialize(x, y, z, dh, acf, cl, sigma, method, hurst, ds, ptr, mute, taper, rescale, pad, nc, fc, alpha, beta, &
+                            gamma)
 
       NULLIFY(ptr)
 

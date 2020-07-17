@@ -68,7 +68,7 @@ MODULE m_scarflib_common
   ! global model indices for all mpi processes
   INTEGER(f_int), ALLOCATABLE, DIMENSION(:,:)           :: gs, ge
 
-  ! variables
+  ! pi
   REAL(f_real),                               PARAMETER :: pi = 3.141592653589793_f_real
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *

@@ -60,7 +60,7 @@ PROGRAM driver
   acf = 0
 
   ! correlation length
-  cl = [2000._f_real, 500._f_real, 200._f_real]
+  cl = [2000._f_real, 500._f_real, 100._f_real]
 
   ! standard deviation (sigma%/100)
   sigma = 0.05_f_real
@@ -130,7 +130,7 @@ PROGRAM driver
   IF (rank .eq. 0) WRITE(stdout, *) '************************ FIM method ************************'
 
   ! structured mesh test
-  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst)
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, beta = 10._f_real)
 
   CALL watch_start(tictoc)
 
@@ -174,13 +174,15 @@ PROGRAM driver
   CALL scarf_finalize()
 
   ! unstructured mesh test
-  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 0, hurst = hurst)
+  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 0, hurst = hurst, beta = 45._f_real)
 
   CALL watch_start(tictoc)
 
   CALL scarf_execute(seed, v1, stats)
 
   CALL watch_stop(tictoc)
+
+CALL scarf_io(n, v3, 'fft_struct_whole_u', 3)
 
   CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
@@ -258,13 +260,15 @@ PROGRAM driver
   CALL scarf_finalize()
 
   ! unstructured mesh test
-  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 1, hurst = hurst)
+  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 1, hurst = hurst, beta = -20._f_real)
 
   CALL watch_start(tictoc)
 
   CALL scarf_execute(seed, v1, stats)
 
   CALL watch_stop(tictoc)
+
+CALL scarf_io(n, v3, 'spec_struct_whole_u', 3)
 
   CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 

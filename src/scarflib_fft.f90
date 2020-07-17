@@ -91,14 +91,17 @@ MODULE m_scarflib_fim
   ! absolute position of model's first point
   REAL(f_real),                DIMENSION(3)             :: off_axis
 
-  REAL(f_real),                DIMENSION(3)             :: bar
-  REAL(f_real),                DIMENSION(3,3)           :: matrix
-
   ! pointer for fourier transform
   COMPLEX(c_cplx),             DIMENSION(:), POINTER    :: cdum => NULL()
 
   ! pointer for fourier transform
   REAL(c_real),                DIMENSION(:), POINTER    :: rdum => NULL()
+
+  ! baricenter
+  REAL(f_real),                DIMENSION(3)             :: bar
+
+  ! rotation matrix
+  REAL(f_real),                DIMENSION(3,3)           :: matrix
 
   ! pointer to FFTW plan
   TYPE(c_ptr)                                           :: pc
@@ -112,7 +115,7 @@ MODULE m_scarflib_fim
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
     SUBROUTINE scarf3d_unstructured_fim(nc, fc, ds, x, y, z, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, pad, &
-                                        field, info)
+                                        alpha, beta, gamma, field, info)
 
       ! Purpose:
       ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
@@ -141,6 +144,9 @@ MODULE m_scarflib_fim
       REAL(f_real),                                  INTENT(IN)  :: taper        !< radius for tapering
       INTEGER(f_int),                                INTENT(IN)  :: rescale      !< flag for rescaling random field to desired sigma
       INTEGER(f_int),                                INTENT(IN)  :: pad          !< flag for handle fft periodicity (grid padding)
+      REAL(f_real),                                  INTENT(IN)  :: alpha           !< angle about z-axis
+      REAL(f_real),                                  INTENT(IN)  :: beta            !< angle about y-axis
+      REAL(f_real),                                  INTENT(IN)  :: gamma           !< angle about x-axis
       REAL(f_real),                 DIMENSION(:),    INTENT(OUT) :: field        !< random field at x,y,z location
       REAL(f_real),                 DIMENSION(8),    INTENT(OUT) :: info         !< errors flags and timing for performance analysis
       COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)             :: spec
@@ -156,11 +162,17 @@ MODULE m_scarflib_fim
       INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                 :: npoints
       LOGICAL,                      DIMENSION(3)                 :: bool
       REAL(f_real)                                               :: scaling
+      REAL(f_real)                                               :: diagonal
+      REAL(f_real)                                               :: calpha, salpha
+      REAL(f_real)                                               :: cbeta, sbeta
+      REAL(f_real)                                               :: cgamma, sgamma
+      REAL(f_real)                                               :: xc, yc, zc
       REAL(f_dble)                                               :: tictoc
       REAL(f_real),                 DIMENSION(2)                 :: et
       REAL(f_real),                 DIMENSION(3)                 :: min_extent
       REAL(f_real),                 DIMENSION(3)                 :: max_extent
       REAL(f_real),                 DIMENSION(3)                 :: pt
+      REAL(f_real),                 DIMENSION(3)                 :: obar
       REAL(f_real),    ALLOCATABLE, DIMENSION(:)                 :: var, mu
       REAL(f_real),    ALLOCATABLE, DIMENSION(:,:,:)             :: delta, buffer
 
@@ -209,6 +221,39 @@ MODULE m_scarflib_fim
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
+      !***
+
+      ! angle about z-axis
+      calpha = cos(alpha * pi / 180._f_real)
+      salpha = sin(alpha * pi / 180._f_real)
+
+      ! angle about y-axis
+      cbeta = cos(beta * pi / 180._f_real)
+      sbeta = sin(beta * pi / 180._f_real)
+
+      ! angle about x-axis
+      cgamma = cos(gamma * pi / 180._f_real)
+      sgamma = sin(gamma * pi / 180._f_real)
+
+      ! setup rotation matrix
+      matrix(:, 1) = [calpha*cbeta, salpha*cbeta, -sbeta]
+      matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
+      matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
+
+      ! baricenter in original reference frame
+      bar = (max_extent - min_extent) / 2._f_real
+
+      ! half space diagonal
+      diagonal = SQRT( (bar(1) - min_extent(1))**2 + (bar(2) - min_extent(2))**2 + (bar(3) - min_extent(3))**2 )
+
+      ! set new nc/fc
+      min_extent = bar - diagonal
+      max_extent = bar + diagonal
+
+      if (world_rank == 0) print*, 'diagonal ', diagonal, ' -- ', bar
+
+      !***
+
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
       DO i = 1, 3
@@ -242,6 +287,22 @@ MODULE m_scarflib_fim
 
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
       IF (ANY(dh .gt. cl / 2._f_real)) info(2) = 1._f_real
+
+      !***
+
+      bar = bar - off_axis
+
+      IF (world_rank == 0) print*, 'new bar: ', bar
+
+      ! baricenter after rotation
+      obar = MATMUL(matrix, bar)
+
+      ! translation vector to rotate around baricenter in original reference frame
+      bar = bar - obar
+
+      IF (world_rank == 0) print*, 'bar: ', bar, ' offset: ', offset, ' obar: ', obar
+
+      !***
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
@@ -278,12 +339,36 @@ MODULE m_scarflib_fim
       ALLOCATE(points_world2rank(0:world_size - 1), points_rank2world(0:world_size - 1))
 
       ! min/max internal grid index containing input points
-      ps(1) = FLOOR((MINVAL(x, dim = 1) - off_axis(1)) / dh) + 1
-      pe(1) = FLOOR((MAXVAL(x, dim = 1) - off_axis(1)) / dh) + 1
-      ps(2) = FLOOR((MINVAL(y, dim = 1) - off_axis(2)) / dh) + 1
-      pe(2) = FLOOR((MAXVAL(y, dim = 1) - off_axis(2)) / dh) + 1
-      ps(3) = FLOOR((MINVAL(z, dim = 1) - off_axis(3)) / dh) + 1
-      pe(3) = FLOOR((MAXVAL(z, dim = 1) - off_axis(3)) / dh) + 1
+      ! ps(1) = FLOOR((MINVAL(x, dim = 1) - off_axis(1)) / dh) + 1
+      ! pe(1) = FLOOR((MAXVAL(x, dim = 1) - off_axis(1)) / dh) + 1
+      ! ps(2) = FLOOR((MINVAL(y, dim = 1) - off_axis(2)) / dh) + 1
+      ! pe(2) = FLOOR((MAXVAL(y, dim = 1) - off_axis(2)) / dh) + 1
+      ! ps(3) = FLOOR((MINVAL(z, dim = 1) - off_axis(3)) / dh) + 1
+      ! pe(3) = FLOOR((MAXVAL(z, dim = 1) - off_axis(3)) / dh) + 1
+
+
+      !***
+
+      ps(:) = huge(1)
+      pe(:) = -huge(1)
+
+      DO i = 1, SIZE(x)
+
+        xc = matrix(1,1)*(x(i) - off_axis(1)) + matrix(1,2)*(y(i) - off_axis(2)) + matrix(1,3)*(z(i) - off_axis(3)) + bar(1)
+        yc = matrix(2,1)*(x(i) - off_axis(1)) + matrix(2,2)*(y(i) - off_axis(2)) + matrix(2,3)*(z(i) - off_axis(3)) + bar(2)
+        zc = matrix(3,1)*(x(i) - off_axis(1)) + matrix(3,2)*(y(i) - off_axis(2)) + matrix(3,3)*(z(i) - off_axis(3)) + bar(3)
+
+        ps(1) = MIN(ps(1), FLOOR(xc / dh) + 1)
+        pe(1) = MAX(pe(1), FLOOR(xc / dh) + 1)
+        ps(2) = MIN(ps(2), FLOOR(yc / dh) + 1)
+        pe(2) = MAX(pe(2), FLOOR(yc / dh) + 1)
+        ps(3) = MIN(ps(3), FLOOR(zc / dh) + 1)
+        pe(3) = MAX(pe(3), FLOOR(zc / dh) + 1)
+
+      ENDDO
+
+      !***
+
 
       points_rank2world = 0
 
@@ -452,8 +537,8 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE scarf3d_structured_fim(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, pad, field, &
-                                      info)
+    SUBROUTINE scarf3d_structured_fim(nc, fc, ds, fs, fe, dh, acf, cl, sigma, hurst, seed, poi, mute, taper, rescale, pad, alpha, &
+                                      beta, gamma, field, info)
 
       ! Purpose:
       ! To compute a random field characterised by a selected ACF on unstructured meshes. For a given ACF, the actual distribution of
@@ -482,6 +567,9 @@ MODULE m_scarflib_fim
       REAL(f_real),                                   INTENT(IN)  :: taper           !< radius for tapering
       INTEGER(f_int),                                 INTENT(IN)  :: rescale         !< flag for rescaling random field to desired sigma
       INTEGER(f_int),                                 INTENT(IN)  :: pad             !< flag for handle fft periodicity (grid padding)
+      REAL(f_real),                                   INTENT(IN)  :: alpha           !< angle about z-axis
+      REAL(f_real),                                   INTENT(IN)  :: beta            !< angle about y-axis
+      REAL(f_real),                                   INTENT(IN)  :: gamma           !< angle about x-axis
       REAL(f_real),                 DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
       REAL(f_real),                 DIMENSION(8),     INTENT(OUT) :: info            !< errors flags and timing for performance analysis
       COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)              :: spec
@@ -497,13 +585,16 @@ MODULE m_scarflib_fim
       INTEGER(f_int),  ALLOCATABLE, DIMENSION(:)                  :: npoints
       LOGICAL,                      DIMENSION(3)                  :: bool
       REAL(f_real)                                                :: scaling
-      REAL(f_real)                                                :: calpha, salpha, cbeta, sbeta, cgamma, sgamma
+      REAL(f_real)                                                :: diagonal
+      REAL(f_real)                                                :: calpha, salpha
+      REAL(f_real)                                                :: cbeta, sbeta
+      REAL(f_real)                                                :: cgamma, sgamma
       REAL(f_dble)                                                :: tictoc
       REAL(f_real),                 DIMENSION(2)                  :: et
       REAL(f_real),                 DIMENSION(3)                  :: min_extent
       REAL(f_real),                 DIMENSION(3)                  :: max_extent
       REAL(f_real),                 DIMENSION(3)                  :: pt
-      REAL(f_real),                 DIMENSION(3)                  :: diagonal, obar
+      REAL(f_real),                 DIMENSION(3)                  :: obar
       REAL(f_real),                 DIMENSION(8)                  :: x, y, z
       REAL(f_real),    ALLOCATABLE, DIMENSION(:)                  :: var, mu
       REAL(f_real),    ALLOCATABLE, DIMENSION(:,:,:)              :: delta, buffer
@@ -557,17 +648,18 @@ MODULE m_scarflib_fim
 !***
 
       ! angle about z-axis
-      calpha = cos(20._f_real * pi / 180._f_real)
-      salpha = sin(20._f_real * pi / 180._f_real)
+      calpha = cos(alpha * pi / 180._f_real)
+      salpha = sin(alpha * pi / 180._f_real)
 
       ! angle about y-axis
-      cbeta = cos(0._f_real * pi / 180._f_real)
-      sbeta = sin(0._f_real * pi / 180._f_real)
+      cbeta = cos(beta * pi / 180._f_real)
+      sbeta = sin(beta * pi / 180._f_real)
 
       ! angle about x-axis
-      cgamma = cos(0._f_real * pi / 180._f_real)
-      sgamma = sin(0._f_real * pi / 180._f_real)
+      cgamma = cos(gamma * pi / 180._f_real)
+      sgamma = sin(gamma * pi / 180._f_real)
 
+      ! setup rotation matrix
       matrix(:, 1) = [calpha*cbeta, salpha*cbeta, -sbeta]
       matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
       matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
@@ -624,7 +716,9 @@ MODULE m_scarflib_fim
 
 !***
 
-      bar = bar + offset
+      bar = bar - off_axis
+
+      IF (world_rank == 0) print*, 'new bar: ', bar
 
       ! baricenter after rotation
       obar = MATMUL(matrix, bar)
@@ -632,7 +726,7 @@ MODULE m_scarflib_fim
       ! translation vector to rotate around baricenter in original reference frame
       bar = bar - obar
 
-      IF (world_rank == 0) print*, 'bar: ', bar
+      IF (world_rank == 0) print*, 'bar: ', bar, ' obar: ', obar
 
 
 !***
@@ -1343,9 +1437,17 @@ MODULE m_scarflib_fim
         DO p = p0, p1
 
           ! transform point coordinates into grid indices for l-th process
-          i = (x(p) - off_axis(1)) / dh + 3._f_real - const(1)
-          j = (y(p) - off_axis(2)) / dh + 3._f_real - const(2)
-          k = (z(p) - off_axis(3)) / dh + 3._f_real - const(3)
+          !i = (x(p) - off_axis(1)) / dh + 3._f_real - const(1)
+          !j = (y(p) - off_axis(2)) / dh + 3._f_real - const(2)
+          !k = (z(p) - off_axis(3)) / dh + 3._f_real - const(3)
+
+          i = matrix(1,1)*(x(p) - off_axis(1)) + matrix(1,2)*(y(p) - off_axis(2)) + matrix(1,3)*(z(p) - off_axis(3)) + bar(1)
+          j = matrix(2,1)*(x(p) - off_axis(1)) + matrix(2,2)*(y(p) - off_axis(2)) + matrix(2,3)*(z(p) - off_axis(3)) + bar(2)
+          k = matrix(3,1)*(x(p) - off_axis(1)) + matrix(3,2)*(y(p) - off_axis(2)) + matrix(3,3)*(z(p) - off_axis(3)) + bar(3)
+
+          i = i / dh + 3._f_real - const(1)
+          j = j / dh + 3._f_real - const(2)
+          k = k / dh + 3._f_real - const(3)
 
           ! check if point is within block of l-th process
           bool = (i .ge. 1) .and. (i .lt. m(1)) .and. (j .ge. 1) .and. (j .lt. m(2)) .and. (k .ge. 1) .and. (k .lt. m(3))
@@ -2798,9 +2900,9 @@ MODULE m_scarflib_fim
       REAL(f_real)                                  :: i, j, k
       ! bilinear
       ! {
-      ! REAL(f_real)                                  :: px, py, pz, ipx, ipy
-      ! REAL(f_real)                                  :: a, b
-      ! REAL(f_real),   DIMENSION(2,2)                :: f
+      REAL(f_real)                                  :: px, py, pz, ipx, ipy
+      REAL(f_real)                                  :: a, b
+      REAL(f_real),   DIMENSION(2,2)                :: f
       ! }
 
       !-----------------------------------------------------------------------------------------------------------------------------
@@ -2814,41 +2916,41 @@ MODULE m_scarflib_fim
 
         ! nearest neighbor
         ! {
-        i0 = NINT(i)
-        j0 = NINT(j)
-        k0 = NINT(k)
-
-        v(p) = delta(i0, j0, k0)
+        ! i0 = NINT(i)
+        ! j0 = NINT(j)
+        ! k0 = NINT(k)
+        !
+        ! v(p) = delta(i0, j0, k0)
         ! }
 
         ! bilinear
         ! {
-        ! i0 = FLOOR(i)
-        ! j0 = FLOOR(j)
-        ! k0 = FLOOR(k)
-        !
-        ! f(:, 1) = delta(i0:i0 + 1, j0, k0)
-        ! f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0)
-        !
-        ! px = i - i0
-        ! py = j - j0
-        !
-        ! ipx = (1._f_real - px)
-        ! ipy = (1._f_real - py)
-        !
-        ! ! bilinear interpolation at level 1
-        ! a = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
-        !
-        ! f(:, 1) = delta(i0:i0 + 1, j0, k0 + 1)
-        ! f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0 + 1)
-        !
-        ! ! bilinear interpolation at level 2
-        ! b = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
-        !
-        ! pz = k - k0
-        !
-        ! ! linear interpolated between level 1 and 2
-        ! v(p) = a * (1._f_real - pz) + b * pz
+        i0 = FLOOR(i)
+        j0 = FLOOR(j)
+        k0 = FLOOR(k)
+
+        f(:, 1) = delta(i0:i0 + 1, j0, k0)
+        f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0)
+
+        px = i - i0
+        py = j - j0
+
+        ipx = (1._f_real - px)
+        ipy = (1._f_real - py)
+
+        ! bilinear interpolation at level 1
+        a = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
+
+        f(:, 1) = delta(i0:i0 + 1, j0, k0 + 1)
+        f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0 + 1)
+
+        ! bilinear interpolation at level 2
+        b = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
+
+        pz = k - k0
+
+        ! linear interpolated between level 1 and 2
+        v(p) = a * (1._f_real - pz) + b * pz
         ! }
 
       ENDDO
