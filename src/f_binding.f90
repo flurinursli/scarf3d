@@ -148,7 +148,7 @@ MODULE m_scarflib_c_binding
         ptr => void
       ENDIF
 
-      CALL scarf_initialize(x, y, z, dh, acf, cl, sigma, method, hurst, ds, ptr, mute, taper, rescale, pad, nc, fc, alpha, beta, &
+      CALL scarf_initialize(dh, acf, cl, sigma, x, y, z, method, hurst, ds, ptr, mute, taper, rescale, pad, nc, fc, alpha, beta, &
                             gamma)
 
       NULLIFY(ptr)
@@ -187,11 +187,11 @@ MODULE m_scarflib_c_binding
         IF (three_dim) THEN
           CALL c_f_pointer(field, f_struct_3d, [dims])
           CALL scarf_execute(seed, f_struct_3d, stats)
-          NULLIFY(f_struct)
+          NULLIFY(f_struct_3d)
         ELSE
           CALL c_f_pointer(field, f_struct_2d, [dims])
           CALL scarf_execute(seed, f_struct_2d, stats)
-          NULLIFY(f_struct)
+          NULLIFY(f_struct_2d)
         ENDIF
       ENDIF
 

@@ -103,7 +103,7 @@ MODULE m_scarflib
 
       n = SIZE(fs)
 
-      obs%fs = 0; obs%fe = 0; obs%cl = 0._f_real
+      obj%fs = 1; obj%fe = 1; obj%cl = 0._f_real
 
       obj%fs(1:n) = fs
       obj%fe(1:n) = fe
@@ -194,7 +194,7 @@ MODULE m_scarflib
 
       n = SIZE(cl)
 
-      obs%cl = 0._f_real
+      obj%cl = 0._f_real
 
       obj%x => x
       obj%y => y
@@ -354,7 +354,7 @@ MODULE m_scarflib
       !
 
       INTEGER(f_int),                           INTENT(IN)  :: seed         !< seed number
-      REAL(f_real),   DIMENSION(:,:),   TARGET, INTENT(OUT) :: field        !< random field
+      REAL(f_real),   DIMENSION(:,:),   CONTIGUOUS, TARGET, INTENT(OUT) :: field        !< random field
       REAL(f_real),   DIMENSION(8),             INTENT(OUT) :: stats        !< vector with accuracy (1:2), std.dev. (3), mean(4) and timing flags (5:6/8)
       REAL(f_real),   DIMENSION(:,:,:), POINTER             :: f
 
@@ -549,10 +549,11 @@ MODULE m_scarflib
       !
 
       INTEGER(f_int),   DIMENSION(2),             INTENT(IN) :: n                     !< grid points in the global mesh
-      REAL(f_real),     DIMENSION(:,:),           INTENT(IN) :: field                 !< random field
+      REAL(f_real),     DIMENSION(:,:), CONTIGUOUS,  TARGET, INTENT(IN) :: field                 !< random field
       CHARACTER(len=*),                           INTENT(IN) :: filename              !< output file name
       INTEGER(f_int),                   OPTIONAL, INTENT(IN) :: nwriters              !< number of concurrent I/O processes (empty = 1)
       INTEGER(f_int)                                         :: rank, np, nw, ierr
+      REAL(f_real),     DIMENSION(:,:,:), POINTER            :: f
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -581,7 +582,9 @@ MODULE m_scarflib
       ! we cannot have more writers than available processes
       IF (PRESENT(nwriters)) nw = MIN(np, nwriters)
 
-      CALL write_one(field, filename, nw)
+      f(1:SIZE(field, 1), 1:SIZE(field, 2), 1:1) => field
+
+      CALL write_one(f, filename, nw)
 
       DEALLOCATE(gs, ge)
 

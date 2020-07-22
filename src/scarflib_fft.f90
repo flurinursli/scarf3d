@@ -434,7 +434,7 @@ enddo
 #endif
 
       ! (inverse) transform along each direction
-      CALL transform_along_z(spec)
+      IF (n .eq. 3) CALL transform_along_z(spec)
       CALL transform_along_y(spec)
       CALL transform_along_x(spec)
 
@@ -445,7 +445,7 @@ enddo
 #endif
 
       ! define scaling factor
-      scaling = 1._f_real / SQRT(REAL(npts(1), f_real) * REAL(npts(2), f_real) * REAL(npts(3), f_real) * dh**3)
+      scaling = 1._f_real / SQRT(REAL(npts(1), f_real) * REAL(npts(2), f_real) * REAL(npts(3), f_real) * dh**n)
 
       ALLOCATE(buffer(m(1), m(2), m(3)))
 
@@ -600,7 +600,7 @@ enddo
       REAL(f_real),                 DIMENSION(8),     INTENT(OUT) :: info            !< errors flags and timing for performance analysis
       COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)              :: spec
       INTEGER(f_int)                                              :: ierr
-      INTEGER(f_int)                                              :: i, j, k
+      INTEGER(f_int)                                              :: i, j, k, n
       INTEGER(f_int)                                              :: cartopo
       INTEGER(f_int)                                              :: offset
       INTEGER(f_int),               DIMENSION(3)                  :: m
@@ -656,6 +656,13 @@ enddo
         print*, 'pad ', pad
       ENDIF
       CALL mpi_barrier(mpi_comm_world, ierr)
+
+      ! discriminate between 2D and 3D case
+      IF (cl(3) .gt. 0._f_real) THEN
+        n = 3
+      ELSE
+        n = 2
+      ENDIF
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! determine internal (FFT) grid size
@@ -731,13 +738,18 @@ enddo
         ! absolute position of first point (it could be negative)
         off_axis(i) = min_extent(i) - (offset + 0.5_f_real) * dh
 
+        IF ( (n .eq. 2) .and. (i .eq. 3) ) THEN
+          off_axis(i) = 0._f_real
+          npts(i)     = 1
+        ENDIF
+
       ENDDO
 
       ! check if model is large enough to catch the lower part of the spectrum (low wavenumbers)...
-      IF (ANY(npts .le. NINT(2._f_real * pi * cl / dh))) info(1) = 1._f_real
+      IF (ANY(npts(1:n) .le. NINT(2._f_real * pi * cl(1:n) / dh))) info(1) = 1._f_real
 
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
-      IF (ANY(dh .gt. cl / 2._f_real)) info(2) = 1._f_real
+      IF (ANY(dh .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
 
 !***
@@ -771,6 +783,8 @@ enddo
       ! return processors grid
       CALL best_config(dims)
 
+if (world_rank == 0) print*, 'best cpu DIMS ', dims
+
       ! create topology
       CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
 
@@ -782,6 +796,11 @@ enddo
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
+
+do i = 0, world_size - 1
+  if (i == world_rank) print*, i, ' INDEX ls-le ', ls, ' - ', le
+  call mpi_barrier(mpi_comm_world, ierr)
+enddo
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -840,6 +859,11 @@ enddo
       ps(3) = FLOOR(MINVAL(z, dim = 1) / dh) + 1
       pe(3) = FLOOR(MAXVAL(z, dim = 1) / dh) + 1
 
+do i = 0, world_size - 1
+  if (i == world_rank) print*, i, ' PS-PE ', ps, ' - ', pe
+  call mpi_barrier(mpi_comm_world, ierr)
+enddo
+
 !***
 
 
@@ -847,7 +871,7 @@ enddo
 
       ! determine if calling process has at least one point falling inside domain of "i-th" process
       DO i = 0, world_size - 1
-        DO j = 1, 3
+        DO j = 1, n
           bool(j) = ( (ps(j) .lt. ge(j, i)) .and. (ps(j) .ge. (gs(j, i) - 1)) ) .or.     &
                     ( (pe(j) .lt. ge(j, i)) .and. (pe(j) .ge. (gs(j, i) - 1)) ) .or.     &
                     ( (pe(j) .ge. ge(j, i)) .and. (ps(j) .lt. (gs(j, i) - 1)) )
@@ -881,7 +905,7 @@ enddo
 #endif
 
       ! (inverse) transform along each direction
-      CALL transform_along_z(spec)
+      IF (n .eq. 3) CALL transform_along_z(spec)
       CALL transform_along_y(spec)
       CALL transform_along_x(spec)
 
@@ -892,7 +916,7 @@ enddo
 #endif
 
       ! define scaling factor
-      scaling = 1._f_real / SQRT(REAL(npts(1), f_real) * REAL(npts(2), f_real) * REAL(npts(3), f_real) * dh**3)
+      scaling = 1._f_real / SQRT(REAL(npts(1), f_real) * REAL(npts(2), f_real) * REAL(npts(3), f_real) * dh**n)
 
       ALLOCATE(buffer(m(1), m(2), m(3)))
 

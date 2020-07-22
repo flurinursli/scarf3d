@@ -174,7 +174,7 @@ PROGRAM driver
   CALL scarf_finalize()
 
   ! unstructured mesh test
-  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 0, hurst = hurst, beta = 45._f_real)
+  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, beta = 45._f_real)
 
   CALL watch_start(tictoc)
 
@@ -260,7 +260,7 @@ CALL scarf_io(n, v3, 'fft_struct_whole_u', 3)
   CALL scarf_finalize()
 
   ! unstructured mesh test
-  CALL scarf_initialize(x1, y1, z1, dh, acf, cl, sigma, method = 1, hurst = hurst, beta = -20._f_real)
+  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, beta = -20._f_real)
 
   CALL watch_start(tictoc)
 

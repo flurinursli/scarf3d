@@ -48,9 +48,9 @@ struct scarf_opt{
 // declare C functions
 void scarf_opt_init(struct scarf_opt * var);
 
-void scarf_struct_initialize(const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
+void scarf_struct_initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
 
-void scarf_unstruct_initialize(const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
+void scarf_unstruct_initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
 
 void scarf_execute(const int seed, real* field, real stats[]);
 
@@ -77,22 +77,22 @@ namespace Scarf3D
     public:
 
       // constructor structured mesh
-      Initialize(const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma)
+      Initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma)
       {
 
         if (method == spec) options.solver = 1;
 
-        scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
+        scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
       };
 
       // constructor unstructured mesh
-      Initialize(const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma)
+      Initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma)
       {
 
         if (method == spec) options.solver = 1;
 
-        scarf_unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, &options);
+        scarf_unstruct_initialize(nd, npts, x, y, z, dh, acf, cl, sigma, &options);
 
       };
 
