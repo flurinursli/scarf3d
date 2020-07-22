@@ -151,7 +151,7 @@ MODULE m_scarflib_fim
       REAL(f_real),                 DIMENSION(8),    INTENT(OUT) :: info         !< errors flags and timing for performance analysis
       COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)             :: spec
       INTEGER(f_int)                                             :: ierr
-      INTEGER(f_int)                                             :: i, j, k
+      INTEGER(f_int)                                             :: i, j, k, n
       INTEGER(f_int)                                             :: cartopo
       INTEGER(f_int)                                             :: offset
       INTEGER(f_int),               DIMENSION(3)                 :: m
@@ -208,6 +208,12 @@ MODULE m_scarflib_fim
       ENDIF
       CALL mpi_barrier(mpi_comm_world, ierr)
 
+      ! discriminate between 2D and 3D case
+      IF (cl(3) .gt. 0._f_real) THEN
+        n = 3
+      ELSE
+        n = 2
+      ENDIF
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! determine internal (FFT) grid size
@@ -280,13 +286,18 @@ MODULE m_scarflib_fim
         ! absolute position of first point (it could be negative)
         off_axis(i) = min_extent(i) - (offset + 0.5_f_real) * dh
 
+        IF ( (n .eq. 2) .and. (i .eq. 3) ) THEN
+          off_axis(i) = 0._f_real
+          npts(i)     = 1
+        ENDIF
+
       ENDDO
 
       ! check if model is large enough to catch the lower part of the spectrum (low wavenumbers)...
-      IF (ANY(npts .le. NINT(2._f_real * pi * cl / dh))) info(1) = 1._f_real
+      IF (ANY(npts(1:n) .le. NINT(2._f_real * pi * cl(1:n) / dh))) info(1) = 1._f_real
 
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
-      IF (ANY(dh .gt. cl / 2._f_real)) info(2) = 1._f_real
+      IF (ANY(dh .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
       !***
 
@@ -315,6 +326,9 @@ MODULE m_scarflib_fim
       ! return processors grid
       CALL best_config(dims)
 
+if (world_rank == 0) print*, 'best cpu DIMS ', dims
+
+
       ! create topology
       CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
 
@@ -326,6 +340,11 @@ MODULE m_scarflib_fim
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
+
+do i = 0, world_size - 1
+  if (i == world_rank) print*, i, ' INDEX ls-le ', ls, ' - ', le
+  call mpi_barrier(mpi_comm_world, ierr)
+enddo
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -367,14 +386,21 @@ MODULE m_scarflib_fim
 
       ENDDO
 
+do i = 0, world_size - 1
+  if (i == world_rank) print*, i, ' PS-PE ', ps, ' - ', pe
+  call mpi_barrier(mpi_comm_world, ierr)
+enddo
+
       !***
 
 
       points_rank2world = 0
 
+      bool(:) = .true.
+
       ! determine if calling process has at least one point falling inside domain of "i-th" process
       DO i = 0, world_size - 1
-        DO j = 1, 3
+        DO j = 1, n
           bool(j) = ( (ps(j) .lt. ge(j, i)) .and. (ps(j) .ge. (gs(j, i) - 1)) ) .or.     &
                     ( (pe(j) .lt. ge(j, i)) .and. (pe(j) .ge. (gs(j, i) - 1)) ) .or.     &
                     ( (pe(j) .ge. ge(j, i)) .and. (ps(j) .lt. (gs(j, i) - 1)) )
@@ -2284,10 +2310,11 @@ MODULE m_scarflib_fim
       INTEGER(f_int),                                                  INTENT(IN)  :: seed                  !< initial seed number
       COMPLEX(f_real), DIMENSION(ls(1):le(1),ls(2):le(2),ls(3):le(3)), INTENT(OUT) :: spec                  !< spectrum
       REAL(f_real),    DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
-      INTEGER(f_int)                                                               :: i, j, k
+      INTEGER(f_int)                                                               :: i, j, k, n
       LOGICAL                                                                      :: filter
       REAL(f_real)                                                                 :: butter, num, amp
       REAL(f_real)                                                                 :: kc, kr
+      REAL(f_real)                                                                 :: hurst_factor
       REAL(f_dble)                                                                 :: tictoc
       REAL(f_real),    DIMENSION(3)                                                :: dk
       REAL(f_real),    DIMENSION(npts(1))                                          :: kx
@@ -2298,6 +2325,13 @@ MODULE m_scarflib_fim
       TYPE(c_ptr)                                                                  :: cptr
 
       !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! discriminate between 2D and 3D case
+      IF (cl(3) .gt. 0._f_real) THEN
+        n = 3
+      ELSE
+        n = 2
+      ENDIF
 
       time(:) = 0._f_real
 
@@ -2328,12 +2362,22 @@ MODULE m_scarflib_fim
       ky = [[(j * dk(2), j = 0, npts(2)/2)], [(j * dk(2), j = npts(2)/2-1, 1, -1)]]
       kz = [[(k * dk(3), k = 0, npts(3)/2)], [(k * dk(3), k = npts(3)/2-1, 1, -1)]]
 
+if (world_rank == 0) print*, 'SPEC KZ ', kz
+
+      IF (n .eq. 3) THEN
+        hurst_factor = hurst + 1.5_f_real
+      ELSE
+        hurst_factor = hurst + 1._f_real
+      ENDIF
+
       ! compute part of power spectral density outside loop
       IF (acf .eq. 0) THEN
-        num = 8._f_real * SQRT(pi**3) * GAMMA(hurst + 1.5_f_real) * sigma**2 * PRODUCT(cl) / GAMMA(hurst)
+        num = 4._f_real * pi * GAMMA(hurst_factor) * sigma**2 * PRODUCT(cl(1:n)) / GAMMA(hurst)
+        IF (n .eq. 3) num = num * 2._f_real * SQRT(pi)
         fun => vk_psdf
       ELSEIF (acf .eq. 1) THEN
-        num = sigma**2 * PRODUCT(cl) * SQRT(pi**3)
+        num = sigma**2 * PRODUCT(cl(1:n)) * pi
+        IF (n .eq. 3) num = num * SQRT(pi)
         fun => gs_psdf
       ENDIF
 
@@ -2365,7 +2409,7 @@ MODULE m_scarflib_fim
             kr = (kx(i) * cl(1))**2 + (ky(j) * cl(2))**2 + (kz(k) * cl(3))**2
 
             ! complete power spectral density and go to amplitude spectrum
-            amp = SQRT(num / fun(kr, hurst))
+            amp = SQRT(num / fun(kr, hurst_factor))
 
             ! apply filter
             amp = amp * butter
@@ -2405,7 +2449,7 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(f_real) FUNCTION vk_psdf(m, hurst)
+    REAL(f_real) FUNCTION vk_psdf(m, hurst_factor)
 
       ! Purpose:
       ! To compute the denominator of Von Karman (or exponential, if hurst = 0.5) PSDFs.
@@ -2417,11 +2461,11 @@ MODULE m_scarflib_fim
       !
 
       REAL(f_real), INTENT(IN) :: m                  !< quantity (wavenumber*cl)**2
-      REAL(f_real), INTENT(IN) :: hurst              !< hurst exponent
+      REAL(f_real), INTENT(IN) :: hurst_factor       !< hurst exponent
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      vk_psdf = (1._f_real + m)**(hurst + 1.5_f_real)
+      vk_psdf = (1._f_real + m)**(hurst_factor)
 
     END FUNCTION vk_psdf
 

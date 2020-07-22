@@ -22,9 +22,10 @@ MODULE m_scarflib_c_binding
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  INTEGER(f_int),               PRIVATE :: n                     !< number of grid nodes (process view, unstructured grid)
-  INTEGER(f_int), DIMENSION(3), PRIVATE :: dims                  !< number of grid nodes (process view, structured grid)
-  LOGICAL,                      PRIVATE :: structured            !< flag for structured/unstructured grid
+  INTEGER(f_int),                            PRIVATE :: n                     !< number of grid nodes (process view, unstructured grid)
+  INTEGER(f_int), ALLOCATABLE, DIMENSION(:), PRIVATE :: dims                  !< number of grid nodes (process view, structured grid)
+  LOGICAL,                                   PRIVATE :: structured            !< flag for structured/unstructured grid
+  LOGICAL,                                   PRIVATE :: three_dim
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -34,8 +35,8 @@ MODULE m_scarflib_c_binding
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE struct_initialize(fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, np, mute, taper, rescale, pad, nc, fc, alpha, &
-                                 beta, gamma) BIND(c, name="struct_initialize")
+    SUBROUTINE struct_initialize(nd, fs, fe, ds, acf, cl, sigma, method, hurst, dh, poi, np, mute, taper, rescale, pad, nc, fc,  &
+                                 alpha, beta, gamma) BIND(c, name="struct_initialize")
 
       ! Purpose:
       !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
@@ -47,10 +48,11 @@ MODULE m_scarflib_c_binding
       !   13/07/20                  added rotation angles
       !
 
-      INTEGER(c_int), DIMENSION(3),                     INTENT(IN) :: fs, fe
+      INTEGER(c_int),                                   INTENT(IN) :: nd                   !< define problem dimension (2 or 3D)
+      INTEGER(c_int), DIMENSION(nd),                    INTENT(IN) :: fs, fe
       REAL(c_real),                                     INTENT(IN) :: ds
       INTEGER(c_int),                                   INTENT(IN) :: acf
-      REAL(c_real),   DIMENSION(3),                     INTENT(IN) :: cl
+      REAL(c_real),   DIMENSION(nd),                    INTENT(IN) :: cl
       REAL(c_real),                                     INTENT(IN) :: sigma
       INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: method
       REAL(c_real),                           OPTIONAL, INTENT(IN) :: hurst
@@ -59,7 +61,7 @@ MODULE m_scarflib_c_binding
       INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: np
       REAL(c_real),                           OPTIONAL, INTENT(IN) :: mute, taper
       INTEGER(c_int),                         OPTIONAL, INTENT(IN) :: rescale, pad
-      REAL(c_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc
+      REAL(c_real),   DIMENSION(nd),          OPTIONAL, INTENT(IN) :: nc, fc
       REAL(c_real),                           OPTIONAL, INTENT(IN) :: alpha, beta, gamma
       REAL(c_real),   DIMENSION(:,:), POINTER                      :: ptr => NULL()
       REAL(c_real),   DIMENSION(0,0), TARGET                       :: void
@@ -68,10 +70,18 @@ MODULE m_scarflib_c_binding
 
       structured = .true.
 
+      IF (nd .eq. 3) THEN
+        three_dim = .true.
+      ELSE
+        three_dim = .false.
+      ENDIF
+
+      ALLOCATE(dims(nd))
+
       dims(:) = fe(:) - fs(:) + 1
 
       IF (PRESENT(poi)) THEN
-        CALL c_f_pointer(poi, ptr, [3, np])
+        CALL c_f_pointer(poi, ptr, [nd, np])
       ELSE
         ptr => void
       ENDIF
@@ -87,8 +97,8 @@ MODULE m_scarflib_c_binding
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE unstruct_initialize(npts, x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, np, mute, taper, rescale, pad, nc,  &
-                                   fc, alpha, beta, gamma) BIND(c, name="unstruct_initialize")
+    SUBROUTINE unstruct_initialize(nd, npts, dh, acf, cl, sigma, x, y, z, method, hurst, ds, poi, np, mute, taper, rescale, pad,  &
+                                   nc, fc, alpha, beta, gamma) BIND(c, name="unstruct_initialize")
 
       ! Purpose:
       !   To allow C wrapper to interface with "scarf_initialize" written in FORTRAN (see m_scarflib for input arguments).
@@ -100,12 +110,14 @@ MODULE m_scarflib_c_binding
       !   13/07/20                  added rotation angles
       !
 
+      INTEGER(c_int),                                    INTENT(IN) :: nd                   !< define problem dimension (2 or 3D)
       INTEGER(c_int),                                    INTENT(IN) :: npts
-      REAL(c_real),   DIMENSION(npts),                   INTENT(IN) :: x, y, z
       REAL(c_real),                                      INTENT(IN) :: dh
       INTEGER(c_int),                                    INTENT(IN) :: acf
-      REAL(c_real),   DIMENSION(3),                      INTENT(IN) :: cl
+      REAL(c_real),   DIMENSION(nd),                     INTENT(IN) :: cl
       REAL(c_real),                                      INTENT(IN) :: sigma
+      REAL(c_real),   DIMENSION(npts),                   INTENT(IN) :: x, y
+      REAL(c_real),   DIMENSION(npts),         OPTIONAL, INTENT(IN) :: z
       INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: method
       REAL(c_real),                            OPTIONAL, INTENT(IN) :: hurst
       REAL(c_real),                            OPTIONAL, INTENT(IN) :: ds
@@ -113,7 +125,7 @@ MODULE m_scarflib_c_binding
       INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: np
       REAL(c_real),                            OPTIONAL, INTENT(IN) :: mute, taper
       INTEGER(c_int),                          OPTIONAL, INTENT(IN) :: rescale, pad
-      REAL(c_real),   DIMENSION(3),            OPTIONAL, INTENT(IN) :: nc, fc
+      REAL(c_real),   DIMENSION(nd),           OPTIONAL, INTENT(IN) :: nc, fc
       REAL(c_real),                            OPTIONAL, INTENT(IN) :: alpha, beta, gamma
       REAL(c_real),   DIMENSION(:,:),  POINTER                      :: ptr => NULL()
       REAL(c_real),   DIMENSION(0,0),  TARGET                       :: void
@@ -122,10 +134,16 @@ MODULE m_scarflib_c_binding
 
       structured = .false.
 
+      IF (nd .eq. 3) THEN
+        three_dim = .true.
+      ELSE
+        three_dim = .false.
+      ENDIF
+
       n = npts
 
       IF (PRESENT(poi)) THEN
-        CALL c_f_pointer(poi, ptr, [3, np])
+        CALL c_f_pointer(poi, ptr, [nd, np])
       ELSE
         ptr => void
       ENDIF
@@ -156,7 +174,8 @@ MODULE m_scarflib_c_binding
       TYPE(c_ptr),                              INTENT(OUT) :: field
       REAL(c_real),   DIMENSION(8),             INTENT(OUT) :: stats
       REAL(c_real),   DIMENSION(:),     POINTER             :: f_unstruct
-      REAL(c_real),   DIMENSION(:,:,:), POINTER             :: f_struct
+      REAL(c_real),   DIMENSION(:,:),   POINTER             :: f_struct_2d
+      REAL(c_real),   DIMENSION(:,:,:), POINTER             :: f_struct_3d
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -165,9 +184,15 @@ MODULE m_scarflib_c_binding
         CALL scarf_execute(seed, f_unstruct, stats)
         NULLIFY(f_unstruct)
       ELSE
-        CALL c_f_pointer(field, f_struct, [dims])
-        CALL scarf_execute(seed, f_struct, stats)
-        NULLIFY(f_struct)
+        IF (three_dim) THEN
+          CALL c_f_pointer(field, f_struct_3d, [dims])
+          CALL scarf_execute(seed, f_struct_3d, stats)
+          NULLIFY(f_struct)
+        ELSE
+          CALL c_f_pointer(field, f_struct_2d, [dims])
+          CALL scarf_execute(seed, f_struct_2d, stats)
+          NULLIFY(f_struct)
+        ENDIF
       ENDIF
 
     END SUBROUTINE execute
@@ -190,6 +215,8 @@ MODULE m_scarflib_c_binding
       !-----------------------------------------------------------------------------------------------------------------------------
 
       CALL scarf_finalize()
+
+      IF (ALLOCATED(dims)) DEALLOCATE(dims)
 
     END SUBROUTINE finalize
 
@@ -214,11 +241,16 @@ MODULE m_scarflib_c_binding
       INTEGER(c_int),                                          OPTIONAL, INTENT(IN) :: nwriters
       CHARACTER(:),      ALLOCATABLE                                                :: filename
       INTEGER(f_int)                                                                :: i
-      REAL(c_real),                  DIMENSION(:,:,:), POINTER                      :: ptr
+      REAL(c_real),                  DIMENSION(:,:),   POINTER                      :: ptr_2d
+      REAL(c_real),                  DIMENSION(:,:,:), POINTER                      :: ptr_3d
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      CALL c_f_pointer(field, ptr, [dims])
+      IF (three_dim) THEN
+        CALL c_f_pointer(field, ptr_3d, [dims])
+      ELSE
+        CALL c_f_pointer(field, ptr_2d, [dims])
+      ENDIF
 
       i = 1
 
@@ -229,9 +261,13 @@ MODULE m_scarflib_c_binding
         i        = i + 1
       ENDDO
 
-      CALL scarf_io(npts, ptr, filename, nwriters)
-
-      NULLIFY(ptr)
+      IF (three_dim) THEN
+        CALL scarf_io(npts, ptr_3d, filename, nwriters)
+        NULLIFY(ptr_3d)
+      ELSE
+        CALL scarf_io(npts, ptr_2d, filename, nwriters)
+        NULLIFY(ptr_2d)
+      ENDIF
 
     END SUBROUTINE io_one
 

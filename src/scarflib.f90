@@ -31,11 +31,11 @@ MODULE m_scarflib
   END INTERFACE
 
   INTERFACE scarf_execute
-    MODULE PROCEDURE execute_structured, execute_unstructured
+    MODULE PROCEDURE execute_structured_2d, execute_structured_3d, execute_unstructured
   END INTERFACE
 
   INTERFACE scarf_io
-    MODULE PROCEDURE scarf_io_slice, scarf_io_one
+    MODULE PROCEDURE scarf_io_slice, scarf_io_one_2d, scarf_io_one_3d
   END INTERFACE
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
@@ -83,10 +83,10 @@ MODULE m_scarflib
       !   04/05/20                  original version
       !
 
-      INTEGER(f_int), DIMENSION(3),             INTENT(IN) :: fs, fe         !< first/last index of external grid
+      INTEGER(f_int), DIMENSION(:),             INTENT(IN) :: fs, fe         !< first/last index of external grid
       REAL(f_real),                             INTENT(IN) :: ds             !< grid-step external grid (controls max resolvable wavenumber)
       INTEGER(f_int),                           INTENT(IN) :: acf            !< autocorrelation function (0=von karman, 1=gaussian)
-      REAL(f_real),   DIMENSION(3),             INTENT(IN) :: cl             !< correlation length
+      REAL(f_real),   DIMENSION(:),             INTENT(IN) :: cl             !< correlation length
       REAL(f_real),                             INTENT(IN) :: sigma          !< standard deviation
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: method         !< algorithm of choice (empty=0=fim, 1=srm)
       REAL(f_real),                   OPTIONAL, INTENT(IN) :: hurst          !< hurst exponent (needed only for acf=0)
@@ -95,20 +95,25 @@ MODULE m_scarflib
       REAL(f_real),                   OPTIONAL, INTENT(IN) :: mute, taper    !< radius for taper/muting
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: rescale        !< rescale discrete std.dev. to continuous one
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: pad            !< pad internal grid (fim only, empty=0=no, 1=yes)
-      REAL(f_real),   DIMENSION(3),   OPTIONAL, INTENT(IN) :: nc, fc         !< min/max extent external grid (empty = use fs,fe)
+      REAL(f_real),   DIMENSION(:),   OPTIONAL, INTENT(IN) :: nc, fc         !< min/max extent external grid (empty = use fs,fe)
       REAL(f_real),                   OPTIONAL, INTENT(IN) :: alpha, beta, gamma
+      INTEGER(f_int)                                       :: n
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      obj%fs  = fs
-      obj%fe  = fe
-      obj%ds  = ds
+      n = SIZE(fs)
+
+      obs%fs = 0; obs%fe = 0; obs%cl = 0._f_real
+
+      obj%fs(1:n) = fs
+      obj%fe(1:n) = fe
+      obj%ds      = ds
 
       ! by default minimum grid-step of external grid equals current grid-step: this implies Kc = Kmax
-      obj%dh    = ds
-      obj%acf   = acf
-      obj%cl    = cl
-      obj%sigma = sigma
+      obj%dh      = ds
+      obj%acf     = acf
+      obj%cl(1:n) = cl
+      obj%sigma   = sigma
 
       obj%method = 0                       !< default to FIM algorithm
 
@@ -123,8 +128,8 @@ MODULE m_scarflib
       obj%beta  = 0._f_real
       obj%gamma = 0._f_real
 
-      obj%nc      = (fs - 1) * ds          !< by default, "nc" and "fc" are given by "fs" and "fe"
-      obj%fc      = (fe - 1) * ds
+      obj%nc = (fs - 1) * ds               !< by default, "nc" and "fc" are given by "fs" and "fe"
+      obj%fc = (fe - 1) * ds
 
       ALLOCATE(obj%poi(0,0))               !< by default, there are no points where tapering/muting should be applied
 
@@ -155,7 +160,7 @@ MODULE m_scarflib
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE initialize_unstructured(x, y, z, dh, acf, cl, sigma, method, hurst, ds, poi, mute, taper, rescale, pad, nc, fc,  &
+    SUBROUTINE initialize_unstructured(dh, acf, cl, sigma, x, y, z, method, hurst, ds, poi, mute, taper, rescale, pad, nc, fc,  &
                                        alpha, beta, gamma)
 
       ! Purpose:
@@ -168,11 +173,12 @@ MODULE m_scarflib
       !   04/05/20                  original version
       !
 
-      REAL(f_real),   DIMENSION(:),   TARGET,           INTENT(IN) :: x, y, z            !< external grid nodes
       REAL(f_real),                                     INTENT(IN) :: dh                 !< min grid-step external grid (controls max absolute wavenumber)
       INTEGER(f_int),                                   INTENT(IN) :: acf                !< autocorrelation function (0=von karman, 1=gaussian)
-      REAL(f_real),   DIMENSION(3),                     INTENT(IN) :: cl                 !< correlation length
+      REAL(f_real),   DIMENSION(:),                     INTENT(IN) :: cl                 !< correlation length
       REAL(f_real),                                     INTENT(IN) :: sigma              !< continuous tandard deviation
+      REAL(f_real),   DIMENSION(:),   TARGET,           INTENT(IN) :: x, y               !< external grid nodes
+      REAL(f_real),   DIMENSION(:),   TARGET, OPTIONAL, INTENT(IN) :: z                  !< external grid nodes
       INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: method             !< algorithm of choice (empty=0=fim, 1=srm)
       REAL(f_real),                           OPTIONAL, INTENT(IN) :: hurst              !< hurst exponent (needed only for acf=0)
       REAL(f_real),                           OPTIONAL, INTENT(IN) :: ds                 !< grid-step external grid (controls max resolvable wavenumber)
@@ -182,17 +188,23 @@ MODULE m_scarflib
       INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: pad                !< pad internal grid (FIM only, empty=0=no, 1=yes)
       REAL(f_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc             !< near corner, far corner
       REAL(f_real),                           OPTIONAL, INTENT(IN) :: alpha, beta, gamma
+      INTEGER(f_int)                                               :: n
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      obj%x     => x
-      obj%y     => y
-      obj%z     => z
+      n = SIZE(cl)
 
-      obj%dh    = dh
-      obj%acf   = acf
-      obj%cl    = cl
-      obj%sigma = sigma
+      obs%cl = 0._f_real
+
+      obj%x => x
+      obj%y => y
+
+      IF (n .eq. 3) obj%z => z
+
+      obj%dh      = dh
+      obj%acf     = acf
+      obj%cl(1:n) = cl
+      obj%sigma   = sigma
 
       ! by default current grid-step of external grid equals min grid-step: this implies Kc = Kmax
       obj%ds     = dh
@@ -211,8 +223,13 @@ MODULE m_scarflib
       obj%gamma = 0._f_real
 
       ! by default, "nc" and "fc" are determined by input grid nodes
-      obj%nc      = [MINVAL(x, dim = 1), MINVAL(y, dim = 1), MINVAL(z, dim = 1)]
-      obj%fc      = [MAXVAL(x, dim = 1), MAXVAL(y, dim = 1), MAXVAL(z, dim = 1)]
+      IF (n .eq. 3) THEN
+        obj%nc = [MINVAL(x, dim = 1), MINVAL(y, dim = 1), MINVAL(z, dim = 1)]
+        obj%fc = [MAXVAL(x, dim = 1), MAXVAL(y, dim = 1), MAXVAL(z, dim = 1)]
+      ELSE
+        obj%nc = [MINVAL(x, dim = 1), MINVAL(y, dim = 1), 0._f_real]
+        obj%fc = [MAXVAL(x, dim = 1), MAXVAL(y, dim = 1), 0._f_real]
+      ENDIF
 
       ALLOCATE(obj%poi(0,0))                 !< by default, there are no points where tapering/muting should be applied
 
@@ -284,7 +301,7 @@ MODULE m_scarflib
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE execute_structured(seed, field, stats)
+    SUBROUTINE execute_structured_3d(seed, field, stats)
 
       ! Purpose:
       !   To launch random field calculations for structured meshes
@@ -319,7 +336,51 @@ MODULE m_scarflib
 
       ENDIF
 
-    END SUBROUTINE execute_structured
+    END SUBROUTINE execute_structured_3d
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE execute_structured_2d(seed, field, stats)
+
+      ! Purpose:
+      !   To launch random field calculations for structured meshes
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),                           INTENT(IN)  :: seed         !< seed number
+      REAL(f_real),   DIMENSION(:,:),   TARGET, INTENT(OUT) :: field        !< random field
+      REAL(f_real),   DIMENSION(8),             INTENT(OUT) :: stats        !< vector with accuracy (1:2), std.dev. (3), mean(4) and timing flags (5:6/8)
+      REAL(f_real),   DIMENSION(:,:,:), POINTER             :: f
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      stats(:) = 0._f_real
+
+      f(1:SIZE(field, 1), 1:SIZE(field, 2), 1:1) => field
+
+      IF (obj%method .eq. 0) THEN
+
+        CALL scarf3d_fim(obj%nc, obj%fc, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%poi, &
+                         obj%mute, obj%taper, obj%rescale, obj%pad, obj%alpha, obj%beta, obj%gamma, f, obj%stats)
+
+        stats = obj%stats
+
+      ELSEIF (obj%method .eq. 1) THEN
+
+        CALL scarf3d_srm(obj%nc, obj%fc, obj%ds, obj%fs, obj%fe, obj%dh, obj%acf, obj%cl, obj%sigma, obj%hurst, seed, obj%poi, &
+                          obj%mute, obj%taper, obj%rescale, obj%alpha, obj%beta, obj%gamma, f, obj%stats)
+
+        stats(1:6) = obj%stats(:)
+
+      ENDIF
+
+    END SUBROUTINE execute_structured_2d
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
@@ -420,7 +481,7 @@ MODULE m_scarflib
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE scarf_io_one(n, field, filename, nwriters)
+    SUBROUTINE scarf_io_one_3d(n, field, filename, nwriters)
 
       ! Purpose:
       !   To write to disk whole random field in a single file. The number of MPI processes with I/O permit can be defined in the
@@ -469,7 +530,62 @@ MODULE m_scarflib
 
       DEALLOCATE(gs, ge)
 
-    END SUBROUTINE scarf_io_one
+    END SUBROUTINE scarf_io_one_3d
+
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+    !===============================================================================================================================
+    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
+
+    SUBROUTINE scarf_io_one_2d(n, field, filename, nwriters)
+
+      ! Purpose:
+      !   To write to disk whole random field in a single file. The number of MPI processes with I/O permit can be defined in the
+      !   arguments list. Works for structured meshes only.
+      !
+      ! Revisions:
+      !     Date                    Description of change
+      !     ====                    =====================
+      !   04/05/20                  original version
+      !
+
+      INTEGER(f_int),   DIMENSION(2),             INTENT(IN) :: n                     !< grid points in the global mesh
+      REAL(f_real),     DIMENSION(:,:),           INTENT(IN) :: field                 !< random field
+      CHARACTER(len=*),                           INTENT(IN) :: filename              !< output file name
+      INTEGER(f_int),                   OPTIONAL, INTENT(IN) :: nwriters              !< number of concurrent I/O processes (empty = 1)
+      INTEGER(f_int)                                         :: rank, np, nw, ierr
+
+      !-----------------------------------------------------------------------------------------------------------------------------
+
+      ! get rank number
+      CALL mpi_comm_rank(mpi_comm_world, rank, ierr)
+
+      ! get number of tasks
+      CALL mpi_comm_size(mpi_comm_world, np, ierr)
+
+      ! these are global variables stored in "scarflib_common"
+      ALLOCATE(gs(3, 0:np - 1), ge(3, 0:np - 1))
+
+      ! store global indices
+      gs(:, rank) = obj%fs
+      ge(:, rank) = obj%fe
+
+      npts = [n(1), n(2), 1]
+
+      ! share info amongst all processes
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
+      CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
+
+      ! default case is to USE one writer only
+      nw = 1
+
+      ! we cannot have more writers than available processes
+      IF (PRESENT(nwriters)) nw = MIN(np, nwriters)
+
+      CALL write_one(field, filename, nw)
+
+      DEALLOCATE(gs, ge)
+
+    END SUBROUTINE scarf_io_one_2d
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

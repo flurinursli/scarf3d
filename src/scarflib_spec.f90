@@ -103,7 +103,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                DIMENSION(:),   INTENT(OUT) :: field        !< random field at x,y,z location
     REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and TIMING for performance analysis
     INTEGER(f_int)                                           :: i, l
-    INTEGER(f_int)                                           :: npts
+    INTEGER(f_int)                                           :: n, npts
     INTEGER(f_int)                                           :: ierr
     INTEGER(c_int)                                           :: c_seed
     INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                :: npoints
@@ -153,6 +153,13 @@ MODULE m_scarflib_srm
 
     info(:) = 0._f_real
 
+    ! discriminate between 2D and 3D case
+    IF (cl(3) .gt. 0._f_real) THEN
+      n = 3
+    ELSE
+      n = 2
+    ENDIF
+
     ! initialise random generator
     c_seed = seed
     CALL set_seed(c_seed)
@@ -174,12 +181,12 @@ MODULE m_scarflib_srm
     ! (global) effective grid size
     span = max_extent - min_extent
 
-    kmin = 2._f_real * pi * maxval(cl / span)
+    kmin = 2._f_real * pi * maxval(cl(1:n) / span(1:n))
 
-    kmax = pi / dh * minval(cl)
+    kmax = pi / dh * minval(cl(1:n))
 
     ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
-    kc = pi / ds * minval(cl)
+    kc = pi / ds * minval(cl(1:n))
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! check if the following conditions for a correct wavenumber representation are violated:
@@ -187,9 +194,9 @@ MODULE m_scarflib_srm
     ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._f_real * pi / span .ge. 1._f_real / cl)) info(1) = 1._f_real
+    IF (ANY(2._f_real * pi / span(1:n) .ge. 1._f_real / cl(1:n))) info(1) = 1._f_real
 
-    IF (ANY(ds .gt. cl / 2._f_real)) info(2) = 1._f_real
+    IF (ANY(ds .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
     ! set scaling factor
     scaling = sigma / SQRT(REAL(nharm, f_real))
@@ -248,9 +255,17 @@ MODULE m_scarflib_srm
 
         ! evaluate original pdf
         IF (acf .eq. 0) THEN
-          d = k**2 / (1._f_real + k**2)**(1.5_f_real + hurst)
+          IF (n .eq. 3) THEN
+            d = k**2 / (1._f_real + k**2)**(1.5_f_real + hurst)
+          ELSE
+            d = k / (1._f_real + k**2)**(1._f_real + hurst)
+          ENDIF
         ELSE
-          d = k**2 * EXP(-0.25_f_real * k**2) / SQRT(pi)
+          IF (n .eq. 3) THEN
+            d = k**2 * EXP(-0.25_f_real * k**2) / SQRT(pi)
+          ELSE
+            d = k * EXP(-0.25_f_real * k**2)
+          ENDIF
         ENDIF
 
         ! take "k" and exit if inequality r < d is verified
@@ -265,12 +280,18 @@ MODULE m_scarflib_srm
       IF (k .gt. kc) CYCLE
 
       ! compute azimuth and polar angles
-      phi   = r(1) * 2._f_real * pi
-      theta = ACOS(1._f_real - 2._f_real * r(2))
+      phi = r(1) * 2._f_real * pi
 
-      v1 = k * SIN(phi) * SIN(theta) / cl(1)
-      v2 = k * COS(phi) * SIN(theta) / cl(2)
-      v3 = k * COS(theta)            / cl(3)
+      IF (n .eq. 3) THEN
+        theta = ACOS(1._f_real - 2._f_real * r(2))
+        v1    = k * SIN(phi) * SIN(theta) / cl(1)
+        v2    = k * COS(phi) * SIN(theta) / cl(2)
+        v3    = k * COS(theta)            / cl(3)
+      ELSE
+        v1 = k * COS(phi) / cl(1)
+        v2 = k * SIN(phi) / cl(2)
+        v3 = 0._f_real
+      ENDIF
 
       ! compute harmonics coefficient "a" and "b"
       ! CALL normdist(r)
@@ -444,7 +465,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
     REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and TIMING for performance analysis
     INTEGER(f_int)                                             :: i, j, k, l
-    INTEGER(f_int)                                             :: ierr
+    INTEGER(f_int)                                             :: n, ierr
     INTEGER(c_int)                                             :: c_seed
     INTEGER(f_int),              DIMENSION(3)                  :: npts
     INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                  :: npoints
@@ -496,6 +517,13 @@ MODULE m_scarflib_srm
 
     info(:) = 0._f_real
 
+    ! discriminate between 2D and 3D case
+    IF (cl(3) .gt. 0._f_real) THEN
+      n = 3
+    ELSE
+      n = 2
+    ENDIF
+
     ! initialise random generator
     c_seed = seed
     CALL set_seed(c_seed)
@@ -517,12 +545,12 @@ MODULE m_scarflib_srm
     ! global effective grid size
     span = max_extent - min_extent
 
-    kmin = 2._f_real * pi * maxval(cl / span)
+    kmin = 2._f_real * pi * maxval(cl(1:n) / span(1:n))
 
-    kmax = pi / dh * minval(cl)
+    kmax = pi / dh * minval(cl(1:n))
 
     ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
-    kc = pi / ds * minval(cl)
+    kc = pi / ds * minval(cl(1:n))
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! check if the following conditions for a correct wavenumber representation are violated:
@@ -530,9 +558,9 @@ MODULE m_scarflib_srm
     ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._f_real * pi / span .ge. 1._f_real / cl)) info(1) = 1._f_real
+    IF (ANY(2._f_real * pi / span(1:n) .ge. 1._f_real / cl(1:n))) info(1) = 1._f_real
 
-    IF (ANY(ds .gt. cl / 2._f_real)) info(2) = 1._f_real
+    IF (ANY(ds .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
     ! set scaling factor
     scaling = sigma / SQRT(REAL(nharm, f_real))
@@ -592,9 +620,17 @@ MODULE m_scarflib_srm
 
         ! evaluate original pdf
         IF (acf .eq. 0) THEN
-          d = u**2 / (1._f_real + u**2)**(1.5_f_real + hurst)
+          IF (n .eq. 3) THEN
+            d = k**2 / (1._f_real + k**2)**(1.5_f_real + hurst)
+          ELSE
+            d = k / (1._f_real + k**2)**(1._f_real + hurst)
+          ENDIF
         ELSE
-          d = u**2 * EXP(-0.25_f_real * u**2) / SQRT(pi)
+          IF (n .eq. 3) THEN
+            d = k**2 * EXP(-0.25_f_real * k**2) / SQRT(pi)
+          ELSE
+            d = k * EXP(-0.25_f_real * k**2)
+          ENDIF
         ENDIF
 
         ! take "k" and exit if inequality r < d is verified
@@ -610,11 +646,17 @@ MODULE m_scarflib_srm
 
       ! compute azimuth and polar angles
       phi   = r(1) * 2._f_real * pi
-      theta = ACOS(1._f_real - 2._f_real * r(2))
 
-      v1 = u * SIN(phi) * SIN(theta) / cl(1)
-      v2 = u * COS(phi) * SIN(theta) / cl(2)
-      v3 = u * COS(theta)            / cl(3)
+      IF (n .eq. 3) THEN
+        theta = ACOS(1._f_real - 2._f_real * r(2))
+        v1    = k * SIN(phi) * SIN(theta) / cl(1)
+        v2    = k * COS(phi) * SIN(theta) / cl(2)
+        v3    = k * COS(theta)            / cl(3)
+      ELSE
+        v1 = k * COS(phi) / cl(1)
+        v2 = k * SIN(phi) / cl(2)
+        v3 = 0._f_real
+      ENDIF
 
       ! compute harmonics coefficient "a" and "b"
       ! CALL normdist(r)
