@@ -83,7 +83,7 @@ MODULE m_scarflib_fim
   LOGICAL,                                   PARAMETER  :: reorder = .true.
 
   ! set cartesian grid periodicity
-  LOGICAL,                     DIMENSION(3), PARAMETER  :: isperiodic = [.false., .false., .false.]
+  LOGICAL,                     DIMENSION(3), PARAMETER  :: isperiodic = [.false., .false., .true.]
 
   ! set a very large number
   REAL(f_real),                              PARAMETER  :: big = HUGE(1._f_real)
@@ -253,8 +253,8 @@ MODULE m_scarflib_fim
       diagonal = SQRT( (bar(1) - min_extent(1))**2 + (bar(2) - min_extent(2))**2 + (bar(3) - min_extent(3))**2 )
 
       ! set new nc/fc
-      min_extent = bar - diagonal
-      max_extent = bar + diagonal
+      min_extent(1:n) = bar(1:n) - diagonal
+      max_extent(1:n) = bar(1:n) + diagonal
 
       if (world_rank == 0) print*, 'diagonal ', diagonal, ' -- ', bar
 
@@ -287,7 +287,7 @@ MODULE m_scarflib_fim
         off_axis(i) = min_extent(i) - (offset + 0.5_f_real) * dh
 
         IF ( (n .eq. 2) .and. (i .eq. 3) ) THEN
-          off_axis(i) = 0._f_real
+          off_axis(i) = -off_axis(i)
           npts(i)     = 1
         ENDIF
 
@@ -301,7 +301,7 @@ MODULE m_scarflib_fim
 
       !***
 
-      bar = bar - off_axis
+      bar(1:n) = bar(1:n) - off_axis(1:n)
 
       IF (world_rank == 0) print*, 'new bar: ', bar
 
@@ -376,6 +376,8 @@ enddo
         xc = matrix(1,1)*(x(i) - off_axis(1)) + matrix(1,2)*(y(i) - off_axis(2)) + matrix(1,3)*(z(i) - off_axis(3)) + bar(1)
         yc = matrix(2,1)*(x(i) - off_axis(1)) + matrix(2,2)*(y(i) - off_axis(2)) + matrix(2,3)*(z(i) - off_axis(3)) + bar(2)
         zc = matrix(3,1)*(x(i) - off_axis(1)) + matrix(3,2)*(y(i) - off_axis(2)) + matrix(3,3)*(z(i) - off_axis(3)) + bar(3)
+
+        IF (n .eq. 2) zc = 0._f_real
 
         ps(1) = MIN(ps(1), FLOOR(xc / dh) + 1)
         pe(1) = MAX(pe(1), FLOOR(xc / dh) + 1)
@@ -677,7 +679,6 @@ enddo
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
 
-
 !***
 
       ! angle about z-axis
@@ -704,8 +705,8 @@ enddo
       diagonal = SQRT( (bar(1) - min_extent(1))**2 + (bar(2) - min_extent(2))**2 + (bar(3) - min_extent(3))**2 )
 
       ! set new nc/fc
-      min_extent = bar - diagonal
-      max_extent = bar + diagonal
+      min_extent(1:n) = bar(1:n) - diagonal
+      max_extent(1:n) = bar(1:n) + diagonal
 
       if (world_rank == 0) print*, 'diagonal ', diagonal, ' -- ', bar
 
@@ -739,7 +740,7 @@ enddo
         off_axis(i) = min_extent(i) - (offset + 0.5_f_real) * dh
 
         IF ( (n .eq. 2) .and. (i .eq. 3) ) THEN
-          off_axis(i) = 0._f_real
+          off_axis(i) = -off_axis(i)
           npts(i)     = 1
         ENDIF
 
@@ -754,7 +755,7 @@ enddo
 
 !***
 
-      bar = bar - off_axis
+      bar(1:n) = bar(1:n) - off_axis(1:n)
 
       IF (world_rank == 0) print*, 'new bar: ', bar
 
@@ -848,6 +849,8 @@ enddo
         z(8) = m(3,1)*((fs(1) - 1)*ds - o(1)) + m(3,2)*((fe(2) - 1)*ds - o(2)) + m(3,3)*((fe(3) - 1)*ds - o(3))
       END ASSOCIATE
 
+      IF (n .eq. 2) z(:) = 0._f_real
+
       x = x + bar(1)
       y = y + bar(2)
       z = z + bar(3)
@@ -868,6 +871,8 @@ enddo
 
 
       points_rank2world = 0
+
+      bool = .true.
 
       ! determine if calling process has at least one point falling inside domain of "i-th" process
       DO i = 0, world_size - 1
@@ -1556,15 +1561,15 @@ enddo
 
       ! transform point coordinates into grid indices
       DO k0 = p0(3), p1(3)
-        z(k0) = ((fs(3) - 1 + k0 - 1) * ds - off_axis(3)) !/ dh + 3._f_real
+        z(k0) = ((fs(3) - 1 + k0 - 1) * ds - off_axis(3))   !/ dh + 3._f_real
       ENDDO
 
       DO j0 = p0(2), p1(2)
-        y(j0) = ((fs(2) - 1 + j0 - 1) * ds - off_axis(2)) !/ dh + 3._f_real
+        y(j0) = ((fs(2) - 1 + j0 - 1) * ds - off_axis(2))   !/ dh + 3._f_real
       ENDDO
 
       DO i0 = p0(1), p1(1)
-        x(i0) = ((fs(1) - 1 + i0 - 1) * ds - off_axis(1)) !/ dh + 3._f_real
+        x(i0) = ((fs(1) - 1 + i0 - 1) * ds - off_axis(1))   !/ dh + 3._f_real
       ENDDO
 
       sendcounts(:) = 0
@@ -2386,6 +2391,8 @@ enddo
       ky = [[(j * dk(2), j = 0, npts(2)/2)], [(j * dk(2), j = npts(2)/2-1, 1, -1)]]
       kz = [[(k * dk(3), k = 0, npts(3)/2)], [(k * dk(3), k = npts(3)/2-1, 1, -1)]]
 
+      IF (n .eq. 2) kz(:) = 0._f_real
+
 if (world_rank == 0) print*, 'SPEC KZ ', kz
 
       IF (n .eq. 3) THEN
@@ -2984,11 +2991,13 @@ if (world_rank == 0) print*, 'SPEC KZ ', kz
 
         ! nearest neighbor
         ! {
-        ! i0 = NINT(i)
-        ! j0 = NINT(j)
-        ! k0 = NINT(k)
-        !
-        ! v(p) = delta(i0, j0, k0)
+!         i0 = NINT(i)
+!         j0 = NINT(j)
+!         k0 = NINT(k)
+!
+! !if (k .ne. 2.5_f_real) print*, 'K0 in interpolate ', k0, k , SIZE(delta, 3)    ! k0=2, SIZE(delta, 3) = 2
+!
+!         v(p) = delta(i0, j0, k0)
         ! }
 
         ! bilinear

@@ -128,8 +128,8 @@ MODULE m_scarflib
       obj%beta  = 0._f_real
       obj%gamma = 0._f_real
 
-      obj%nc = (fs - 1) * ds               !< by default, "nc" and "fc" are given by "fs" and "fe"
-      obj%fc = (fe - 1) * ds
+      obj%nc = (obj%fs - 1) * ds               !< by default, "nc" and "fc" are given by "fs" and "fe"
+      obj%fc = (obj%fe - 1) * ds
 
       ALLOCATE(obj%poi(0,0))               !< by default, there are no points where tapering/muting should be applied
 
@@ -194,12 +194,17 @@ MODULE m_scarflib
 
       n = SIZE(cl)
 
-      obj%cl = 0._f_real
+      obj%cl(:) = 0._f_real
 
       obj%x => x
       obj%y => y
 
-      IF (n .eq. 3) obj%z => z
+      IF (n .eq. 3) THEN
+        obj%z => z
+      ELSE
+        ALLOCATE(obj%z(SIZE(x)))
+        obj%z = 0._f_real
+      ENDIF
 
       obj%dh      = dh
       obj%acf     = acf
@@ -401,6 +406,9 @@ MODULE m_scarflib
 
       IF (ALLOCATED(obj%poi))   DEALLOCATE(obj%poi)
       IF (ALLOCATED(obj%stats)) DEALLOCATE(obj%stats)
+
+      ! in 2D, for unstructured meshes, we allocated pointer 'obj%z'
+      IF ( (obj%cl(3) .eq. 0._f_real) .and. (ASSOCIATED(obj%z)) ) DEALLOCATE(obj%z)
 
       NULLIFY(obj%x, obj%y, obj%z)
 

@@ -227,6 +227,8 @@ MODULE m_scarflib_srm
     matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
     matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
 
+    IF (n .eq. 2) matrix(3, 3) = 0._f_real
+
     ! baricenter in original reference frame
     bar = (max_extent - min_extent) / 2._f_real
 
@@ -590,6 +592,8 @@ MODULE m_scarflib_srm
     matrix(:, 1) = [calpha*cbeta                       , salpha*cbeta                       , -sbeta      ]
     matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
     matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
+
+    IF (n .eq. 2) matrix(3, 3) = 0._f_real
 
     ! baricenter in original reference frame
     bar = (max_extent - min_extent) / 2._f_real
