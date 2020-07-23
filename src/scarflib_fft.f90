@@ -2391,10 +2391,6 @@ enddo
       ky = [[(j * dk(2), j = 0, npts(2)/2)], [(j * dk(2), j = npts(2)/2-1, 1, -1)]]
       kz = [[(k * dk(3), k = 0, npts(3)/2)], [(k * dk(3), k = npts(3)/2-1, 1, -1)]]
 
-      IF (n .eq. 2) kz(:) = 0._f_real
-
-if (world_rank == 0) print*, 'SPEC KZ ', kz
-
       IF (n .eq. 3) THEN
         hurst_factor = hurst + 1.5_f_real
       ELSE

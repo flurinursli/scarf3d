@@ -116,6 +116,7 @@ MODULE m_scarflib_srm
     REAL(f_real)                                             :: calpha, salpha
     REAL(f_real)                                             :: cbeta, sbeta
     REAL(f_real)                                             :: cgamma, sgamma
+    REAL(f_real)                                             :: hurst_factor
     REAL(f_dble)                                             :: tictoc
     REAL(c_real),                DIMENSION(2)                :: r
     REAL(f_real),                DIMENSION(3)                :: span
@@ -227,8 +228,6 @@ MODULE m_scarflib_srm
     matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
     matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
 
-    IF (n .eq. 2) matrix(3, 3) = 0._f_real
-
     ! baricenter in original reference frame
     bar = (max_extent - min_extent) / 2._f_real
 
@@ -237,6 +236,12 @@ MODULE m_scarflib_srm
 
     ! translation vector to rotate around baricenter in original reference frame
     bar = bar - obar
+
+print*, 'bar ', bar, obar
+
+    hurst_factor = hurst + 1._f_real
+
+    IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
 
     ! loop over harmonics
     ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
@@ -257,17 +262,11 @@ MODULE m_scarflib_srm
 
         ! evaluate original pdf
         IF (acf .eq. 0) THEN
-          IF (n .eq. 3) THEN
-            d = k**2 / (1._f_real + k**2)**(1.5_f_real + hurst)
-          ELSE
-            d = k / (1._f_real + k**2)**(1._f_real + hurst)
-          ENDIF
+          d = k / (1._f_real + k**2)**hurst_factor
+          IF (n .eq. 3) d = d * k
         ELSE
-          IF (n .eq. 3) THEN
-            d = k**2 * EXP(-0.25_f_real * k**2) / SQRT(pi)
-          ELSE
-            d = k * EXP(-0.25_f_real * k**2)
-          ENDIF
+          d = k * EXP(-0.25_f_real * k**2)
+          IF (n .eq. 3) d = d * k / SQRT(pi)
         ENDIF
 
         ! take "k" and exit if inequality r < d is verified
@@ -481,6 +480,7 @@ MODULE m_scarflib_srm
     REAL(f_real)                                               :: calpha, salpha
     REAL(f_real)                                               :: cbeta, sbeta
     REAL(f_real)                                               :: cgamma, sgamma
+    REAL(f_real)                                               :: hurst_factor
     REAL(f_dble)                                               :: tictoc
     REAL(c_real),                DIMENSION(2)                  :: r
     REAL(f_real),                DIMENSION(3)                  :: span
@@ -593,8 +593,6 @@ MODULE m_scarflib_srm
     matrix(:, 2) = [calpha*sbeta*sgamma - salpha*cgamma, salpha*sbeta*sgamma + calpha*cgamma, cbeta*sgamma]
     matrix(:, 3) = [calpha*sbeta*cgamma + salpha*sgamma, salpha*sbeta*cgamma - calpha*sgamma, cbeta*cgamma]
 
-    IF (n .eq. 2) matrix(3, 3) = 0._f_real
-
     ! baricenter in original reference frame
     bar = (max_extent - min_extent) / 2._f_real
 
@@ -604,6 +602,11 @@ MODULE m_scarflib_srm
     ! translation vector to rotate around baricenter in original reference frame
     bar = bar - obar
 
+print*, 'bar ', bar, obar, ' x ', npts
+
+    hurst_factor = hurst + 1._f_real
+
+    IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
 
     ! loop over harmonics
     ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
@@ -624,17 +627,11 @@ MODULE m_scarflib_srm
 
         ! evaluate original pdf
         IF (acf .eq. 0) THEN
-          IF (n .eq. 3) THEN
-            d = k**2 / (1._f_real + k**2)**(1.5_f_real + hurst)
-          ELSE
-            d = k / (1._f_real + k**2)**(1._f_real + hurst)
-          ENDIF
+          d = u / (1._f_real + u**2)**hurst_factor
+          IF (n .eq. 3) d = d * u
         ELSE
-          IF (n .eq. 3) THEN
-            d = k**2 * EXP(-0.25_f_real * k**2) / SQRT(pi)
-          ELSE
-            d = k * EXP(-0.25_f_real * k**2)
-          ENDIF
+          d = u * EXP(-0.25_f_real * u**2)
+          IF (n .eq. 3) d = d * u / SQRT(pi)
         ENDIF
 
         ! take "k" and exit if inequality r < d is verified
@@ -649,16 +646,16 @@ MODULE m_scarflib_srm
       IF (u .gt. kc) CYCLE
 
       ! compute azimuth and polar angles
-      phi   = r(1) * 2._f_real * pi
+      phi = r(1) * 2._f_real * pi
 
       IF (n .eq. 3) THEN
         theta = ACOS(1._f_real - 2._f_real * r(2))
-        v1    = k * SIN(phi) * SIN(theta) / cl(1)
-        v2    = k * COS(phi) * SIN(theta) / cl(2)
-        v3    = k * COS(theta)            / cl(3)
+        v1    = u * SIN(phi) * SIN(theta) / cl(1)
+        v2    = u * COS(phi) * SIN(theta) / cl(2)
+        v3    = u * COS(theta)            / cl(3)
       ELSE
-        v1 = k * COS(phi) / cl(1)
-        v2 = k * SIN(phi) / cl(2)
+        v1 = u * COS(phi) / cl(1)
+        v2 = u * SIN(phi) / cl(2)
         v3 = 0._f_real
       ENDIF
 
