@@ -21,7 +21,7 @@ PROGRAM driver
   INTEGER(f_int)                                         :: i, j, k
   INTEGER(f_int)                                         :: rank, ntasks, ierr
   INTEGER(f_int)                                         :: acf, rescale, pad, seed
-  INTEGER(f_int),              DIMENSION(3)              :: n, fs, fe
+  INTEGER(f_int),              DIMENSION(3)              :: n, fs, fe, samples
   REAL(f_real)                                           :: ds, dh, sigma, hurst, mute, taper
   REAL(f_real),                DIMENSION(3)              :: cl
   REAL(f_real),                DIMENSION(8)              :: stats
@@ -50,7 +50,7 @@ PROGRAM driver
 
   ! number of points for whole model
   !n = [2000*2, 3200*2, 1200*2]
-  n = [500, 450, 400]
+  n = [5000, 4500, 400/400]
 
   ! grid step
   ds = 50._f_real
@@ -61,7 +61,7 @@ PROGRAM driver
   acf = 0
 
   ! correlation length
-  cl = [2000._f_real, 500._f_real, 100._f_real]
+  cl = [2000._f_real, 500._f_real, 100._f_real] * 10
 
   ! standard deviation (sigma%/100)
   sigma = 0.05_f_real
@@ -73,14 +73,15 @@ PROGRAM driver
   seed = 1235
 
   ! set position of point-of-interest (muting/tapering), same units as "dh"
-  poi(:, 1) = [400., 250., 100.] * ds
-  poi(:, 2) = [350., 200.,  50.] * ds
+  poi(:, 1) = [400., 250., 100.] * ds * 10
+  poi(:, 2) = [200., 150.,  50.] * ds * 10
+  !poi(:, 2) = [350., 200.,  50.] * ds
 
   ! radius for muting (at poi), same units as "dh"
-  mute = 1000. !1000.
+  mute = 1000. * 10 !1000.
 
   ! radius for tapering (at poi + mute), same units as "dh"
-  taper = 5000. !5000.
+  taper = 5000. * 10 !5000.
 
   ! rescale to desired (continuous) sigma
   rescale = 0
@@ -99,20 +100,19 @@ PROGRAM driver
 
   CALL sample_mesh(rank, ntasks, n, fs, fe)
 
+  samples = [fe(1) - fs(1) + 1, fe(2) - fs(2) + 1, fe(3) - fs(3) + 1]
+
   ! allocate memory for mesh
-  ALLOCATE(v1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
-  ALLOCATE(x1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
-  ALLOCATE(y1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
-  ALLOCATE(z1((fe(1) - fs(1) + 1) * (fe(2) - fs(2) + 1) * (fe(3) - fs(3) + 1)))
+  ALLOCATE(v1(PRODUCT(samples)), x1(PRODUCT(samples)), y1(PRODUCT(samples)), z1(PRODUCT(samples)))
 
   x3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => x1
   y3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => y1
   z3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => z1
   v3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => v1
 
-  x2(fs(1):fe(1), fs(2):fe(2)) => x1(1:n(1)*n(2))
-  y2(fs(1):fe(1), fs(2):fe(2)) => y1(1:n(1)*n(2))
-  v2(fs(1):fe(1), fs(2):fe(2)) => v1(1:n(1)*n(2))
+  x2(fs(1):fe(1), fs(2):fe(2)) => x1(1:PRODUCT(samples(1:2)))
+  y2(fs(1):fe(1), fs(2):fe(2)) => y1(1:PRODUCT(samples(1:2)))
+  v2(fs(1):fe(1), fs(2):fe(2)) => v1(1:PRODUCT(samples(1:2)))
 
   DO k = fs(3), fe(3)
     DO j = fs(2), fe(2)
@@ -135,7 +135,8 @@ PROGRAM driver
   IF (rank .eq. 0) WRITE(stdout, *) '********************** FIM method 2D ***********************'
 
   ! structured mesh test
-  CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 0, hurst = hurst, alpha = 0._f_real)
+  CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 0, hurst = hurst, alpha = 30._f_real,    &
+                        poi = poi(1:2,:), taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
@@ -170,11 +171,12 @@ PROGRAM driver
   CALL scarf_finalize()
 
   ! unstructured mesh test
-  CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1(1:n(1)*n(2)), y1(1:n(1)*n(2)), method = 0, hurst = hurst, alpha = 0._f_real)
+  CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1(1:PRODUCT(samples(1:2))), y1(1:PRODUCT(samples(1:2))), method = 0,  &
+                        hurst = hurst, alpha = 30._f_real, poi = poi(1:2,:), taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
-  CALL scarf_execute(seed, v1(1:n(1)*n(2)), stats)
+  CALL scarf_execute(seed, v1(1:PRODUCT(samples(1:2))), stats)
 
   CALL watch_stop(tictoc)
 
@@ -202,84 +204,84 @@ PROGRAM driver
 
   !---------------------------------------------------------------------------------------------------------------------------------
 
-  IF (rank .eq. 0) WRITE(stdout, *) ''
-  IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'
-  IF (rank .eq. 0) WRITE(stdout, *) '*********************** FIM method 3D **********************'
-
-  ! structured mesh test
-  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, beta = 1._f_real)
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_execute(seed, v3, stats)
-
-  CALL watch_stop(tictoc)
-
-  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
-
-  IF (rank .eq. 0) THEN
-    WRITE(stdout, *) ''
-    WRITE(stdout, *) 'Summary structured mesh'
-    WRITE(stdout, *) '  i)   test completed in       : ', REAL(tictoc, f_sgle),   ' sec'
-    WRITE(stdout, *) '  ii)  domain too small?       : ', NINT(stats(1))
-    WRITE(stdout, *) '  iii) grid-step too large?    : ', NINT(stats(2))
-    WRITE(stdout, *) '  iv)  standard deviation      : ', REAL(stats(3), f_sgle)
-    WRITE(stdout, *) '  vi)  mean value              : ', REAL(stats(4), f_sgle)
-    WRITE(stdout, *) '  vii) timing for spectrum     : ', REAL(stats(5), f_sgle), ' sec'
-    WRITE(stdout, *) '  viii)timing for symmetry     : ', REAL(stats(6), f_sgle), ' sec'
-    WRITE(stdout, *) '  ix)  timing for ifft         : ', REAL(stats(7), f_sgle), ' sec'
-    WRITE(stdout, *) '  x)   timing for interpolation: ', REAL(stats(8), f_sgle), ' sec'
-  ENDIF
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_io(n, 'x', n(1)/2, v3, 'fft_struct_xslice')
-  CALL scarf_io(n, 'y', n(2)/2, v3, 'fft_struct_yslice')
-  CALL scarf_io(n, 'z', n(3)/2, v3, 'fft_struct_zslice')
-
-  CALL watch_stop(tictoc)
-  IF (rank .eq. 0) WRITE(stdout, *) '  xi)  slice(s) written in     : ', REAL(tictoc, f_sgle), ' sec'
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_io(n, v3, 'fft_struct_whole_3d', 3)
-
-  CALL watch_stop(tictoc)
-
-  IF (rank .eq. 0) WRITE(stdout, *) '  xii) whole file written in   : ', REAL(tictoc, f_sgle), ' sec'
-
-  CALL scarf_finalize()
-
-  ! unstructured mesh test
-  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, beta = 0.5_f_real)
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_execute(seed, v1, stats)
-
-  CALL watch_stop(tictoc)
-
-  CALL scarf_io(n, v3, 'fft_unstruct_whole_3d', 3)
-
-  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
-
-  IF (rank .eq. 0) THEN
-    WRITE(stdout, *) ''
-    WRITE(stdout, *) 'Summary unstructured mesh'
-    WRITE(stdout, *) '  i)   test completed in       : ', REAL(tictoc, f_sgle),   ' sec'
-    WRITE(stdout, *) '  ii)  domain too small?       : ', NINT(stats(1))
-    WRITE(stdout, *) '  iii) grid-step too large?    : ', NINT(stats(2))
-    WRITE(stdout, *) '  iv)  standard deviation      : ', REAL(stats(3), f_sgle)
-    WRITE(stdout, *) '  v)   mean value              : ', REAL(stats(4), f_sgle)
-    WRITE(stdout, *) '  vi)  timing for spectrum     : ', REAL(stats(5), f_sgle), ' sec'
-    WRITE(stdout, *) '  vii) timing for symmetry     : ', REAL(stats(6), f_sgle), ' sec'
-    WRITE(stdout, *) '  viii)timing for ifft         : ', REAL(stats(7), f_sgle), ' sec'
-    WRITE(stdout, *) '  ix)  timing for interpolation: ', REAL(stats(8), f_sgle), ' sec'
-  ENDIF
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_finalize()
+  ! IF (rank .eq. 0) WRITE(stdout, *) ''
+  ! IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'
+  ! IF (rank .eq. 0) WRITE(stdout, *) '*********************** FIM method 3D **********************'
+  !
+  ! ! structured mesh test
+  ! CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, beta = 10._f_real, poi=poi, taper=taper, mute=mute)
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_execute(seed, v3, stats)
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  !
+  ! IF (rank .eq. 0) THEN
+  !   WRITE(stdout, *) ''
+  !   WRITE(stdout, *) 'Summary structured mesh'
+  !   WRITE(stdout, *) '  i)   test completed in       : ', REAL(tictoc, f_sgle),   ' sec'
+  !   WRITE(stdout, *) '  ii)  domain too small?       : ', NINT(stats(1))
+  !   WRITE(stdout, *) '  iii) grid-step too large?    : ', NINT(stats(2))
+  !   WRITE(stdout, *) '  iv)  standard deviation      : ', REAL(stats(3), f_sgle)
+  !   WRITE(stdout, *) '  vi)  mean value              : ', REAL(stats(4), f_sgle)
+  !   WRITE(stdout, *) '  vii) timing for spectrum     : ', REAL(stats(5), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  viii)timing for symmetry     : ', REAL(stats(6), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  ix)  timing for ifft         : ', REAL(stats(7), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  x)   timing for interpolation: ', REAL(stats(8), f_sgle), ' sec'
+  ! ENDIF
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_io(n, 'x', n(1)/2, v3, 'fft_struct_xslice')
+  ! CALL scarf_io(n, 'y', n(2)/2, v3, 'fft_struct_yslice')
+  ! CALL scarf_io(n, 'z', n(3)/2, v3, 'fft_struct_zslice')
+  !
+  ! CALL watch_stop(tictoc)
+  ! IF (rank .eq. 0) WRITE(stdout, *) '  xi)  slice(s) written in     : ', REAL(tictoc, f_sgle), ' sec'
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_io(n, v3, 'fft_struct_whole_3d', 3)
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! IF (rank .eq. 0) WRITE(stdout, *) '  xii) whole file written in   : ', REAL(tictoc, f_sgle), ' sec'
+  !
+  ! CALL scarf_finalize()
+  !
+  ! ! unstructured mesh test
+  ! CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, beta = 10._f_real,poi=poi,taper=taper,mute=mute)
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_execute(seed, v1, stats)
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! CALL scarf_io(n, v3, 'fft_unstruct_whole_3d', 3)
+  !
+  ! CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  !
+  ! IF (rank .eq. 0) THEN
+  !   WRITE(stdout, *) ''
+  !   WRITE(stdout, *) 'Summary unstructured mesh'
+  !   WRITE(stdout, *) '  i)   test completed in       : ', REAL(tictoc, f_sgle),   ' sec'
+  !   WRITE(stdout, *) '  ii)  domain too small?       : ', NINT(stats(1))
+  !   WRITE(stdout, *) '  iii) grid-step too large?    : ', NINT(stats(2))
+  !   WRITE(stdout, *) '  iv)  standard deviation      : ', REAL(stats(3), f_sgle)
+  !   WRITE(stdout, *) '  v)   mean value              : ', REAL(stats(4), f_sgle)
+  !   WRITE(stdout, *) '  vi)  timing for spectrum     : ', REAL(stats(5), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  vii) timing for symmetry     : ', REAL(stats(6), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  viii)timing for ifft         : ', REAL(stats(7), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  ix)  timing for interpolation: ', REAL(stats(8), f_sgle), ' sec'
+  ! ENDIF
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_finalize()
 
 
   ! ================================================================================================================================-
@@ -295,7 +297,8 @@ PROGRAM driver
   IF (rank .eq. 0) WRITE(stdout, *) '*********************** SRM method 2D **********************'
 
   ! structured mesh test
-  CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 1, hurst = hurst, alpha = -20._f_real)
+  CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 1, hurst = hurst, alpha = -20._f_real,    &
+                        poi = poi(1:2,:), taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
@@ -328,11 +331,12 @@ PROGRAM driver
   CALL scarf_finalize()
 
   ! unstructured mesh test
-  CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1(1:n(1)*n(2)), y1(1:n(1)*n(2)), method = 1, hurst = hurst, alpha = -20._f_real)
+  CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1(1:PRODUCT(samples(1:2))), y1(1:PRODUCT(samples(1:2))), method = 1,  &
+                        hurst = hurst, alpha = -20._f_real, poi = poi(1:2,:), taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
-  CALL scarf_execute(seed, v1(1:n(1)*n(2)), stats)
+  CALL scarf_execute(seed, v1(1:PRODUCT(samples(1:2))), stats)
 
   CALL watch_stop(tictoc)
 
@@ -358,81 +362,81 @@ PROGRAM driver
 
   !---------------------------------------------------------------------------------------------------------------------------------
 
-  IF (rank .eq. 0) WRITE(stdout, *) ''
-  IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'
-  IF (rank .eq. 0) WRITE(stdout, *) '*********************** SRM method 3D **********************'
-
-  ! structured mesh test
-  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst, beta = -20._f_real)
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_execute(seed, v3, stats)
-
-  CALL watch_stop(tictoc)
-
-  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
-
-  IF (rank .eq. 0) THEN
-    WRITE(stdout, *) ''
-    WRITE(stdout, *) 'Summary structured mesh'
-    WRITE(stdout, *) '  i)   test completed in    : ', REAL(tictoc, f_sgle),   ' sec'
-    WRITE(stdout, *) '  ii)  domain too small?    : ', NINT(stats(1))
-    WRITE(stdout, *) '  iii) grid-step too large? : ', NINT(stats(2))
-    WRITE(stdout, *) '  iv)  standard deviation   : ', REAL(stats(3), f_sgle)
-    WRITE(stdout, *) '  vi)  mean value           : ', REAL(stats(4), f_sgle)
-    WRITE(stdout, *) '  vii) CPU main loop        : ', REAL(stats(5), f_sgle), ' sec'
-    WRITE(stdout, *) '  viii)GPU main loop        : ', REAL(stats(6), f_sgle), ' sec'
-  ENDIF
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_io(n, 'x', n(1)/2, v3, 'spec_struct_xslice')
-  CALL scarf_io(n, 'y', n(2)/2, v3, 'spec_struct_yslice')
-  CALL scarf_io(n, 'z', n(3)/2, v3, 'spec_struct_zslice')
-
-  CALL watch_stop(tictoc)
-
-  IF (rank .eq. 0) WRITE(stdout, *) '  ix)  slice(s) written in  : ', REAL(tictoc, f_sgle), ' sec'
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_io(n, v3, 'spec_struct_whole_3d', 3)
-
-  CALL watch_stop(tictoc)
-
-  IF (rank .eq. 0) WRITE(stdout, *) '  x)   whole file written in: ', REAL(tictoc, f_sgle), ' sec'
-
-  CALL scarf_finalize()
-
-  ! unstructured mesh test
-  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, beta = -20._f_real)
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_execute(seed, v1, stats)
-
-  CALL watch_stop(tictoc)
-
-  CALL scarf_io(n, v3, 'spec_unstruct_whole_3d', 3)
-
-  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
-
-  IF (rank .eq. 0) THEN
-    WRITE(stdout, *) ''
-    WRITE(stdout, *) 'Summary unstructured mesh'
-    WRITE(stdout, *) '  i)   test completed in   : ', REAL(tictoc, f_sgle),   ' sec'
-    WRITE(stdout, *) '  ii)  domain too small?   : ', NINT(stats(1))
-    WRITE(stdout, *) '  iii) grid-step too large?: ', NINT(stats(2))
-    WRITE(stdout, *) '  iv)  standard deviation  : ', REAL(stats(3), f_sgle)
-    WRITE(stdout, *) '  vi)  mean value          : ', REAL(stats(4), f_sgle)
-    WRITE(stdout, *) '  vii) CPU main loop       : ', REAL(stats(5), f_sgle), ' sec'
-    WRITE(stdout, *) '  viii)GPU main loop       : ', REAL(stats(6), f_sgle), ' sec'
-  ENDIF
-
-  CALL watch_start(tictoc)
-
-  CALL scarf_finalize()
+  ! IF (rank .eq. 0) WRITE(stdout, *) ''
+  ! IF (rank .eq. 0) WRITE(stdout, *) '************************************************************'
+  ! IF (rank .eq. 0) WRITE(stdout, *) '*********************** SRM method 3D **********************'
+  !
+  ! ! structured mesh test
+  ! CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst, beta = -20._f_real)
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_execute(seed, v3, stats)
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  !
+  ! IF (rank .eq. 0) THEN
+  !   WRITE(stdout, *) ''
+  !   WRITE(stdout, *) 'Summary structured mesh'
+  !   WRITE(stdout, *) '  i)   test completed in    : ', REAL(tictoc, f_sgle),   ' sec'
+  !   WRITE(stdout, *) '  ii)  domain too small?    : ', NINT(stats(1))
+  !   WRITE(stdout, *) '  iii) grid-step too large? : ', NINT(stats(2))
+  !   WRITE(stdout, *) '  iv)  standard deviation   : ', REAL(stats(3), f_sgle)
+  !   WRITE(stdout, *) '  vi)  mean value           : ', REAL(stats(4), f_sgle)
+  !   WRITE(stdout, *) '  vii) CPU main loop        : ', REAL(stats(5), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  viii)GPU main loop        : ', REAL(stats(6), f_sgle), ' sec'
+  ! ENDIF
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_io(n, 'x', n(1)/2, v3, 'spec_struct_xslice')
+  ! CALL scarf_io(n, 'y', n(2)/2, v3, 'spec_struct_yslice')
+  ! CALL scarf_io(n, 'z', n(3)/2, v3, 'spec_struct_zslice')
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! IF (rank .eq. 0) WRITE(stdout, *) '  ix)  slice(s) written in  : ', REAL(tictoc, f_sgle), ' sec'
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_io(n, v3, 'spec_struct_whole_3d', 3)
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! IF (rank .eq. 0) WRITE(stdout, *) '  x)   whole file written in: ', REAL(tictoc, f_sgle), ' sec'
+  !
+  ! CALL scarf_finalize()
+  !
+  ! ! unstructured mesh test
+  ! CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, beta = -20._f_real)
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_execute(seed, v1, stats)
+  !
+  ! CALL watch_stop(tictoc)
+  !
+  ! CALL scarf_io(n, v3, 'spec_unstruct_whole_3d', 3)
+  !
+  ! CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  !
+  ! IF (rank .eq. 0) THEN
+  !   WRITE(stdout, *) ''
+  !   WRITE(stdout, *) 'Summary unstructured mesh'
+  !   WRITE(stdout, *) '  i)   test completed in   : ', REAL(tictoc, f_sgle),   ' sec'
+  !   WRITE(stdout, *) '  ii)  domain too small?   : ', NINT(stats(1))
+  !   WRITE(stdout, *) '  iii) grid-step too large?: ', NINT(stats(2))
+  !   WRITE(stdout, *) '  iv)  standard deviation  : ', REAL(stats(3), f_sgle)
+  !   WRITE(stdout, *) '  vi)  mean value          : ', REAL(stats(4), f_sgle)
+  !   WRITE(stdout, *) '  vii) CPU main loop       : ', REAL(stats(5), f_sgle), ' sec'
+  !   WRITE(stdout, *) '  viii)GPU main loop       : ', REAL(stats(6), f_sgle), ' sec'
+  ! ENDIF
+  !
+  ! CALL watch_start(tictoc)
+  !
+  ! CALL scarf_finalize()
 
 #endif
 

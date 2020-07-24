@@ -11,6 +11,8 @@ MODULE m_scarflib_srm
   !     ====                    =====================
   !   04/05/20                  original version
   !   11/05/20                  updated macro for double-precision
+  !   21/07/20                  corr.len. refers to arbitrary axis
+  !   23/07/20                  return 2D/3D fields based on input
   !
 
   USE, NON_INTRINSIC :: m_scarflib_common
@@ -82,6 +84,8 @@ MODULE m_scarflib_srm
     !     Date                    Description of change
     !     ====                    =====================
     !   04/05/20                  original version
+    !   21/07/20                  rotation angles
+    !   23/07/20                  2D fields
     !
 
     REAL(f_real),                DIMENSION(3),   INTENT(IN)  :: nc, fc       !< min/max extent of external grid, control min wavenumber
@@ -119,7 +123,7 @@ MODULE m_scarflib_srm
     REAL(f_real)                                             :: hurst_factor
     REAL(f_dble)                                             :: tictoc
     REAL(c_real),                DIMENSION(2)                :: r
-    REAL(f_real),                DIMENSION(3)                :: span
+    REAL(f_real),                DIMENSION(3)                :: span, pt
     REAL(f_real),                DIMENSION(3)                :: min_extent, max_extent
     REAL(f_real),                DIMENSION(3)                :: bar, obar
     REAL(f_real),   ALLOCATABLE, DIMENSION(:)                :: mu, var
@@ -237,8 +241,7 @@ MODULE m_scarflib_srm
     ! translation vector to rotate around baricenter in original reference frame
     bar = bar - obar
 
-print*, 'bar ', bar, obar
-
+    ! setup argument for gamma function
     hurst_factor = hurst + 1._f_real
 
     IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
@@ -283,12 +286,12 @@ print*, 'bar ', bar, obar
       ! compute azimuth and polar angles
       phi = r(1) * 2._f_real * pi
 
-      IF (n .eq. 3) THEN
+      IF (n .eq. 3) THEN                                     !< spherical coordinates
         theta = ACOS(1._f_real - 2._f_real * r(2))
         v1    = k * SIN(phi) * SIN(theta) / cl(1)
         v2    = k * COS(phi) * SIN(theta) / cl(2)
         v3    = k * COS(theta)            / cl(3)
-      ELSE
+      ELSE                                                   !< polar coordinates
         v1 = k * COS(phi) / cl(1)
         v2 = k * SIN(phi) / cl(2)
         v3 = 0._f_real
@@ -366,7 +369,7 @@ print*, 'bar ', bar, obar
     DO i = 1, npts
       field(i) = field(i) * scaling
     ENDDO
-    !$acc END kernels
+    !$acc end kernels
 
     ! copy "field" back to host and free memory on device
     !$acc end data
@@ -420,8 +423,11 @@ print*, 'bar ', bar, obar
     ! taper/mute random field at desired locations.
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    pt(:) = 0._f_real
+
     DO i = 1, SIZE(poi, 2)
-      CALL tapering(x, y, z, field, poi(:, i), mute, taper)
+      pt(1:n) = poi(1:n, i)
+      CALL tapering(x, y, z, field, pt, mute, taper)
     ENDDO
 
     CALL mpi_barrier(mpi_comm_world, ierr)
@@ -445,6 +451,8 @@ print*, 'bar ', bar, obar
     !     Date                    Description of change
     !     ====                    =====================
     !   04/05/20                  original version
+    !   21/07/20                  rotation angles
+    !   23/07/20                  2D fields
     !
 
     REAL(f_real),                DIMENSION(3),     INTENT(IN)  :: nc, fc          !< min/max extent of external grid, control min wavenumber
@@ -483,7 +491,7 @@ print*, 'bar ', bar, obar
     REAL(f_real)                                               :: hurst_factor
     REAL(f_dble)                                               :: tictoc
     REAL(c_real),                DIMENSION(2)                  :: r
-    REAL(f_real),                DIMENSION(3)                  :: span
+    REAL(f_real),                DIMENSION(3)                  :: span, pt
     REAL(f_real),                DIMENSION(3)                  :: min_extent, max_extent
     REAL(f_real),                DIMENSION(3)                  :: bar, obar
     REAL(f_real),   ALLOCATABLE, DIMENSION(:)                  :: mu, var
@@ -602,8 +610,7 @@ print*, 'bar ', bar, obar
     ! translation vector to rotate around baricenter in original reference frame
     bar = bar - obar
 
-print*, 'bar ', bar, obar, ' x ', npts
-
+    ! setup argument for gamma function
     hurst_factor = hurst + 1._f_real
 
     IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
@@ -648,12 +655,12 @@ print*, 'bar ', bar, obar, ' x ', npts
       ! compute azimuth and polar angles
       phi = r(1) * 2._f_real * pi
 
-      IF (n .eq. 3) THEN
+      IF (n .eq. 3) THEN                                             !< spherical coordinates
         theta = ACOS(1._f_real - 2._f_real * r(2))
         v1    = u * SIN(phi) * SIN(theta) / cl(1)
         v2    = u * COS(phi) * SIN(theta) / cl(2)
         v3    = u * COS(theta)            / cl(3)
-      ELSE
+      ELSE                                                           !< polar coordinates
         v1 = u * COS(phi) / cl(1)
         v2 = u * SIN(phi) / cl(2)
         v3 = 0._f_real
@@ -812,8 +819,11 @@ print*, 'bar ', bar, obar, ' x ', npts
     ! taper/mute random field at desired locations.
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
+    pt(:) = 0._f_real
+
     DO i = 1, SIZE(poi, 2)
-      CALL tapering(ds, fs, fe, field, poi(:, i), mute, taper)
+      pt(1:n) = poi(1:n, i)
+      CALL tapering(ds, fs, fe, field, pt, mute, taper)
     ENDDO
 
     CALL mpi_barrier(mpi_comm_world, ierr)

@@ -7,6 +7,8 @@ MODULE m_scarflib
   !     Date                    Description of change
   !     ====                    =====================
   !   04/05/20                  original version
+  !   21/07/20                  added rotation angles
+  !   23/07/20                  handle 2D fields
   !
 
   !USE, NON_INTRINSIC :: mpi                     !< this is included in common???
@@ -81,6 +83,8 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  added rotation angles
+      !   23/07/20                  handle 2D input params
       !
 
       INTEGER(f_int), DIMENSION(:),             INTENT(IN) :: fs, fe         !< first/last index of external grid
@@ -171,6 +175,8 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  added rotation angles
+      !   23/07/20                  handle 2D input params
       !
 
       REAL(f_real),                                     INTENT(IN) :: dh                 !< min grid-step external grid (controls max absolute wavenumber)
@@ -186,7 +192,7 @@ MODULE m_scarflib
       REAL(f_real),                           OPTIONAL, INTENT(IN) :: mute, taper        !< radius for taper/muting
       INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: rescale            !< rescale discrete std.dev. to continuous one
       INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: pad                !< pad internal grid (FIM only, empty=0=no, 1=yes)
-      REAL(f_real),   DIMENSION(3),           OPTIONAL, INTENT(IN) :: nc, fc             !< near corner, far corner
+      REAL(f_real),   DIMENSION(:),           OPTIONAL, INTENT(IN) :: nc, fc             !< near corner, far corner
       REAL(f_real),                           OPTIONAL, INTENT(IN) :: alpha, beta, gamma
       INTEGER(f_int)                                               :: n
 
@@ -274,6 +280,7 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  added rotation angles
       !
 
       INTEGER(f_int),               INTENT(IN)  :: seed         !< seed number
@@ -315,6 +322,8 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  added rotation angles
+      !   23/07/20                  handle 3D fields only
       !
 
       INTEGER(f_int),                   INTENT(IN)  :: seed         !< seed number
@@ -356,6 +365,7 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   23/07/20                  handle 2D fields only and rotation angles
       !
 
       INTEGER(f_int),                           INTENT(IN)  :: seed         !< seed number
@@ -400,6 +410,7 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   23/07/20                  handle 2D case
       !
 
       !-----------------------------------------------------------------------------------------------------------------------------
@@ -499,6 +510,7 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   23/07/20                  handle 3D fields only
       !
 
       INTEGER(f_int),   DIMENSION(3),               INTENT(IN) :: n                     !< grid points in the global mesh
@@ -554,6 +566,7 @@ MODULE m_scarflib
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   23/07/20                  handle 2D fields only
       !
 
       INTEGER(f_int),   DIMENSION(2),             INTENT(IN) :: n                     !< grid points in the global mesh

@@ -11,6 +11,8 @@ MODULE m_scarflib_fim
   !     ====                    =====================
   !   04/05/20                  original version
   !   11/05/20                  updated macro for double-precision
+  !   21/07/20                  corr.len. refers to arbitrary axis
+  !   23/07/20                  return 2D/3D fields based on input
   !
 
   ! mpif90 -o3 scarflib_fft2.f90 scarflib_spec.f90 scarflib.f90 driver.f90 *.f -i/home/walter/backedup/software/FFTW-3.3.8/INCLUDE
@@ -70,7 +72,7 @@ MODULE m_scarflib_fim
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
-  ! work with 3D cartesian grids
+  ! algorithm based on 3D cartesian grids
   INTEGER(f_int),                            PARAMETER  :: ndims = 3
 
   ! mask to determine if i-th process has points falling inside domain of calling process (0=no, 1=yes)
@@ -82,7 +84,7 @@ MODULE m_scarflib_fim
   ! allow grid re-ordering
   LOGICAL,                                   PARAMETER  :: reorder = .true.
 
-  ! set cartesian grid periodicity
+  ! set cartesian grid periodicity (periodic along Z-axis to handle 2D fields)
   LOGICAL,                     DIMENSION(3), PARAMETER  :: isperiodic = [.false., .false., .true.]
 
   ! set a very large number
@@ -128,6 +130,8 @@ MODULE m_scarflib_fim
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  rotation angles
+      !   23/07/20                  2D fields
       !
 
       REAL(f_real),                 DIMENSION(3),    INTENT(IN)  :: nc, fc       !< min/max extent of input grid (m or km)
@@ -227,8 +231,6 @@ MODULE m_scarflib_fim
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
-      !***
-
       ! angle about z-axis
       calpha = cos(alpha * pi / 180._f_real)
       salpha = sin(alpha * pi / 180._f_real)
@@ -256,10 +258,6 @@ MODULE m_scarflib_fim
       min_extent(1:n) = bar(1:n) - diagonal
       max_extent(1:n) = bar(1:n) + diagonal
 
-      if (world_rank == 0) print*, 'diagonal ', diagonal, ' -- ', bar
-
-      !***
-
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
       DO i = 1, 3
@@ -268,8 +266,6 @@ MODULE m_scarflib_fim
         ! slightly larger than necessary (half grid-step) in each direction to avoid side-effects due to interpolation (useful when
         ! the extra extension to handle fft periodicity is not desired)
         npts(i) = NINT( (max_extent(i) + dh * 0.5_f_real - min_extent(i) + dh * 0.5_f_real) / dh) + 1
-
-        IF (world_rank == 0) print*, 'npts ', npts(i), ' - ', min_extent, ' ', max_extent
 
         ! padding depends on correlation length
         offset = NINT(cl(i) / dh)
@@ -299,21 +295,14 @@ MODULE m_scarflib_fim
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
       IF (ANY(dh .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
-      !***
-
+      ! translate baricenter to account position of first point
       bar(1:n) = bar(1:n) - off_axis(1:n)
-
-      IF (world_rank == 0) print*, 'new bar: ', bar
 
       ! baricenter after rotation
       obar = MATMUL(matrix, bar)
 
       ! translation vector to rotate around baricenter in original reference frame
       bar = bar - obar
-
-      IF (world_rank == 0) print*, 'bar: ', bar, ' offset: ', offset, ' obar: ', obar
-
-      !***
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
@@ -326,9 +315,6 @@ MODULE m_scarflib_fim
       ! return processors grid
       CALL best_config(dims)
 
-if (world_rank == 0) print*, 'best cpu DIMS ', dims
-
-
       ! create topology
       CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
 
@@ -340,11 +326,6 @@ if (world_rank == 0) print*, 'best cpu DIMS ', dims
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
-
-do i = 0, world_size - 1
-  if (i == world_rank) print*, i, ' INDEX ls-le ', ls, ' - ', le
-  call mpi_barrier(mpi_comm_world, ierr)
-enddo
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -365,9 +346,6 @@ enddo
       ! ps(3) = FLOOR((MINVAL(z, dim = 1) - off_axis(3)) / dh) + 1
       ! pe(3) = FLOOR((MAXVAL(z, dim = 1) - off_axis(3)) / dh) + 1
 
-
-      !***
-
       ps(:) = huge(1)
       pe(:) = -huge(1)
 
@@ -387,14 +365,6 @@ enddo
         pe(3) = MAX(pe(3), FLOOR(zc / dh) + 1)
 
       ENDDO
-
-do i = 0, world_size - 1
-  if (i == world_rank) print*, i, ' PS-PE ', ps, ' - ', pe
-  call mpi_barrier(mpi_comm_world, ierr)
-enddo
-
-      !***
-
 
       points_rank2world = 0
 
@@ -509,8 +479,19 @@ enddo
       ! taper/mute random field at desired locations.
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
+      pt(:) = 0._f_real
+
       DO i = 1, SIZE(poi, 2)
-        pt(:) = poi(:, i) - off_axis(:)                         !< update "poi" according to coordinates of internal grid
+
+        ! update "poi" according to coordinates of internal grid and rotation angles
+        DO k = 1, n
+          pt(k) = 0._f_real
+          DO j = 1, n
+            pt(k) = pt(k) + matrix(k,j)*(poi(j,i) - off_axis(j))
+          ENDDO
+          pt(k) = pt(k) + bar(k)
+        ENDDO
+
         CALL tapering(dh, ls, le, buffer, pt, mute, taper)
       ENDDO
 
@@ -579,6 +560,8 @@ enddo
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  rotation angles
+      !   23/07/20                  2D fields
       !
 
       REAL(f_real),                 DIMENSION(3),     INTENT(IN)  :: nc, fc          !< min/max extent of input grid (m or km)
@@ -678,9 +661,6 @@ enddo
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
-
-!***
-
       ! angle about z-axis
       calpha = cos(alpha * pi / 180._f_real)
       salpha = sin(alpha * pi / 180._f_real)
@@ -708,11 +688,6 @@ enddo
       min_extent(1:n) = bar(1:n) - diagonal
       max_extent(1:n) = bar(1:n) + diagonal
 
-      if (world_rank == 0) print*, 'diagonal ', diagonal, ' -- ', bar
-
-!***
-
-
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
       DO i = 1, 3
@@ -721,8 +696,6 @@ enddo
         ! slightly larger than necessary (half grid-step) in each direction to avoid side-effects due to interpolation (useful when
         ! the extra extension to handle fft periodicity is not desired)
         npts(i) = NINT( (max_extent(i) + dh * 0.5_f_real - min_extent(i) + dh * 0.5_f_real) / dh) + 1
-
-        IF (world_rank == 0) print*, 'component', i, ' npts ', npts(i), ' - ', min_extent, ' ', max_extent
 
         ! padding depends on correlation length
         offset = NINT(cl(i) / dh)
@@ -752,9 +725,7 @@ enddo
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
       IF (ANY(dh .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
-
-!***
-
+      ! translate baricenter to account position of first point
       bar(1:n) = bar(1:n) - off_axis(1:n)
 
       IF (world_rank == 0) print*, 'new bar: ', bar
@@ -764,14 +735,6 @@ enddo
 
       ! translation vector to rotate around baricenter in original reference frame
       bar = bar - obar
-
-      IF (world_rank == 0) print*, 'bar: ', bar, ' obar: ', obar
-
-
-!***
-
-
-
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
@@ -784,8 +747,6 @@ enddo
       ! return processors grid
       CALL best_config(dims)
 
-if (world_rank == 0) print*, 'best cpu DIMS ', dims
-
       ! create topology
       CALL mpi_cart_create(mpi_comm_world, ndims, dims, isperiodic, reorder, cartopo, ierr)
 
@@ -797,11 +758,6 @@ if (world_rank == 0) print*, 'best cpu DIMS ', dims
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
-
-do i = 0, world_size - 1
-  if (i == world_rank) print*, i, ' INDEX ls-le ', ls, ' - ', le
-  call mpi_barrier(mpi_comm_world, ierr)
-enddo
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -817,8 +773,6 @@ enddo
       ! min/max internal grid index containing input points
       !ps = FLOOR(((fs - 1) * ds - off_axis) / dh) + 1
       !pe = FLOOR(((fe - 1) * ds - off_axis) / dh) + 1
-
-!***
 
       ASSOCIATE(m => matrix, o => off_axis)
         x(1) = m(1,1)*((fs(1) - 1)*ds - o(1)) + m(1,2)*((fs(2) - 1)*ds - o(2)) + m(1,3)*((fs(3) - 1)*ds - o(3))
@@ -861,14 +815,6 @@ enddo
       pe(2) = FLOOR(MAXVAL(y, dim = 1) / dh) + 1
       ps(3) = FLOOR(MINVAL(z, dim = 1) / dh) + 1
       pe(3) = FLOOR(MAXVAL(z, dim = 1) / dh) + 1
-
-do i = 0, world_size - 1
-  if (i == world_rank) print*, i, ' PS-PE ', ps, ' - ', pe
-  call mpi_barrier(mpi_comm_world, ierr)
-enddo
-
-!***
-
 
       points_rank2world = 0
 
@@ -983,8 +929,18 @@ enddo
       ! taper/mute random field at desired locations.
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
 
+      pt(:) = 0._f_real
+
       DO i = 1, SIZE(poi, 2)
-        pt(:) = poi(:, i) - off_axis(:)                           !< update "poi" according to coordinates of internal grid
+        ! update "poi" according to coordinates of internal grid and rotation angle
+        DO k = 1, n
+          pt(k) = 0._f_real
+          DO j = 1, n
+            pt(k) = pt(k) + matrix(k,j)*(poi(j,i) - off_axis(j))
+          ENDDO
+          pt(k) = pt(k) + bar(k)
+        ENDDO
+
         CALL tapering(dh, ls, le, buffer, pt, mute, taper)
       ENDDO
 
@@ -1456,6 +1412,7 @@ enddo
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  rotation matrix
       !
 
       INTEGER(f_int),                 INTENT(IN)  :: p0, p1             !< first/last index of points to be sent
@@ -1539,6 +1496,7 @@ enddo
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   21/07/20                  rotation matrix
       !
 
       INTEGER(f_int), DIMENSION(3),          INTENT(IN)  :: p0, p1              !< first/last index (internal FFT grid) of points to be sent
@@ -2327,6 +2285,7 @@ enddo
       !     Date                    Description of change
       !     ====                    =====================
       !   04/05/20                  original version
+      !   23/07/20                  added 2D PSDFs
       !
 
       REAL(f_real),                                                    INTENT(IN)  :: ds
