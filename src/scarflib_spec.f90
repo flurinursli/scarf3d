@@ -106,6 +106,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                                INTENT(IN)  :: gamma        !< angle about x-axis
     REAL(f_real),                DIMENSION(:),   INTENT(OUT) :: field        !< random field at x,y,z location
     REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and TIMING for performance analysis
+    CHARACTER(30)                                            :: string
     INTEGER(f_int)                                           :: i, l
     INTEGER(f_int)                                           :: n, npts
     INTEGER(f_int)                                           :: ierr
@@ -134,27 +135,49 @@ MODULE m_scarflib_srm
     CALL mpi_comm_SIZE(mpi_comm_world, world_size, ierr)
     CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
-    IF (world_rank == 0) THEN
-      print*, 'input params @ unstructured-spec'
-      print*, 'nc ', nc
-      print*, 'fc ', fc
-      print*, 'ds ', ds
-      print*, 'x ', SIZE(x)
-      print*, 'z ', SIZE(z)
-      print*, 'dh ', dh
-      print*, 'acf ', acf
-      print*, 'cl ', cl
-      print*, 'sigma ', sigma
-      print*, 'hurst ', hurst
-      print*, 'seed ', seed
-      print*, 'poi ', SIZE(poi)
-      print*, 'mute ', mute
-      print*, 'taper ', taper
-      print*, 'alpha ', alpha
-      print*, 'beta ', beta
-      print*, 'gamma ', gamma
+#ifdef DEBUG
+    IF (world_rank .eq. 0) THEN
+      WRITE(output_unit, *) 'DEBUG MODE: input parameters for "scarf3d_unstructured_srm"'
+      WRITE(output_unit, *) '****************************************************************'
+      string = 'near corner (NC)'
+      WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', nc, '|'
+      string = 'far corner (FC)'
+      WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', fc, '|'
+      string = '(maximum) grid-step (DS)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', ds, '|'
+      string = 'number of points (X-Y-Z)'
+      WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', SIZE(x), SIZE(y), SIZE(z), '|'
+      string = 'internal grid-step (DH)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', dh, '|'
+      string = 'autocorr. fun. (ACF)'
+      WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', acf, '|'
+      string = 'correlation length (CL)'
+      WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', cl, '|'
+      string = 'std. dev. (SIGMA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', sigma, '|'
+      string = 'hurst exp. (HURST)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', hurst, '|'
+      string = 'seed number (SEED)'
+      WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', seed, '|'
+      string = 'number of POIs'
+      WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', SIZE(poi, 2), '|'
+      string = 'muting radius (MUTE)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', mute, '|'
+      string = 'tapering radius (TAPER)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', taper, '|'
+      string = 'rescaling opt. (RESCALE)'
+      WRITE(output_unit, '(X, A26, A, L12, T65, A)') ADJUSTL(string), '|', rescale, '|'
+      string = 'alpha angle (ALPHA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', alpha, '|'
+      string = 'beta angle (BETA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', beta, '|'
+      string = 'gamma angle (GAMMA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', gamma, '|'
+      WRITE(output_unit, *) '****************************************************************'
     ENDIF
+
     CALL mpi_barrier(mpi_comm_world, ierr)
+#endif
 
     info(:) = 0._f_real
 
@@ -473,6 +496,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                                  INTENT(IN)  :: gamma           !< angle about x-axis
     REAL(f_real),                DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
     REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and TIMING for performance analysis
+    CHARACTER(30)                                              :: string
     INTEGER(f_int)                                             :: i, j, k, l
     INTEGER(f_int)                                             :: n, ierr
     INTEGER(c_int)                                             :: c_seed
@@ -502,28 +526,51 @@ MODULE m_scarflib_srm
     CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
     CALL mpi_comm_rank(mpi_comm_world, world_rank, ierr)
 
-    IF (world_rank == 0) THEN
-      print*, 'input params @ structured-spec'
-      print*, 'nc ', nc
-      print*, 'fc ', fc
-      print*, 'ds ', ds
-      print*, 'fs ', fs
-      print*, 'fe ', fe
-      print*, 'dh ', dh
-      print*, 'acf ', acf
-      print*, 'cl ', cl
-      print*, 'sigma ', sigma
-      print*, 'hurst ', hurst
-      print*, 'seed ', seed
-      print*, 'poi ', SIZE(poi)
-      print*, 'mute ', mute
-      print*, 'taper ', taper
-      print*, 'alpha ', alpha
-      print*, 'beta ', beta
-      print*, 'gamma ', gamma
+#ifdef DEBUG
+    IF (world_rank .eq. 0) THEN
+      WRITE(output_unit, *) 'DEBUG MODE: input parameters for "scarf3d_structured_srm"'
+      WRITE(output_unit, *) '****************************************************************'
+      string = 'near corner (NC)'
+      WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', nc, '|'
+      string = 'far corner (FC)'
+      WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', fc, '|'
+      string = 'grid-step (DS)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', ds, '|'
+      string = 'first sample (FS)'
+      WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', fs, '|'
+      string = 'last sample (FE)'
+      WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', fe, '|'
+      string = 'internal grid-step (DH)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', dh, '|'
+      string = 'autocorr. fun. (ACF)'
+      WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', acf, '|'
+      string = 'correlation length (CL)'
+      WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', cl, '|'
+      string = 'std. dev. (SIGMA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', sigma, '|'
+      string = 'hurst exp. (HURST)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', hurst, '|'
+      string = 'seed number (SEED)'
+      WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', seed, '|'
+      string = 'number of POIs'
+      WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', SIZE(poi, 2), '|'
+      string = 'muting radius (MUTE)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', mute, '|'
+      string = 'tapering radius (TAPER)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', taper, '|'
+      string = 'rescaling opt. (RESCALE)'
+      WRITE(output_unit, '(X, A26, A, L12, T65, A)') ADJUSTL(string), '|', rescale, '|'
+      string = 'alpha angle (ALPHA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', alpha, '|'
+      string = 'beta angle (BETA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', beta, '|'
+      string = 'gamma angle (GAMMA)'
+      WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', gamma, '|'
+      WRITE(output_unit, *) '****************************************************************'
     ENDIF
-    CALL mpi_barrier(mpi_comm_world, ierr)
 
+    CALL mpi_barrier(mpi_comm_world, ierr)
+#endif
 
     info(:) = 0._f_real
 

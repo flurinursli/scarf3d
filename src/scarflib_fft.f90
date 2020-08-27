@@ -153,6 +153,7 @@ MODULE m_scarflib_fim
       REAL(f_real),                                  INTENT(IN)  :: gamma           !< angle about x-axis
       REAL(f_real),                 DIMENSION(:),    INTENT(OUT) :: field        !< random field at x,y,z location
       REAL(f_real),                 DIMENSION(8),    INTENT(OUT) :: info         !< errors flags and timing for performance analysis
+      CHARACTER(30)                                              :: string
       COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)             :: spec
       INTEGER(f_int)                                             :: ierr
       INTEGER(f_int)                                             :: i, j, k, n
@@ -191,26 +192,51 @@ MODULE m_scarflib_fim
       ! initialise variables
       info(:) = 0._f_real
 
-      IF (world_rank == 0) THEN
-        print*, 'input params @ unstructured-fft'
-        print*, 'nc ', nc
-        print*, 'fc ', fc
-        print*, 'ds ', ds
-        print*, 'x ', SIZE(x)
-        print*, 'z ', SIZE(z)
-        print*, 'dh ', dh
-        print*, 'acf ', acf
-        print*, 'cl ', cl
-        print*, 'sigma ', sigma
-        print*, 'hurst ', hurst
-        print*, 'seed ', seed
-        print*, 'poi ', SIZE(poi)
-        print*, 'mute ', mute
-        print*, 'taper ', taper
-        print*, 'rescale ', rescale
-        print*, 'pad ', pad
+#ifdef DEBUG
+      IF (world_rank .eq. 0) THEN
+        WRITE(output_unit, *) 'DEBUG MODE: input parameters for "scarf3d_unstructured_fim"'
+        WRITE(output_unit, *) '****************************************************************'
+        string = 'near corner (NC)'
+        WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', nc, '|'
+        string = 'far corner (FC)'
+        WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', fc, '|'
+        string = '(maximum) grid-step (DS)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', ds, '|'
+        string = 'number of points (X-Y-Z)'
+        WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', SIZE(x), SIZE(y), SIZE(z), '|'
+        string = 'internal grid-step (DH)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', dh, '|'
+        string = 'autocorr. fun. (ACF)'
+        WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', acf, '|'
+        string = 'correlation length (CL)'
+        WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', cl, '|'
+        string = 'std. dev. (SIGMA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', sigma, '|'
+        string = 'hurst exp. (HURST)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', hurst, '|'
+        string = 'seed number (SEED)'
+        WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', seed, '|'
+        string = 'number of POIs'
+        WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', SIZE(poi, 2), '|'
+        string = 'muting radius (MUTE)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', mute, '|'
+        string = 'tapering radius (TAPER)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', taper, '|'
+        string = 'rescaling opt. (RESCALE)'
+        WRITE(output_unit, '(X, A26, A, L12, T65, A)') ADJUSTL(string), '|', rescale, '|'
+        string = 'domain padding (PAD)'
+        WRITE(output_unit, '(X, A26, A, L12, T65, A)') ADJUSTL(string), '|', pad, '|'
+        string = 'alpha angle (ALPHA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', alpha, '|'
+        string = 'beta angle (BETA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', beta, '|'
+        string = 'gamma angle (GAMMA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', gamma, '|'
+        WRITE(output_unit, *) '****************************************************************'
       ENDIF
+
       CALL mpi_barrier(mpi_comm_world, ierr)
+#endif
 
       ! discriminate between 2D and 3D case
       IF (cl(3) .gt. 0._f_real) THEN
@@ -583,6 +609,7 @@ MODULE m_scarflib_fim
       REAL(f_real),                                   INTENT(IN)  :: gamma           !< angle about x-axis
       REAL(f_real),                 DIMENSION(:,:,:), INTENT(OUT) :: field           !< random field
       REAL(f_real),                 DIMENSION(8),     INTENT(OUT) :: info            !< errors flags and timing for performance analysis
+      CHARACTER(30)                                               :: string
       COMPLEX(f_real), ALLOCATABLE, DIMENSION(:,:,:)              :: spec
       INTEGER(f_int)                                              :: ierr
       INTEGER(f_int)                                              :: i, j, k, n
@@ -621,26 +648,53 @@ MODULE m_scarflib_fim
       ! initialise variables
       info(:) = 0._f_real
 
-      IF (world_rank == 0) THEN
-        print*, 'input params @ structured-fft'
-        print*, 'nc ', nc
-        print*, 'fc ', fc
-        print*, 'ds ', ds
-        print*, 'fs ', fs
-        print*, 'fe ', fe
-        print*, 'dh ', dh
-        print*, 'acf ', acf
-        print*, 'cl ', cl
-        print*, 'sigma ', sigma
-        print*, 'hurst ', hurst
-        print*, 'seed ', seed
-        print*, 'poi ', SIZE(poi), SIZE(poi, 1), SIZE(poi, 2)
-        print*, 'mute ', mute
-        print*, 'taper ', taper
-        print*, 'rescale ', rescale
-        print*, 'pad ', pad
+#ifdef DEBUG
+      IF (world_rank .eq. 0) THEN
+        WRITE(output_unit, *) 'DEBUG MODE: input parameters for "scarf3d_structured_fim"'
+        WRITE(output_unit, *) '****************************************************************'
+        string = 'near corner (NC)'
+        WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', nc, '|'
+        string = 'far corner (FC)'
+        WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', fc, '|'
+        string = 'grid-step (DS)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', ds, '|'
+        string = 'first sample (FS)'
+        WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', fs, '|'
+        string = 'last sample (FE)'
+        WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', fe, '|'
+        string = 'internal grid-step (DH)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', dh, '|'
+        string = 'autocorr. fun. (ACF)'
+        WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', acf, '|'
+        string = 'correlation length (CL)'
+        WRITE(output_unit, '(X, A26, A, 3F12.3, T65, A)') ADJUSTL(string), '|', cl, '|'
+        string = 'std. dev. (SIGMA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', sigma, '|'
+        string = 'hurst exp. (HURST)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', hurst, '|'
+        string = 'seed number (SEED)'
+        WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', seed, '|'
+        string = 'number of POIs'
+        WRITE(output_unit, '(X, A26, A, I12, T65, A)') ADJUSTL(string), '|', SIZE(poi, 2), '|'
+        string = 'muting radius (MUTE)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', mute, '|'
+        string = 'tapering radius (TAPER)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', taper, '|'
+        string = 'rescaling opt. (RESCALE)'
+        WRITE(output_unit, '(X, A26, A, L12, T65, A)') ADJUSTL(string), '|', rescale, '|'
+        string = 'domain padding (PAD)'
+        WRITE(output_unit, '(X, A26, A, L12, T65, A)') ADJUSTL(string), '|', pad, '|'
+        string = 'alpha angle (ALPHA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', alpha, '|'
+        string = 'beta angle (BETA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', beta, '|'
+        string = 'gamma angle (GAMMA)'
+        WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', gamma, '|'
+        WRITE(output_unit, *) '****************************************************************'
       ENDIF
+
       CALL mpi_barrier(mpi_comm_world, ierr)
+#endif
 
       ! discriminate between 2D and 3D case
       IF (cl(3) .gt. 0._f_real) THEN
@@ -728,7 +782,7 @@ MODULE m_scarflib_fim
       ! translate baricenter to account position of first point
       bar(1:n) = bar(1:n) - off_axis(1:n)
 
-      IF (world_rank == 0) print*, 'new bar: ', bar
+      ! IF (world_rank == 0) print*, 'new bar: ', bar
 
       ! baricenter after rotation
       obar = MATMUL(matrix, bar)

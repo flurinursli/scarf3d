@@ -13,16 +13,16 @@ COMPILER = $(VENDOR)
 # compile library in single or double precision
 PRECISION = single
 
-# compile in debug mode?
+# compile in debug mode? (yes/no)
 DEBUG = no
 
-# activate stopwatch for performance analysis
+# activate stopwatch for performance analysis? (yes/no)
 TIMING = yes
 
-# target for parallel filesystem (pfs)?
+# target for I/O parallel file-system (yes/no)?
 PFS = no
 
-# enable test of spectral method in driver programs
+# enable test of spectral method in driver programs? (yes/no)
 SPECTRAL = yes
 
 # path to external library TRNG4: update also LD_LIBRARY_PATH if necessary
