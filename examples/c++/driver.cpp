@@ -33,13 +33,13 @@ int main(){
   const int n[3] = {500, 450, 400};
 
   // grid-step
-  const real ds = 20.;
+  const real ds = 50.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const real cl[3] = {2000., 200., 100.};
+  const real cl[3] = {2000., 500., 100.};
 
   // standard deviation
   const real sigma = 0.05;
@@ -105,14 +105,14 @@ int main(){
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
-  // FFT method test
+  // test FIM algorithm
   // ---------------------------------------------------------------------------
   // ===========================================================================
 
   if (world_rank == 0){
-    std::cout << ""                                                             << std::endl;
-    std::cout << "************************************************************" << std::endl;
-    std::cout << "************************ FIM method ************************" << std::endl;
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "****** FIM algorithm, 3D, structured mesh *******" << std::endl;
   }
 
   {
@@ -132,17 +132,21 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << ""                                                                << std::endl;
-      std::cout << "Summary structured mesh"                                         << std::endl;
-      std::cout << "  i)   test completed in       : " << (float) tictoc   << " sec" << std::endl;
-      std::cout << "  ii)  domain too small?       : " << (int) stats[0]             << std::endl;
-      std::cout << "  iii) grid-step too large?    : " << (int) stats[1]             << std::endl;
-      std::cout << "  iv)  standard deviation      : " << (float) stats[2]           << std::endl;
-      std::cout << "  v)   mean value              : " << (float) stats[3]           << std::endl;
-      std::cout << "  vi)  timing for spectrum     : " << (float) stats[4] << " sec" << std::endl;
-      std::cout << "  vii) timing for symmetry     : " << (float) stats[5] << " sec" << std::endl;
-      std::cout << "  viii)timing for ifft         : " << (float) stats[6] << " sec" << std::endl;
-      std::cout << "  ix)  timing for interpolation: " << (float) stats[7] << " sec" << std::endl;
+      std::cout << ""                                                                               << std::endl;
+      std::cout << "Statistics for current simulation"                                              << std::endl;
+      std::cout << "*************************************************"                              << std::endl;
+      std::cout << "Elapsed time                  |" << (float) tictoc   << " sec" << "           |"<< std::endl;
+      std::cout << "   + spectrum                 |" << (float) stats[4] << " sec" << "           |"<< std::endl;
+      std::cout << "   + symmetry                 |" << (float) stats[5] << " sec" << "           |"<< std::endl;
+      std::cout << "   + FFT                      |" << (float) stats[6] << " sec" << "           |"<< std::endl;
+      std::cout << "   + interpolation            |" << (float) stats[7] << " sec" << "           |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Domain too small?             |" << (bool) stats[0]            << "           |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << (bool) stats[1]            << "           |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Discrete standard deviation   |" << (float) stats[2]           << "           |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << (float) stats[3]           << "           |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
     }
 
     // IO
@@ -153,7 +157,7 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-       std::cout << "  x)   slice(s) written in     : " << (float) tictoc << " sec" << std::endl;
+       std::cout << "I/O time (slices)             |" << (float) tictoc << " sec" << "           |"<< std::endl;
     }
 
     int nwriters[1] = {3};
@@ -163,11 +167,18 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "  xi)  whole file written in   : " << (float) tictoc << " sec" << std::endl;
+      std::cout << "I/O time                      |" << (float) tictoc << " sec" << "           |"<< std::endl;
+      std::cout << "*************************************************"                            << std::endl;
     }
 
     // call destructor explicitly
     //S.~Initialize();
+  }
+
+  if (world_rank == 0){
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "***** FIM algorithm, 3D, unstructured mesh ******" << std::endl;
   }
 
   {
@@ -186,17 +197,21 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << ""                                                                << std::endl;
-      std::cout << "Summary unstructured mesh"                                       << std::endl;
-      std::cout << "  i)   test completed in       : " << (float) tictoc   << " sec" << std::endl;
-      std::cout << "  ii)  domain too small?       : " << (int) stats[0]             << std::endl;
-      std::cout << "  iii) grid-step too large?    : " << (int) stats[1]             << std::endl;
-      std::cout << "  iv)  standard deviation      : " << (float) stats[2]           << std::endl;
-      std::cout << "  v)   mean value              : " << (float) stats[3]           << std::endl;
-      std::cout << "  vi)  timing for spectrum     : " << (float) stats[4] << " sec" << std::endl;
-      std::cout << "  vii) timing for symmetry     : " << (float) stats[5] << " sec" << std::endl;
-      std::cout << "  viii)timing for ifft         : " << (float) stats[6] << " sec" << std::endl;
-      std::cout << "  ix)  timing for interpolation: " << (float) stats[7] << " sec" << std::endl;
+      std::cout << ""                                                                               << std::endl;
+      std::cout << "Statistics for current simulation"                                              << std::endl;
+      std::cout << "*************************************************"                              << std::endl;
+      std::cout << "Elapsed time                  |" << (float) tictoc   << " sec" << "           |"<< std::endl;
+      std::cout << "   + spectrum                 |" << (float) stats[4] << " sec" << "           |"<< std::endl;
+      std::cout << "   + symmetry                 |" << (float) stats[5] << " sec" << "           |"<< std::endl;
+      std::cout << "   + FFT                      |" << (float) stats[6] << " sec" << "           |"<< std::endl;
+      std::cout << "   + interpolation            |" << (float) stats[7] << " sec" << "           |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Domain too small?             |" << (bool) stats[0]            << "           |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << (bool) stats[1]            << "           |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Discrete standard deviation   |" << (float) stats[2]           << "           |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << (float) stats[3]           << "           |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
     }
 
     // call destructor explicitly
@@ -205,7 +220,7 @@ int main(){
 
   // ===========================================================================
   // ---------------------------------------------------------------------------
-  // SPEC method test
+  // test SRM algorithm
   // ---------------------------------------------------------------------------
   // ===========================================================================
 

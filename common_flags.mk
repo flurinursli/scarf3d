@@ -3,13 +3,18 @@
 # optimization flags for each compiler
 ifeq ($(COMPILER),gcc)
   FFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
-  CXXFLAGS = -O3 -funroll-loops -cpp
+  #CXXFLAGS = -O3 -funroll-loops -cpp
+	CXXFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
+	LDFLAGS = -lgfortran
 else ifeq ($(COMPILER),pgi)
   FFLAGS = -fast -acc -ta=tesla:cc75 -cpp
-  CXXFLAGS = -fast -cpp
+  #CXXFLAGS = -fast -cpp
+	CXXFLAGS = -fast -acc -ta=tesla:cc75 -cpp
+	LDFLAGS = -lpgf90 -lpgf90rtl
 else ifeq ($(COMPILER),intel)
   FFLAGS = -O3 -unroll-aggressive -qopt-prefetch -cpp
   CXXFLAGS = -O3 -unroll-aggressive -qopt-prefetch
+	LDFLAGS = -lifcore
 endif
 
 # debugging flags
