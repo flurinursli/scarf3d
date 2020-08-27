@@ -3,7 +3,7 @@
 ################################################################################
 
 # set dependencies if invoked with 'examples' argument
-examples: fortran #c++ c
+examples: fortran c++ #c
 
 # invoke MAKE with 'fortran' argument
 fortran:

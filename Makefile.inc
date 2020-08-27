@@ -23,7 +23,7 @@ TIMING = yes
 PFS = no
 
 # enable test of spectral method in driver programs? (yes/no)
-SPECTRAL = yes
+SPECTRAL = no
 
 # path to external library TRNG4: update also LD_LIBRARY_PATH if necessary
 TRNG_DIR = $(TRNG_PATH)

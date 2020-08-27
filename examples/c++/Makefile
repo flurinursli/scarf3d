@@ -43,7 +43,8 @@ INCL = -I../../include
 LIB_LINK_FLAGS  = -L../../lib -l$(LIB_NAME)
 LIB_LINK_FLAGS += -L$(TRNG_DIR)/lib -ltrng4 -lstdc++
 LIB_LINK_FLAGS += -L$(FFTW_DIR)/lib -lfftw3 -lfftw3f
-#
+
+
 # # prepare preprocessor directives
 # PP_FLAGS =
 #

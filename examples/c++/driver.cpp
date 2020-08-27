@@ -125,7 +125,7 @@ int main(){
     //Scarf3D::options.nc = x0;
     //Scarf3D::options.fc = x1;
 
-    Scarf3D::Initialize<fft> S(fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fft> S(3, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -179,7 +179,7 @@ int main(){
     //Scarf3D::options.nc = x0;
     //Scarf3D::options.fc = x1;
 
-    Scarf3D::Initialize<fft> S(npts, x, y, z, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fft> S(3, npts, x, y, z, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -223,7 +223,7 @@ int main(){
 
     Scarf3D::options.alpha = 20;
 
-    Scarf3D::Initialize<spec> S(fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<spec> S(3, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -273,7 +273,7 @@ int main(){
     Scarf3D::options.alpha = 50;
     Scarf3D::options.gamma = 10;
 
-    Scarf3D::Initialize<spec> S(npts, x, y, z, ds, acf, cl, sigma);
+    Scarf3D::Initialize<spec> S(3, npts, x, y, z, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
