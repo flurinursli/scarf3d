@@ -232,7 +232,6 @@ MODULE m_scarflib_fim
         WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', beta, '|'
         string = 'gamma angle (GAMMA)'
         WRITE(output_unit, '(X, A26, A, F12.3, T65, A)') ADJUSTL(string), '|', gamma, '|'
-        WRITE(output_unit, *) '****************************************************************'
       ENDIF
 
       CALL mpi_barrier(mpi_comm_world, ierr)
@@ -314,6 +313,14 @@ MODULE m_scarflib_fim
         ENDIF
 
       ENDDO
+
+#ifdef DEBUG
+      IF (world_rank .eq. 0) THEN
+        string = 'internal model (NPTS)'
+        WRITE(output_unit, '(X, A26, A, 3I12, T65, A)') ADJUSTL(string), '|', npts, '|'
+        WRITE(output_unit, *) '****************************************************************'
+      ENDIF
+#endif
 
       ! check if model is large enough to catch the lower part of the spectrum (low wavenumbers)...
       IF (ANY(npts(1:n) .le. NINT(2._f_real * pi * cl(1:n) / dh))) info(1) = 1._f_real
