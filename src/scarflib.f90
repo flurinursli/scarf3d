@@ -135,7 +135,7 @@ MODULE m_scarflib
       obj%nc = (obj%fs - 1) * ds               !< by default, "nc" and "fc" are given by "fs" and "fe"
       obj%fc = (obj%fe - 1) * ds
 
-      ALLOCATE(obj%poi(0,0))               !< by default, there are no points where tapering/muting should be applied
+      !ALLOCATE(obj%poi(0,0))                  !< by default, there are no points where tapering/muting should be applied
 
       ! override default values
       IF (PRESENT(method))  obj%method  = method
@@ -145,12 +145,23 @@ MODULE m_scarflib
       IF (PRESENT(taper))   obj%taper   = taper
       IF (PRESENT(rescale)) obj%rescale = rescale
       IF (PRESENT(pad))     obj%pad     = pad
-      IF (PRESENT(poi))     obj%poi     = poi
+      !IF (PRESENT(poi))     obj%poi     = poi
       IF (PRESENT(nc))      obj%nc      = nc
       IF (PRESENT(fc))      obj%fc      = fc
       IF (PRESENT(alpha))   obj%alpha   = alpha
       IF (PRESENT(beta))    obj%beta    = beta
       IF (PRESENT(gamma))   obj%gamma   = gamma
+
+      IF (present(poi)) THEN
+        print*, size(poi, 1), size(poi, 2)
+        ALLOCATE(obj%poi(size(poi, 1), size(poi, 2)))
+        print*, 'alloc ok'
+        obj%poi = poi
+      ENDIF
+
+      print*,'a',  allocated(obj%poi)
+      print*, obj%poi(:, 1)
+
 
       IF (obj%method .eq. 0) THEN
         ALLOCATE(obj%stats(8))

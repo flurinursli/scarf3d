@@ -17,7 +17,7 @@ extern void execute(const int* seed, real** field, real stats[]);
 
 extern void finalize();
 
-extern void io_one(const int* npts, const real** field, const char fname[], const int* nwriters);
+extern void io_one(const int* nd, const int* npts, const real** field, const char fname[], const int* nwriters);
 
 extern void io_slice(const int* npts, const char axis[], const int* plane, const real** field, const char fname[]);
 
@@ -117,9 +117,9 @@ void scarf_finalize(){
 
 // define C I/O functions
 
-void scarf_io_one(const int npts[], const real* field, const char fname[], const int* nwriters){
+void scarf_io_one(const int nd, const int npts[], const real* field, const char fname[], const int* nwriters){
 
-  io_one(npts, &field, fname, nwriters);
+  io_one(&nd, npts, &field, fname, nwriters);
 
 }
 

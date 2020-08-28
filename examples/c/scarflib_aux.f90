@@ -29,7 +29,7 @@ MODULE m_scarflib_aux
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE sample_mesh(rank, ntasks, n, fs, fe) BIND(c, name="sample_mesh")
+    SUBROUTINE sample_mesh(nd, rank, ntasks, n, fs, fe) BIND(c, name="sample_mesh")
 
       ! Purpose:
       !   To create a sample structured mesh to be used in the driver program and to distribute it amonst available processes.
@@ -40,21 +40,27 @@ MODULE m_scarflib_aux
       !   04/05/20                  original version
       !
 
-      INTEGER(c_int),               INTENT(IN)  :: rank, ntasks
-      INTEGER(c_int), DIMENSION(3), INTENT(IN)  :: n
-      INTEGER(c_int), DIMENSION(3), INTENT(OUT) :: fs, fe
-      INTEGER(f_int)                            :: topo, ierr
-      INTEGER(f_int), DIMENSION(3)              :: dims, coords
+      INTEGER(c_int),                INTENT(IN)  :: nd
+      INTEGER(c_int),                INTENT(IN)  :: rank, ntasks
+      INTEGER(c_int), DIMENSION(nd), INTENT(IN)  :: n
+      INTEGER(c_int), DIMENSION(nd), INTENT(OUT) :: fs, fe
+      INTEGER(f_int)                             :: topo, ierr
+      INTEGER(f_int), DIMENSION(3)               :: dims, coords, fs3, fe3
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
       ! set global variables in "scarflib_common" and needed by "best_config"
       world_size = ntasks
-      npts       = n
+
+      IF (nd .eq. 3) THEN
+        npts = n
+      ELSE
+        npts = [n(1), n(2), 1]
+      ENDIF
 
       CALL best_config(dims)
 
-      IF (rank .eq. 0) WRITE(stdout, *) 'CPU-grid in driver program: ', dims
+      ! IF (rank .eq. 0) WRITE(stdout, *) 'CPU-grid in driver program: ', dims
 
       ! create topology
       CALL mpi_cart_create(mpi_comm_world, 3, dims, [.false., .false., .false.], .true., topo, ierr)
@@ -62,7 +68,15 @@ MODULE m_scarflib_aux
       CALL mpi_cart_coords(topo, rank, 3, coords, ierr)
 
       ! split each axis and assign points to current process
-      CALL mpi_split_task(n, dims, coords, fs, fe)
+      CALL mpi_split_task(n, dims, coords, fs3, fe3)
+
+      IF (SIZE(fs) .eq. 3) THEN
+        fs = fs3
+        fe = fe3
+      ELSE
+        fs = fs3(1:2)
+        fe = fe3(1:2)
+      ENDIF
 
     END SUBROUTINE sample_mesh
 

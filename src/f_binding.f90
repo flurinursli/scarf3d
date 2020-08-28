@@ -224,7 +224,7 @@ MODULE m_scarflib_c_binding
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE io_one(npts, field, fout, nwriters) BIND(c, name="io_one")
+    SUBROUTINE io_one(nd, npts, field, fout, nwriters) BIND(c, name="io_one")
 
       ! Purpose:
       !   To allow C wrapper to interface with "scarf_io" written in FORTRAN (see m_scarflib for input arguments).
@@ -235,7 +235,8 @@ MODULE m_scarflib_c_binding
       !   04/05/20                  original version
       !
 
-      INTEGER(c_int),                DIMENSION(3),                       INTENT(IN) :: npts
+      INTEGER(c_int),                                                    INTENT(IN) :: nd
+      INTEGER(c_int),                DIMENSION(nd),                      INTENT(IN) :: npts
       TYPE(c_ptr),                                                       INTENT(IN) :: field
       CHARACTER(c_char),             DIMENSION(*),                       INTENT(IN) :: fout
       INTEGER(c_int),                                          OPTIONAL, INTENT(IN) :: nwriters

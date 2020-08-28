@@ -1,10 +1,11 @@
 #include <mpi.h>
 #include <iostream>
+#include <iomanip>
 #include "scarf3d.h"
 
 // FORTRAN subroutine prototype
 extern "C"{
-  extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
+  extern void sample_mesh(const int* nd, const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
 }
 
 // timing functions
@@ -47,45 +48,269 @@ int main(){
   // seed number
   const int seed = 1235;
 
+  // hurst exponent
   const real hurst = 0.25;
 
+  const int npoi = 2;
+
+  real poi[4] = {400*ds, 250*ds, 200*ds, 150*ds};
+
+  // I/O writers (only for PFS)
+  const int nwriters[1] = {2};
+
+  // other variables used throughout the code
+  double tictoc;
+  int fs[3], fe[3], dims[3];
+  int npts, nd;
+  long c;
   real stats[8];
+  real *x, *y, *z, *field;
 
-  // real x0[3], x1[3];
-  //
-  // for (int i = 0; i < 3; i++){
-  //   x0[i] = 0;
-  //   x1[i] = (n[i] - 1) * ds;
-  // }
-  //
-  // real dh = ds;
-  //
-  // for (int i = 0; i < 3; i++) n[i] = n[i] / 4;
-  // ds = ds * 4;
+  // set formatting
+  std::cout << std::right << std::fixed << std::boolalpha;
+  std::cout.precision(5);
 
-  // ===========================================================================
-  // ---------------------------------------------------------------------------
-  // create sample structured mesh
-  // ---------------------------------------------------------------------------
-  // ===========================================================================
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // create sample structured mesh: 2D case
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
 
-  int fs[3], fe[3];
+  nd = 2;
 
-  // domain decomposition
-  sample_mesh(&world_rank, &world_size, n, fs, fe);
+  sample_mesh(&nd, &world_rank, &world_size, n, fs, fe);
 
-  int dims[3];
-
-  for (int i = 0; i < 3; i++){
+  for (int i = 0; i < nd; i++){
     dims[i] = (fe[i] - fs[i] + 1);
   }
 
-  real* x     = new real[dims[0]*dims[1]*dims[2]];
-  real* y     = new real[dims[0]*dims[1]*dims[2]];
-  real* z     = new real[dims[0]*dims[1]*dims[2]];
-  real* field = new real[dims[0]*dims[1]*dims[2]];
+  x     = new real[dims[0]*dims[1]];
+  y     = new real[dims[0]*dims[1]];
+  field = new real[dims[0]*dims[1]];
 
-  long c;
+  for (int j = 0; j < dims[1]; j++){
+    for (int i = 0; i < dims[0]; i++){
+      c    = (j * dims[0]) + i;
+      x[c] = (i + fs[0] - 1) * ds;
+      y[c] = (j + fs[1] - 1) * ds;
+    }
+  }
+
+  npts = dims[0] * dims[1];
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests FIM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+  if (world_rank == 0){
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "****** FIM algorithm, 2D, structured mesh *******" << std::endl;
+  }
+
+  {
+
+    Scarf3D::options.hurst = hurst;
+    Scarf3D::options.alpha = 30;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+
+    Scarf3D::Initialize<fft> S(nd, fs, fe, ds, acf, cl, sigma);
+
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0){
+      std::cout << ""                                                                                       << std::endl;
+      std::cout << "Statistics for current simulation"                                                      << std::endl;
+      std::cout << "*************************************************"                                      << std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |" << std::endl;
+      std::cout << "   + spectrum                 |" << std::setw(12) << (float) stats[4] << " sec" << " |" << std::endl;
+      std::cout << "   + symmetry                 |" << std::setw(12) << (float) stats[5] << " sec" << " |" << std::endl;
+      std::cout << "   + FFT                      |" << std::setw(12) << (float) stats[6] << " sec" << " |" << std::endl;
+      std::cout << "   + interpolation            |" << std::setw(12) << (float) stats[7] << " sec" << " |" << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]  << "     |"       << std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]  << "     |"       << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2] << "     |"       << std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3] << "     |"       << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+    }
+
+    watch_start(&tictoc);
+    S.io(nd, n, field, "fim_struct_whole_2d", nwriters);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0) {
+      std::cout << "I/O time                      |" << std::setw(12) << (float) tictoc << " sec" << " |" << std::endl;
+      std::cout << "*************************************************"                                    << std::endl;
+    }
+
+    // call destructor explicitly
+    //S.~Initialize();
+  }
+
+  if (world_rank == 0){
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "***** FIM algorithm, 2D, unstructured mesh ******" << std::endl;
+  }
+
+  {
+
+    Scarf3D::options.hurst = hurst;
+
+    Scarf3D::Initialize<fft> S(nd, npts, x, y, ds, acf, cl, sigma);
+
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0){
+      std::cout << ""                                                                                       << std::endl;
+      std::cout << "Statistics for current simulation"                                                      << std::endl;
+      std::cout << "*************************************************"                                      << std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |" << std::endl;
+      std::cout << "   + spectrum                 |" << std::setw(12) << (float) stats[4] << " sec" << " |" << std::endl;
+      std::cout << "   + symmetry                 |" << std::setw(12) << (float) stats[5] << " sec" << " |" << std::endl;
+      std::cout << "   + FFT                      |" << std::setw(12) << (float) stats[6] << " sec" << " |" << std::endl;
+      std::cout << "   + interpolation            |" << std::setw(12) << (float) stats[7] << " sec" << " |" << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]  << "     |"       << std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]  << "     |"       << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2] << "     |"       << std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3] << "     |"       << std::endl;
+      std::cout << "*************************************************"                                      << std::endl;
+    }
+
+    // I/O not possible for unstructured mesh because "fs" and "fe" are not defined
+
+    // call destructor explicitly
+    //S.~Initialize();
+  }
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests SRM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+#ifdef SPECTRAL
+
+  if (world_rank == 0){
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "****** SRM algorithm, 2D, structured mesh *******" << std::endl;
+  }
+
+  {
+
+    Scarf3D::options.hurst = hurst;
+
+    Scarf3D::options.alpha = 20;
+
+    Scarf3D::Initialize<spec> S(nd, fs, fe, ds, acf, cl, sigma);
+
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0){
+      std::cout << ""                                                                               << std::endl;
+      std::cout << "Statistics for current simulation"                                              << std::endl;
+      std::cout << "*************************************************"                              << std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |"<< std::endl;
+      std::cout << "   + CPU (main loop)          |" << std::setw(12) << (float) stats[4] << " sec" << " |"<< std::endl;
+      std::cout << "   + GPU (main loop)          |" << std::setw(12) << (float) stats[5] << " sec" << " |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]            << " |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]            << " |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2]           << " |"<< std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3]           << " |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+    }
+
+
+    watch_start(&tictoc);
+    S.io(nd, n, field, "srm_struct_whole_2d", nwriters);
+    watch_stop(&tictoc);
+
+    if (world_rank == 0) {
+      std::cout << "I/O time                      |" << std::setw(12) << (float) tictoc << " sec" << " |" << std::endl;
+      std::cout << "*************************************************"                                    << std::endl;
+    }
+
+    // call destructor explicitly
+    // S.~Initialize();
+    }
+
+    if (world_rank == 0){
+      std::cout << ""                                                  << std::endl;
+      std::cout << "*************************************************" << std::endl;
+      std::cout << "***** SRM algorithm, 2D, unstructured mesh ******" << std::endl;
+    }
+
+    {
+
+      Scarf3D::options.hurst = hurst;
+      Scarf3D::options.alpha = 50;
+
+      Scarf3D::Initialize<spec> S(nd, npts, x, y, z, ds, acf, cl, sigma);
+
+      watch_start(&tictoc);
+      S.execute(seed, field, stats);
+      watch_stop(&tictoc);
+
+      if (world_rank == 0){
+        std::cout << ""                                                                               << std::endl;
+        std::cout << "Statistics for current simulation"                                              << std::endl;
+        std::cout << "*************************************************"                              << std::endl;
+        std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |"<< std::endl;
+        std::cout << "   + CPU (main loop)          |" << std::setw(12) << (float) stats[4] << " sec" << " |"<< std::endl;
+        std::cout << "   + GPU (main loop)          |" << std::setw(12) << (float) stats[5] << " sec" << " |"<< std::endl;
+        std::cout << "------------------------------|-----------------|"                              << std::endl;
+        std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]            << " |"<< std::endl;
+        std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]            << " |"<< std::endl;
+        std::cout << "------------------------------|-----------------|"                              << std::endl;
+        std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2]           << " |"<< std::endl;
+        std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3]           << " |"<< std::endl;
+        std::cout << "*************************************************"                              << std::endl;
+      }
+
+      // call destructor explicitly
+      //S.~Initialize();
+    }
+
+#endif
+
+  // release resources
+  delete[] x;
+  delete[] y;
+  delete[] field;
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // create sample structured mesh: 3D case
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+  nd = 3;
+
+  sample_mesh(&nd, &world_rank, &world_size, n, fs, fe);
+
+  for (int i = 0; i < nd; i++){
+    dims[i] = (fe[i] - fs[i] + 1);
+  }
+
+  x     = new real[dims[0]*dims[1]*dims[2]];
+  y     = new real[dims[0]*dims[1]*dims[2]];
+  z     = new real[dims[0]*dims[1]*dims[2]];
+  field = new real[dims[0]*dims[1]*dims[2]];
 
   for (int k = 0; k < dims[2]; k++){
     for (int j = 0; j < dims[1]; j++){
@@ -98,16 +323,13 @@ int main(){
     }
   }
 
-  const int npts = dims[0] * dims[1] * dims[2];
+  npts = dims[0] * dims[1] * dims[2];
 
-  double tictoc;
-
-
-  // ===========================================================================
-  // ---------------------------------------------------------------------------
-  // test FIM algorithm
-  // ---------------------------------------------------------------------------
-  // ===========================================================================
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests FIM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
 
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
@@ -120,55 +342,49 @@ int main(){
     Scarf3D::options.hurst = hurst;
     Scarf3D::options.alpha = 30;
     Scarf3D::options.beta  = 20;
-    //Scarf3D::options.dh    = dh;
 
-    //Scarf3D::options.nc = x0;
-    //Scarf3D::options.fc = x1;
-
-    Scarf3D::Initialize<fft> S(3, fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fft> S(nd, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << ""                                                                               << std::endl;
-      std::cout << "Statistics for current simulation"                                              << std::endl;
-      std::cout << "*************************************************"                              << std::endl;
-      std::cout << "Elapsed time                  |" << (float) tictoc   << " sec" << "           |"<< std::endl;
-      std::cout << "   + spectrum                 |" << (float) stats[4] << " sec" << "           |"<< std::endl;
-      std::cout << "   + symmetry                 |" << (float) stats[5] << " sec" << "           |"<< std::endl;
-      std::cout << "   + FFT                      |" << (float) stats[6] << " sec" << "           |"<< std::endl;
-      std::cout << "   + interpolation            |" << (float) stats[7] << " sec" << "           |"<< std::endl;
-      std::cout << "------------------------------|-----------------|"                              << std::endl;
-      std::cout << "Domain too small?             |" << (bool) stats[0]            << "           |"<< std::endl;
-      std::cout << "Grid-step too large?          |" << (bool) stats[1]            << "           |"<< std::endl;
-      std::cout << "------------------------------|-----------------|"                              << std::endl;
-      std::cout << "Discrete standard deviation   |" << (float) stats[2]           << "           |"<< std::endl;
-      std::cout << "Grid-step too large?          |" << (float) stats[3]           << "           |"<< std::endl;
-      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << ""                                                                                       << std::endl;
+      std::cout << "Statistics for current simulation"                                                      << std::endl;
+      std::cout << "*************************************************"                                      << std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |" << std::endl;
+      std::cout << "   + spectrum                 |" << std::setw(12) << (float) stats[4] << " sec" << " |" << std::endl;
+      std::cout << "   + symmetry                 |" << std::setw(12) << (float) stats[5] << " sec" << " |" << std::endl;
+      std::cout << "   + FFT                      |" << std::setw(12) << (float) stats[6] << " sec" << " |" << std::endl;
+      std::cout << "   + interpolation            |" << std::setw(12) << (float) stats[7] << " sec" << " |" << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]  << "     |"       << std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]  << "     |"       << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2] << "     |"       << std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3] << "     |"       << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
     }
 
     // IO
     watch_start(&tictoc);
-    S.io(n, "x", n[0]/2, field, "fft_struct_xslice");
-    S.io(n, "y", n[1]/2, field, "fft_struct_yslice");
-    S.io(n, "z", n[2]/2, field, "fft_struct_zslice");
+    S.io(n, "x", n[0]/2, field, "fim_struct_xslice");
+    S.io(n, "y", n[1]/2, field, "fim_struct_yslice");
+    S.io(n, "z", n[2]/2, field, "fim_struct_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-       std::cout << "I/O time (slices)             |" << (float) tictoc << " sec" << "           |"<< std::endl;
+       std::cout << "I/O time (slices)             |" << std::setw(12) << (float) tictoc << " sec" << " |" << std::endl;
     }
 
-    int nwriters[1] = {3};
-
     watch_start(&tictoc);
-    S.io(n, field, "fft_struct_whole", nwriters);
+    S.io(nd, n, field, "fim_struct_whole_3d", nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "I/O time                      |" << (float) tictoc << " sec" << "           |"<< std::endl;
-      std::cout << "*************************************************"                            << std::endl;
+      std::cout << "I/O time                      |" << std::setw(12) << (float) tictoc << " sec" << " |"<< std::endl;
+      std::cout << "*************************************************"                                   << std::endl;
     }
 
     // call destructor explicitly
@@ -185,12 +401,56 @@ int main(){
 
     Scarf3D::options.hurst = hurst;
 
-    //Scarf3D::options.ds    = ds;
+    Scarf3D::Initialize<fft> S(nd, npts, x, y, z, ds, acf, cl, sigma);
 
-    //Scarf3D::options.nc = x0;
-    //Scarf3D::options.fc = x1;
+    watch_start(&tictoc);
+    S.execute(seed, field, stats);
+    watch_stop(&tictoc);
 
-    Scarf3D::Initialize<fft> S(3, npts, x, y, z, ds, acf, cl, sigma);
+    if (world_rank == 0){
+      std::cout << ""                                                                                       << std::endl;
+      std::cout << "Statistics for current simulation"                                                      << std::endl;
+      std::cout << "*************************************************"                                      << std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |" << std::endl;
+      std::cout << "   + spectrum                 |" << std::setw(12) << (float) stats[4] << " sec" << " |" << std::endl;
+      std::cout << "   + symmetry                 |" << std::setw(12) << (float) stats[5] << " sec" << " |" << std::endl;
+      std::cout << "   + FFT                      |" << std::setw(12) << (float) stats[6] << " sec" << " |" << std::endl;
+      std::cout << "   + interpolation            |" << std::setw(12) << (float) stats[7] << " sec" << " |" << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]  << "     |"       << std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]  << "     |"       << std::endl;
+      std::cout << "------------------------------|-----------------|"                                      << std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2] << "     |"       << std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3] << "     |"       << std::endl;
+      std::cout << "*************************************************"                                      << std::endl;
+    }
+
+    // call destructor explicitly
+    //S.~Initialize();
+  }
+
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests SRM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+#ifdef SPECTRAL
+
+  if (world_rank == 0){
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "****** SRM algorithm, 3D, structured mesh *******" << std::endl;
+  }
+
+  {
+
+    Scarf3D::options.hurst = hurst;
+
+    Scarf3D::options.alpha = 20;
+
+    Scarf3D::Initialize<spec> S(nd, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -200,60 +460,16 @@ int main(){
       std::cout << ""                                                                               << std::endl;
       std::cout << "Statistics for current simulation"                                              << std::endl;
       std::cout << "*************************************************"                              << std::endl;
-      std::cout << "Elapsed time                  |" << (float) tictoc   << " sec" << "           |"<< std::endl;
-      std::cout << "   + spectrum                 |" << (float) stats[4] << " sec" << "           |"<< std::endl;
-      std::cout << "   + symmetry                 |" << (float) stats[5] << " sec" << "           |"<< std::endl;
-      std::cout << "   + FFT                      |" << (float) stats[6] << " sec" << "           |"<< std::endl;
-      std::cout << "   + interpolation            |" << (float) stats[7] << " sec" << "           |"<< std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |"<< std::endl;
+      std::cout << "   + CPU (main loop)          |" << std::setw(12) << (float) stats[4] << " sec" << " |"<< std::endl;
+      std::cout << "   + GPU (main loop)          |" << std::setw(12) << (float) stats[5] << " sec" << " |"<< std::endl;
       std::cout << "------------------------------|-----------------|"                              << std::endl;
-      std::cout << "Domain too small?             |" << (bool) stats[0]            << "           |"<< std::endl;
-      std::cout << "Grid-step too large?          |" << (bool) stats[1]            << "           |"<< std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]            << " |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]            << " |"<< std::endl;
       std::cout << "------------------------------|-----------------|"                              << std::endl;
-      std::cout << "Discrete standard deviation   |" << (float) stats[2]           << "           |"<< std::endl;
-      std::cout << "Grid-step too large?          |" << (float) stats[3]           << "           |"<< std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2]           << " |"<< std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3]           << " |"<< std::endl;
       std::cout << "------------------------------|-----------------|"                              << std::endl;
-    }
-
-    // call destructor explicitly
-    //S.~Initialize();
-  }
-
-  // ===========================================================================
-  // ---------------------------------------------------------------------------
-  // test SRM algorithm
-  // ---------------------------------------------------------------------------
-  // ===========================================================================
-
-#ifdef SPECTRAL
-
-  if (world_rank == 0){
-    std::cout << ""                                                             << std::endl;
-    std::cout << "************************************************************" << std::endl;
-    std::cout << "************************ SRM method ************************" << std::endl;
-  }
-
-  {
-
-    Scarf3D::options.hurst = hurst;
-
-    Scarf3D::options.alpha = 20;
-
-    Scarf3D::Initialize<spec> S(3, fs, fe, ds, acf, cl, sigma);
-
-    watch_start(&tictoc);
-    S.execute(seed, field, stats);
-    watch_stop(&tictoc);
-
-    if (world_rank == 0){
-      std::cout << ""                                                             << std::endl;
-      std::cout << "Summary structured mesh"                                      << std::endl;
-      std::cout << "  i)   test completed in    : " << (float) tictoc   << " sec" << std::endl;
-      std::cout << "  ii)  domain too small?    : " << (int) stats[0]             << std::endl;
-      std::cout << "  iii) grid-step too large? : " << (int) stats[1]             << std::endl;
-      std::cout << "  iv)  standard deviation   : " << (float) stats[2]           << std::endl;
-      std::cout << "  v)   mean value           : " << (float) stats[3]           << std::endl;
-      std::cout << "  vi)  CPU main loop        : " << (float) stats[4] << " sec" << std::endl;
-      std::cout << "  vii) GPU main loop        : " << (float) stats[5] << " sec" << std::endl;
     }
 
     // IO
@@ -264,21 +480,26 @@ int main(){
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "  viii)slice(s) written in  : " << (float) tictoc << " sec" << std::endl;
+       std::cout << "I/O time (slices)             |" << std::setw(12) << (float) tictoc << " sec" << "  |" << std::endl;
     }
 
-    int nwriters[1] = {3};
-
     watch_start(&tictoc);
-    S.io(n, field, "spec_struct_whole", nwriters);
+    S.io(nd, n, field, "srm_struct_whole", nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
-      std::cout << "  ix)  whole file written in: " << (float) tictoc << " sec" << std::endl;
+      std::cout << "I/O time                      |" << std::setw(12) << (float) tictoc << " sec" << " |"<< std::endl;
+      std::cout << "*************************************************"                                   << std::endl;
     }
 
     // call destructor explicitly
     // S.~Initialize();
+  }
+
+  if (world_rank == 0){
+    std::cout << ""                                                  << std::endl;
+    std::cout << "*************************************************" << std::endl;
+    std::cout << "***** SRM algorithm, 3D, unstructured mesh ******" << std::endl;
   }
 
   {
@@ -288,30 +509,35 @@ int main(){
     Scarf3D::options.alpha = 50;
     Scarf3D::options.gamma = 10;
 
-    Scarf3D::Initialize<spec> S(3, npts, x, y, z, ds, acf, cl, sigma);
+    Scarf3D::Initialize<spec> S(nd, npts, x, y, z, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
     watch_stop(&tictoc);
 
     if (world_rank == 0){
-      std::cout << ""                                                            << std::endl;
-      std::cout << "Summary unstructured mesh"                                   << std::endl;
-      std::cout << "  i)   test completed in   : " << (float) tictoc   << " sec" << std::endl;
-      std::cout << "  ii)  domain too small?   : " << (int) stats[0]             << std::endl;
-      std::cout << "  iii) grid-step too large?: " << (int) stats[1]             << std::endl;
-      std::cout << "  iv)  standard deviation  : " << (float) stats[2]           << std::endl;
-      std::cout << "  v)   mean value          : " << (float) stats[3]           << std::endl;
-      std::cout << "  vi)  CPU main loop       : " << (float) stats[4] << " sec" << std::endl;
-      std::cout << "  vii) GPU main loop       : " << (float) stats[5] << " sec" << std::endl;
+      std::cout << ""                                                                               << std::endl;
+      std::cout << "Statistics for current simulation"                                              << std::endl;
+      std::cout << "*************************************************"                              << std::endl;
+      std::cout << "Elapsed time                  |" << std::setw(12) << (float) tictoc   << " sec" << " |"<< std::endl;
+      std::cout << "   + CPU (main loop)          |" << std::setw(12) << (float) stats[4] << " sec" << " |"<< std::endl;
+      std::cout << "   + GPU (main loop)          |" << std::setw(12) << (float) stats[5] << " sec" << " |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Domain too small?             |" << std::setw(12) << (bool) stats[0]            << " |"<< std::endl;
+      std::cout << "Grid-step too large?          |" << std::setw(12) << (bool) stats[1]            << " |"<< std::endl;
+      std::cout << "------------------------------|-----------------|"                              << std::endl;
+      std::cout << "Discrete standard deviation   |" << std::setw(12) << (float) stats[2]           << " |"<< std::endl;
+      std::cout << "Discrete mean value           |" << std::setw(12) << (float) stats[3]           << " |"<< std::endl;
+      std::cout << "*************************************************"                              << std::endl;
     }
 
     // call destructor explicitly
-    S.~Initialize();
+    //S.~Initialize();
   }
 
 #endif
 
+   // release resources
    delete[] x;
    delete[] y;
    delete[] z;

@@ -5,7 +5,7 @@
 
 
 // FORTRAN subroutine prototype
-extern void sample_mesh(const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
+extern void sample_mesh(const int* nd, const int* rank, const int* ntasks, const int n[], int fs[], int fe[]);
 
 // timing functions
 void watch_start(double* t){MPI_Barrier(MPI_COMM_WORLD); *t = MPI_Wtime();}
@@ -55,27 +55,239 @@ int main(){
 
   const real hurst = 0.25;
 
-  // ===========================================================================
-  // ---------------------------------------------------------------------------
-  // create sample structured mesh
+  // I/O writers (only for PFS)
+  const int nwriters[1] = {2};
 
-  int fs[3], fe[3];
+  double tictoc;
+  int fs[3], fe[3], dims[3];
+  int npts, nd;
+  long c;
+  real stats[8];
+  real *x, *y, *z, *field;
+
+  struct scarf_opt options;
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // create sample structured mesh: 2D case
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+  nd = 2;
 
   // domain decomposition
-  sample_mesh(&world_rank, &world_size, n, fs, fe);
+  sample_mesh(&nd, &world_rank, &world_size, n, fs, fe);
 
-  int dims[3];
-
-  for (int i = 0; i < 3; i++){
+  for (int i = 0; i < nd; i++){
     dims[i] = (fe[i] - fs[i] + 1);
   }
 
-  real* x     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
-  real* y     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
-  real* z     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
-  real* field = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  x     = (real*) malloc(dims[0]*dims[1] * sizeof(real));
+  y     = (real*) malloc(dims[0]*dims[1] * sizeof(real));
+  field = (real*) malloc(dims[0]*dims[1] * sizeof(real));
 
-  long c;
+  for (int j = 0; j < dims[1]; j++){
+    for (int i = 0; i < dims[0]; i++){
+      c    = (j * dims[0]) + i;
+      x[c] = (i + fs[0] - 1) * ds;
+      y[c] = (j + fs[1] - 1) * ds;
+    }
+  }
+
+  npts = dims[0] * dims[1];
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests FIM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("*************************************************\n");
+    printf("****** FIM algorithm, 2D, structured mesh *******\n");
+  }
+
+  scarf_opt_init(&options);
+
+  options.hurst = hurst;
+  options.alpha = 30;
+
+  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+
+  watch_start(&tictoc);
+  scarf_execute(seed, field, stats);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + spectrum                 |%12.5f sec |\n", (float) stats[4]);
+    printf("   + symmetry                 |%12.5f sec |\n", (float) stats[5]);
+    printf("   + FFT                      |%12.5f sec |\n", (float) stats[6]);
+    printf("   + interpolation            |%12.5f sec |\n", (float) stats[7]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("------------------------------|-----------------|\n");
+  }
+
+  watch_start(&tictoc);
+  scarf_io_one(nd, n, field, "fim_struct_whole_2d", nwriters);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0) {
+    printf("I/O time                      |%12.5f sec |\n", (float) tictoc);
+    printf("*************************************************\n");
+  }
+
+  scarf_finalize();
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("*************************************************\n");
+    printf("***** FIM algorithm, 2D, unstructured mesh ******\n");
+  }
+
+  scarf_unstruct_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
+
+  watch_start(&tictoc);
+  scarf_execute(seed, field, stats);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + spectrum                 |%12.5f sec |\n", (float) stats[4]);
+    printf("   + symmetry                 |%12.5f sec |\n", (float) stats[5]);
+    printf("   + FFT                      |%12.5f sec |\n", (float) stats[6]);
+    printf("   + interpolation            |%12.5f sec |\n", (float) stats[7]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("*************************************************\n");
+  }
+
+  scarf_finalize();
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests SRM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+#ifdef SPECTRAL
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("*************************************************\n");
+    printf("****** SRM algorithm, 2D, structured mesh *******\n");
+  }
+
+  scarf_opt_init(&options);
+
+  options.solver = 1;
+
+  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+
+  watch_start(&tictoc);
+  scarf_execute(seed, field, stats);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + CPU (main loop)          |%12.5f sec |\n", (float) stats[4]);
+    printf("   + GPU (main loop)          |%12.5f sec |\n", (float) stats[5]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("------------------------------|-----------------|\n");
+  }
+
+  watch_start(&tictoc);
+  scarf_io_one(nd, n, field, "srm_struct_whole_2d", nwriters);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0) {
+    printf("I/O time                      |%12.5f sec |\n", (float) tictoc);
+    printf("*************************************************\n");
+  }
+
+  scarf_finalize();
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("*************************************************\n");
+    printf("****** SRM algorithm, 2D, structured mesh *******\n");
+  }
+
+  scarf_unstruct_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
+
+  watch_start(&tictoc);
+  scarf_execute(seed, field, stats);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0){
+    printf("\n");
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + CPU (main loop)          |%12.5f sec |\n", (float) stats[4]);
+    printf("   + GPU (main loop)          |%12.5f sec |\n", (float) stats[5]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("*************************************************\n");
+  }
+
+  scarf_finalize();
+
+#endif
+
+  free(x);
+  free(y);
+  free(field);
+
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // create sample structured mesh: 3D case
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
+
+  nd = 3;
+
+  // domain decomposition
+  sample_mesh(&nd, &world_rank, &world_size, n, fs, fe);
+
+  for (int i = 0; i < nd; i++){
+    dims[i] = (fe[i] - fs[i] + 1);
+  }
+
+  x     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  y     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  z     = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
+  field = (real*) malloc(dims[0]*dims[1]*dims[2] * sizeof(real));
 
   for (int k = 0; k < dims[2]; k++){
     for (int j = 0; j < dims[1]; j++){
@@ -88,30 +300,27 @@ int main(){
     }
   }
 
-  const int npts = dims[0] * dims[1] * dims[2];
+  npts = dims[0] * dims[1] * dims[2];
 
-  real stats[8];
-
-  double tictoc;
-
-  // ===========================================================================
-  // ---------------------------------------------------------------------------
-  // FFT method test
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests FIM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
 
   if (world_rank == 0){
     printf("\n");
-    printf("************************************************************\n");
-    printf("************************ FIM method ************************\n");
+    printf("*************************************************\n");
+    printf("****** FIM algorithm, 3D, structured mesh *******\n");
   }
-
-  struct scarf_opt options;
 
   scarf_opt_init(&options);
 
   options.hurst = hurst;
   options.alpha = 30;
+  options.beta  = 20;
 
-  scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
+  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -119,44 +328,52 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Summary structured mesh\n");
-    printf("  i)   test completed in       : %f sec\n", (float) tictoc);
-    printf("  ii)  domain too small?       : %d\n", (int) stats[0]);
-    printf("  iii) grid-step too large?    : %d\n", (int) stats[1]);
-    printf("  iv)  standard deviation      : %f\n", (float) stats[2]);
-    printf("  v)   mean value              : %f\n", (float) stats[3]);
-    printf("  vi)  timing for spectrum     : %f sec\n", (float) stats[4]);
-    printf("  vii) timing for symmetry     : %f sec\n", (float) stats[5]);
-    printf("  viii)timing for ifft         : %f sec\n", (float) stats[6]);
-    printf("  ix)  timing for interpolation: %f sec\n", (float) stats[7]);
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + spectrum                 |%12.5f sec |\n", (float) stats[4]);
+    printf("   + symmetry                 |%12.5f sec |\n", (float) stats[5]);
+    printf("   + FFT                      |%12.5f sec |\n", (float) stats[6]);
+    printf("   + interpolation            |%12.5f sec |\n", (float) stats[7]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("------------------------------|-----------------|\n");
   }
 
-  // IO
   watch_start(&tictoc);
-  scarf_io_slice(n, "x", n[0]/2, field, "fft_struct_xslice");
-  scarf_io_slice(n, "y", n[1]/2, field, "fft_struct_yslice");
-  scarf_io_slice(n, "z", n[2]/2, field, "fft_struct_zslice");
+  scarf_io_slice(n, "x", n[0]/2, field, "fim_struct_xslice");
+  scarf_io_slice(n, "y", n[1]/2, field, "fim_struct_yslice");
+  scarf_io_slice(n, "z", n[2]/2, field, "fim_struct_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("  x)   slice(s) written in     : %f sec\n", (float) tictoc);
+    printf("I/O time (slices)             |%12.5f sec |\n", (float) tictoc);
   }
 
-  int nwriters[1] = {3};
-
   watch_start(&tictoc);
-  scarf_io_one(n, field, "fft_struct_whole", nwriters);
+  scarf_io_one(nd, n, field, "fim_struct_whole_3d", nwriters);
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("  xi)  whole file written in   : %f sec\n", (float) tictoc);
+    printf("I/O time                      |%12.5f sec |\n", (float) tictoc);
+    printf("*************************************************\n");
   }
 
   scarf_finalize();
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, &options);
+  if (world_rank == 0){
+    printf("\n");
+    printf("*************************************************\n");
+    printf("***** FIM algorithm, 3D, unstructured mesh ******\n");
+  }
+
+  scarf_unstruct_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -164,37 +381,43 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Summary unstructured mesh\n");
-    printf("  i)   test completed in       : %f sec\n", (float) tictoc);
-    printf("  ii)  domain too small?       : %d\n", (int) stats[0]);
-    printf("  iii) grid-step too large?    : %d\n", (int) stats[1]);
-    printf("  iv)  standard deviation      : %f\n", (float) stats[2]);
-    printf("  v)   mean value              : %f\n", (float) stats[3]);
-    printf("  vi)  timing for spectrum     : %f sec\n", (float) stats[4]);
-    printf("  vii) timing for symmetry     : %f sec\n", (float) stats[5]);
-    printf("  viii)timing for ifft         : %f sec\n", (float) stats[6]);
-    printf("  ix)  timing for interpolation: %f sec\n", (float) stats[7]);
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + spectrum                 |%12.5f sec |\n", (float) stats[4]);
+    printf("   + symmetry                 |%12.5f sec |\n", (float) stats[5]);
+    printf("   + FFT                      |%12.5f sec |\n", (float) stats[6]);
+    printf("   + interpolation            |%12.5f sec |\n", (float) stats[7]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("*************************************************\n");
   }
 
   scarf_finalize();
 
-  // ===========================================================================
-  // ---------------------------------------------------------------------------
-  // SPEC method test
+  // ================================================================================================================================
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // tests SRM algorithm
+  // --------------------------------------------------------------------------------------------------------------------------------
+  // ================================================================================================================================
 
 #ifdef SPECTRAL
 
   if (world_rank == 0){
     printf("\n");
-    printf("************************************************************\n");
-    printf("************************ SRM method ************************\n");
+    printf("*************************************************\n");
+    printf("****** SRM algorithm, 3D, structured mesh *******\n");
   }
 
   scarf_opt_init(&options);
 
   options.solver = 1;
 
-  scarf_struct_initialize(fs, fe, ds, acf, cl, sigma, &options);
+  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -202,38 +425,48 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Summary structured mesh\n");
-    printf("  i)   test completed in    : %f sec\n", (float) tictoc);
-    printf("  ii)  domain too small?    : %d\n", (int) stats[0]);
-    printf("  iii) grid-step too large? : %d\n", (int) stats[1]);
-    printf("  iv)  standard deviation   : %f\n", (float) stats[2]);
-    printf("  v)   mean value           : %f\n", (float) stats[3]);
-    printf("  vi)  CPU main loop        : %f sec\n", (float) stats[4]);
-    printf("  vii) GPU main loop        : %f sec\n", (float) stats[5]);
-  }
-
-  // IO
-  watch_start(&tictoc);
-  scarf_io_slice(n, "x", n[0]/2, field, "spec_struct_xslice");
-  scarf_io_slice(n, "y", n[1]/2, field, "spec_struct_yslice");
-  scarf_io_slice(n, "z", n[2]/2, field, "spec_struct_zslice");
-  watch_stop(&tictoc);
-
-  if (world_rank == 0) {
-    printf("  viii)slice(s) written in  : %f sec\n", (float) tictoc);
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + CPU (main loop)          |%12.5f sec |\n", (float) stats[4]);
+    printf("   + GPU (main loop)          |%12.5f sec |\n", (float) stats[5]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("------------------------------|-----------------|\n");
   }
 
   watch_start(&tictoc);
-  scarf_io_one(n, field, "spec_struct_whole", nwriters);
+  scarf_io_slice(n, "x", n[0]/2, field, "srm_struct_xslice");
+  scarf_io_slice(n, "y", n[1]/2, field, "srm_struct_yslice");
+  scarf_io_slice(n, "z", n[2]/2, field, "srm_struct_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
-    printf("  ix)  whole file written in: %f sec\n", (float) tictoc);
+    printf("I/O time (slices)             |%12.5f sec    |\n", (float) tictoc);
+  }
+
+  watch_start(&tictoc);
+  scarf_io_one(nd, n, field, "srm_struct_whole_3d", nwriters);
+  watch_stop(&tictoc);
+
+  if (world_rank == 0) {
+    printf("I/O time                      |%12.5f sec    |\n", (float) tictoc);
+    printf("*************************************************\n");
   }
 
   scarf_finalize();
 
-  scarf_unstruct_initialize(npts, x, y, z, ds, acf, cl, sigma, &options);
+  if (world_rank == 0){
+    printf("\n");
+    printf("*************************************************\n");
+    printf("****** SRM algorithm, 3D, structured mesh *******\n");
+  }
+
+  scarf_unstruct_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -241,28 +474,32 @@ int main(){
 
   if (world_rank == 0){
     printf("\n");
-    printf("Summary unstructured mesh\n");
-    printf("  i)   test completed in    : %f sec\n", (float) tictoc);
-    printf("  ii)  domain too small?    : %d\n", (int) stats[0]);
-    printf("  iii) grid-step too large? : %d\n", (int) stats[1]);
-    printf("  iv)  standard deviation   : %f\n", (float) stats[2]);
-    printf("  v)   mean value           : %f\n", (float) stats[3]);
-    printf("  vi)  CPU main loop        : %f sec\n", (float) stats[4]);
-    printf("  vii) GPU main loop        : %f sec\n", (float) stats[5]);
+    printf("Statistics for current simulation\n");
+    printf("*************************************************\n");
+    printf("Elapsed time                  |%12.5f sec |\n", (float) tictoc);
+    printf("   + CPU (main loop)          |%12.5f sec |\n", (float) stats[4]);
+    printf("   + GPU (main loop)          |%12.5f sec |\n", (float) stats[5]);
+    printf("------------------------------|-----------------|\n");
+    printf("Domain too small?             |%12s     |\n", stats[0] ? "true" : "false");
+    printf("Grid-step too large?          |%12s     |\n", stats[1] ? "true" : "false");
+    printf("------------------------------|-----------------|\n");
+    printf("Discrete standard deviation   |%12.5f     |\n", (float) stats[2]);
+    printf("Discrete mean value           |%12.5f     |\n", (float) stats[3]);
+    printf("*************************************************\n");
   }
 
   scarf_finalize();
 
 #endif
 
-   free(x);
-   free(y);
-   free(z);
-   free(field);
+  free(x);
+  free(y);
+  free(z);
+  free(field);
 
-   MPI_Barrier(MPI_COMM_WORLD);
+  MPI_Barrier(MPI_COMM_WORLD);
 
-   MPI_Finalize();
+  MPI_Finalize();
 
   return 0;
 

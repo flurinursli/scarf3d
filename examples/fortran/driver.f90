@@ -125,9 +125,8 @@ PROGRAM driver
     WRITE(stdout, *) '****** FIM algorithm, 2D, structured mesh *******'
   ENDIF
 
-  ! structured mesh test
   CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 0, hurst = hurst, alpha = 30._f_real,    &
-                        poi = poi, taper = taper, mute = mute)
+                        poi = poi(1:2,:), taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
@@ -186,7 +185,6 @@ PROGRAM driver
     WRITE(stdout, *) '***** FIM algorithm, 2D, unstructured mesh ******'
   ENDIF
 
-  ! unstructured mesh test
   CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1, y1, method = 0,  &
                         hurst = hurst, alpha = 30._f_real, poi = poi(1:2,:), taper = taper, mute = mute)
 
@@ -241,11 +239,11 @@ PROGRAM driver
 
   CALL scarf_finalize()
 
-  ! ================================================================================================================================-
+  ! ================================================================================================================================
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! tests SRM algorithm
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! ================================================================================================================================-
+  ! ================================================================================================================================
 
 #ifdef SPECTRAL
 

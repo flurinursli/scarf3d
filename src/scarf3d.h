@@ -32,7 +32,7 @@ struct scarf_opt{
   real hurst;
   real dh;
   real ds;
-  real* poi;
+  real * poi;
   int npoi;
   real mute;
   real taper;
@@ -56,7 +56,7 @@ void scarf_execute(const int seed, real* field, real stats[]);
 
 void scarf_finalize();
 
-void scarf_io_one(const int* npts, const real* field, const char fname[], const int* nwriters);
+void scarf_io_one(const int nd, const int* npts, const real* field, const char fname[], const int* nwriters);
 
 void scarf_io_slice(const int* npts, const char axis[], const int plane, const real* field, const char fname[]);
 
@@ -96,6 +96,15 @@ namespace Scarf3D
 
       };
 
+      Initialize(const int nd, const int npts, const real* x, const real* y, const real dh, const int acf, const real cl[], const real sigma)
+      {
+
+        if (method == spec) options.solver = 1;
+
+        scarf_unstruct_initialize(nd, npts, x, y, nullptr, dh, acf, cl, sigma, &options);
+
+      };
+
       // destructor
       ~Initialize()
       {
@@ -110,9 +119,9 @@ namespace Scarf3D
       };
 
       // IO whole model
-      void io(const int npts[], const real* field, const char fname[], const int* nwriters = nullptr)
+      void io(const int nd, const int npts[], const real* field, const char fname[], const int* nwriters = nullptr)
       {
-        scarf_io_one(npts, field, fname, nwriters);
+        scarf_io_one(nd, npts, field, fname, nwriters);
       };
 
       // IO model slice
