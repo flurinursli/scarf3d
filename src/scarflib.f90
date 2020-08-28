@@ -58,7 +58,8 @@ MODULE m_scarflib
     REAL(f_real),                         DIMENSION(3)   :: nc, fc
     REAL(f_real),                POINTER, DIMENSION(:)   :: x => NULL(), y => NULL(), z => NULL()
     REAL(f_real),   ALLOCATABLE,          DIMENSION(:)   :: stats
-    REAL(f_real),   ALLOCATABLE,          DIMENSION(:,:) :: poi
+    !REAL(f_real),   ALLOCATABLE,          DIMENSION(:,:) :: poi
+    REAL(f_real),                POINTER, DIMENSION(:,:) :: poi => NULL()
 
   END TYPE scarf_obj
 
@@ -95,7 +96,7 @@ MODULE m_scarflib
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: method         !< algorithm of choice (empty=0=fim, 1=srm)
       REAL(f_real),                   OPTIONAL, INTENT(IN) :: hurst          !< hurst exponent (needed only for acf=0)
       REAL(f_real),                   OPTIONAL, INTENT(IN) :: dh             !< min grid-step external grid (controls max absolute wavenumber)
-      REAL(f_real),   DIMENSION(:,:), OPTIONAL, INTENT(IN) :: poi            !< points where taper/muting should be applied
+      REAL(f_real),   DIMENSION(:,:), TARGET, OPTIONAL, INTENT(IN) :: poi            !< points where taper/muting should be applied
       REAL(f_real),                   OPTIONAL, INTENT(IN) :: mute, taper    !< radius for taper/muting
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: rescale        !< rescale discrete std.dev. to continuous one
       INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: pad            !< pad internal grid (fim only, empty=0=no, 1=yes)
@@ -152,16 +153,11 @@ MODULE m_scarflib
       IF (PRESENT(beta))    obj%beta    = beta
       IF (PRESENT(gamma))   obj%gamma   = gamma
 
-      IF (present(poi)) THEN
-        print*, size(poi, 1), size(poi, 2)
-        ALLOCATE(obj%poi(size(poi, 1), size(poi, 2)))
-        print*, 'alloc ok'
-        obj%poi = poi
+      IF (PRESENT(poi)) THEN
+        obj%poi => poi
+      ELSE
+        ALLOCATE(obj%poi(0,0))
       ENDIF
-
-      print*,'a',  allocated(obj%poi)
-      print*, obj%poi(:, 1)
-
 
       IF (obj%method .eq. 0) THEN
         ALLOCATE(obj%stats(8))
@@ -426,13 +422,14 @@ MODULE m_scarflib
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      IF (ALLOCATED(obj%poi))   DEALLOCATE(obj%poi)
+      !IF (ALLOCATED(obj%poi))   DEALLOCATE(obj%poi)
       IF (ALLOCATED(obj%stats)) DEALLOCATE(obj%stats)
 
       ! in 2D, for unstructured meshes, we allocated pointer 'obj%z'
       IF ( (obj%cl(3) .eq. 0._f_real) .and. (ASSOCIATED(obj%z)) ) DEALLOCATE(obj%z)
 
       NULLIFY(obj%x, obj%y, obj%z)
+      NULLIFY(obj%poi)
 
     END SUBROUTINE scarf_finalize
 

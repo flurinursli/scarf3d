@@ -5,7 +5,7 @@
 
 // declare FORTRAN subroutines
 extern void struct_initialize(const int* nd, const int fs[], const int fe[], const real* ds, const int* acf, const real cl[], const real* sigma,
-                              const int* solver, const real* hurst, const real* dh, const real* poi, const int* npoi, const real* mute,
+                              const int* solver, const real* hurst, const real* dh, real** poi, const int* npoi, const real* mute,
                               const real* taper, const int* rescale, const int* pad, const real nc[], const real fc[], const real* alpha,
                               const real* beta, const real* gamma);
 
@@ -49,14 +49,14 @@ void scarf_opt_init(struct scarf_opt * var){
 void scarf_struct_initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
 
    int *solver = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
-   real *hurst = NULL, *dh = NULL, *poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
+   real *hurst = NULL, *dh = NULL, **poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
    real *alpha = NULL, *beta = NULL, *gamma = NULL;
 
    if (var){
      if (var->solver == 1) solver = &var->solver;
      if (var->hurst > 0) hurst = &var->hurst;
      if (var->dh > 0) dh = &var->dh;
-     if (var->poi) poi = var->poi;
+     if (var->poi) poi = &var->poi;
      if (var->npoi > 0) npoi = &var->npoi;
      if (var->mute > 0) mute = &var->mute;
      if (var->taper > 0) taper = &var->taper;
