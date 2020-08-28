@@ -51,9 +51,15 @@ int main(){
   // hurst exponent
   const real hurst = 0.25;
 
+  // rotation angles
+  const real alpha = 30;
+  const real beta  = -10;
+
+  // number of POI
   const int npoi = 2;
 
-  real * poi;
+  const real taper = 5000;
+  const real mute  = 1000;
 
   // I/O writers (only for PFS)
   const int nwriters[1] = {2};
@@ -64,7 +70,7 @@ int main(){
   int npts, nd;
   long c;
   real stats[8];
-  real *x, *y, *z, *field;
+  real *x, *y, *z, *field, *poi;
 
   // set formatting
   std::cout << std::right << std::fixed << std::boolalpha;
@@ -98,7 +104,7 @@ int main(){
 
   npts = dims[0] * dims[1];
 
-  poi = new real[2 * npoi];
+  poi = new real[nd * npoi];
 
   poi[0] = 400 * ds;
   poi[1] = 250 * ds;
@@ -120,9 +126,11 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
-    Scarf3D::options.alpha = 30;
+    Scarf3D::options.alpha = alpha;
     Scarf3D::options.npoi  = npoi;
     Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<fft> S(nd, fs, fe, ds, acf, cl, sigma);
 
@@ -170,6 +178,11 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    Scarf3D::options.alpha = alpha;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<fft> S(nd, npts, x, y, ds, acf, cl, sigma);
 
@@ -218,8 +231,11 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
-
-    Scarf3D::options.alpha = 20;
+    Scarf3D::options.alpha = alpha;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<spec> S(nd, fs, fe, ds, acf, cl, sigma);
 
@@ -266,7 +282,11 @@ int main(){
     {
 
       Scarf3D::options.hurst = hurst;
-      Scarf3D::options.alpha = 50;
+      Scarf3D::options.alpha = alpha;
+      Scarf3D::options.npoi  = npoi;
+      Scarf3D::options.poi   = poi;
+      Scarf3D::options.taper = taper;
+      Scarf3D::options.mute  = mute;
 
       Scarf3D::Initialize<spec> S(nd, npts, x, y, z, ds, acf, cl, sigma);
 
@@ -333,6 +353,15 @@ int main(){
 
   npts = dims[0] * dims[1] * dims[2];
 
+  poi = new real[nd * npoi];
+
+  poi[0] = 400 * ds;
+  poi[1] = 250 * ds;
+  poi[2] = 100 * ds;
+  poi[3] = 200 * ds;
+  poi[4] = 150 * ds;
+  poi[5] = 50 * ds;
+
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
   // tests FIM algorithm
@@ -348,8 +377,12 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
-    Scarf3D::options.alpha = 30;
-    Scarf3D::options.beta  = 20;
+    Scarf3D::options.alpha = alpha;
+    Scarf3D::options.beta  = beta;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<fft> S(nd, fs, fe, ds, acf, cl, sigma);
 
@@ -408,6 +441,12 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    Scarf3D::options.alpha = alpha;
+    Scarf3D::options.beta  = beta;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<fft> S(nd, npts, x, y, z, ds, acf, cl, sigma);
 
@@ -455,8 +494,12 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
-
-    Scarf3D::options.alpha = 20;
+    Scarf3D::options.alpha = alpha;
+    Scarf3D::options.beta  = beta;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<spec> S(nd, fs, fe, ds, acf, cl, sigma);
 
@@ -513,9 +556,12 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
-
-    Scarf3D::options.alpha = 50;
-    Scarf3D::options.gamma = 10;
+    Scarf3D::options.alpha = alpha;
+    Scarf3D::options.beta  = beta;
+    Scarf3D::options.npoi  = npoi;
+    Scarf3D::options.poi   = poi;
+    Scarf3D::options.taper = taper;
+    Scarf3D::options.mute  = mute;
 
     Scarf3D::Initialize<spec> S(nd, npts, x, y, z, ds, acf, cl, sigma);
 
@@ -550,6 +596,7 @@ int main(){
    delete[] y;
    delete[] z;
    delete[] field;
+   delete[] poi;
 
    MPI_Barrier(MPI_COMM_WORLD);
 

@@ -655,9 +655,6 @@ MODULE m_scarflib_fim
       ! initialise variables
       info(:) = 0._f_real
 
-print*, 'shape(poi) ', shape(poi), poi
-
-
 #ifdef DEBUG
       IF (world_rank .eq. 0) THEN
         WRITE(output_unit, *)

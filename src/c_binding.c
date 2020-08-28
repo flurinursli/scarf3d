@@ -10,7 +10,7 @@ extern void struct_initialize(const int* nd, const int fs[], const int fe[], con
                               const real* beta, const real* gamma);
 
 extern void unstruct_initialize(const int* nd, const int* npts, const real* dh, const int* acf, const real cl[], const real* sigma, const real* x, const real* y, const real* z,
-                                const int* solver, const real* hurst, const real* ds, const real* poi, const int* npoi, const real* mute, const real* taper,
+                                const int* solver, const real* hurst, const real* ds, real** poi, const int* npoi, const real* mute, const real* taper,
                                 const int* rescale, const int* pad, const real nc[], const real fc[], const real* alpha, const real* beta, const real* gamma);
 
 extern void execute(const int* seed, real** field, real stats[]);
@@ -76,14 +76,14 @@ void scarf_struct_initialize(const int nd, const int fs[], const int fe[], const
 void scarf_unstruct_initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
 
   int *solver = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
-  real *hurst = NULL, *ds = NULL, *poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
+  real *hurst = NULL, *ds = NULL, **poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
   real *alpha = NULL, *beta = NULL, *gamma = NULL;
 
   if (var){
     if (var->solver == 1) solver = &var->solver;
     if (var->hurst > 0) hurst = &var->hurst;
     if (var->ds > 0) ds = &var->ds;
-    if (var->poi) poi = var->poi;
+    if (var->poi) poi = &var->poi;
     if (var->npoi > 0) npoi = &var->npoi;
     if (var->mute > 0) mute = &var->mute;
     if (var->taper > 0) taper = &var->taper;

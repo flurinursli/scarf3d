@@ -79,7 +79,7 @@ PROGRAM driver
   mute = 1000.
 
   ! radius for tapering (at poi + mute), same units as "dh"
-  taper = 5000. * 10
+  taper = 5000.
 
   ! rescale to desired (continuous) sigma
   rescale = 0
@@ -368,278 +368,330 @@ PROGRAM driver
   NULLIFY(v2, x2, y2)
   DEALLOCATE(v1, x1, y1)
 
-! ================================================================================================================================
-! --------------------------------------------------------------------------------------------------------------------------------
-! create sample structured mesh: 3D case
-! --------------------------------------------------------------------------------------------------------------------------------
-! ================================================================================================================================
+  ! ================================================================================================================================
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! create sample structured mesh: 3D case
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! ================================================================================================================================
 
-CALL sample_mesh(rank, ntasks, n, fs, fe)
+  CALL sample_mesh(rank, ntasks, n, fs, fe)
 
-samples = [fe(1) - fs(1) + 1, fe(2) - fs(2) + 1, fe(3) - fs(3) + 1]
+  samples = [fe(1) - fs(1) + 1, fe(2) - fs(2) + 1, fe(3) - fs(3) + 1]
 
-ALLOCATE(v1(PRODUCT(samples)), x1(PRODUCT(samples)), y1(PRODUCT(samples)), z1(PRODUCT(samples)))
+  ALLOCATE(v1(PRODUCT(samples)), x1(PRODUCT(samples)), y1(PRODUCT(samples)), z1(PRODUCT(samples)))
 
-x3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => x1
-y3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => y1
-z3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => z1
-v3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => v1
+  x3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => x1
+  y3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => y1
+  z3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => z1
+  v3(fs(1):fe(1), fs(2):fe(2), fs(3):fe(3)) => v1
 
-DO k = fs(3), fe(3)
-  DO j = fs(2), fe(2)
-    DO i = fs(1), fe(1)
-      x3(i, j, k) = (i - 1) * ds
-      y3(i, j, k) = (j - 1) * ds
-      z3(i, j, k) = (k - 1) * ds
+  DO k = fs(3), fe(3)
+    DO j = fs(2), fe(2)
+      DO i = fs(1), fe(1)
+        x3(i, j, k) = (i - 1) * ds
+        y3(i, j, k) = (j - 1) * ds
+        z3(i, j, k) = (k - 1) * ds
+      ENDDO
     ENDDO
   ENDDO
-ENDDO
 
-! ================================================================================================================================
-! --------------------------------------------------------------------------------------------------------------------------------
-! test FIM algorithm
-! --------------------------------------------------------------------------------------------------------------------------------
-! ================================================================================================================================
+  ! ================================================================================================================================
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! test FIM algorithm
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! ================================================================================================================================
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *) ''
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *) '****** FIM algorithm, 3D, structured mesh *******'
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *) '****** FIM algorithm, 3D, structured mesh *******'
+  ENDIF
 
-CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, beta = 10._f_real, poi = poi, taper = taper,  &
-                      mute = mute)
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, beta = 10._f_real, poi = poi, taper = taper,  &
+                        mute = mute)
 
-CALL watch_start(tictoc)
+  CALL watch_start(tictoc)
 
-CALL scarf_execute(seed, v3, stats)
+  CALL scarf_execute(seed, v3, stats)
 
-CALL watch_stop(tictoc)
+  CALL watch_stop(tictoc)
 
-CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *)
-  buffer = 'Statistics for current simulation'
-  WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
-  WRITE(stdout, *) '*************************************************'
-  buffer = 'Elapsed time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  buffer = '+ spectrum'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
-  buffer = '+ symmetry'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
-  buffer = '+ FFT'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(7), ' sec', '|'
-  buffer = '+ interpolation'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(8), ' sec', '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Domain too small?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
-  buffer = 'Grid-step too large?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Discrete standard deviation'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
-  buffer = 'Discrete mean value'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *)
+    buffer = 'Statistics for current simulation'
+    WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
+    WRITE(stdout, *) '*************************************************'
+    buffer = 'Elapsed time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    buffer = '+ spectrum'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
+    buffer = '+ symmetry'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
+    buffer = '+ FFT'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(7), ' sec', '|'
+    buffer = '+ interpolation'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(8), ' sec', '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Domain too small?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
+    buffer = 'Grid-step too large?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Discrete standard deviation'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
+    buffer = 'Discrete mean value'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+  ENDIF
 
-CALL watch_start(tictoc)
+  CALL watch_start(tictoc)
 
-CALL scarf_io(n, v3, 'fim_struct_whole_3d', 3)
+  CALL scarf_io(n, "x", n(1)/2, v3, "fim_struct_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "fim_struct_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "fim_struct_zslice")
 
-CALL watch_stop(tictoc)
+  CALL watch_stop(tictoc)
 
-IF (rank .eq. 0) THEN
-  buffer = 'I/O time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *)
-ENDIF
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time (slices)'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+  ENDIF
 
-CALL scarf_finalize()
+  CALL watch_start(tictoc)
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *) ''
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *) '***** FIM algorithm, 3D, unstructured mesh ******'
-ENDIF
+  CALL scarf_io(n, v3, 'fim_struct_whole_3d', 3)
 
-CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, beta = 10._f_real, poi = poi, taper = taper,  &
-                      mute = mute)
+  CALL watch_stop(tictoc)
 
-CALL watch_start(tictoc)
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *)
+  ENDIF
 
-CALL scarf_execute(seed, v1, stats)
+  CALL scarf_finalize()
 
-CALL watch_stop(tictoc)
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *) '***** FIM algorithm, 3D, unstructured mesh ******'
+  ENDIF
 
-CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, beta = 10._f_real, poi = poi, taper = taper,  &
+                        mute = mute)
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *)
-  buffer = 'Statistics for current simulation'
-  WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
-  WRITE(stdout, *) '*************************************************'
-  buffer = 'Elapsed time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  buffer = '+ spectrum'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
-  buffer = '+ symmetry'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
-  buffer = '+ FFT'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(7), ' sec', '|'
-  buffer = '+ interpolation'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(8), ' sec', '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Domain too small?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
-  buffer = 'Grid-step too large?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Discrete standard deviation'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
-  buffer = 'Discrete mean value'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-ENDIF
+  CALL watch_start(tictoc)
 
-CALL watch_start(tictoc)
+  CALL scarf_execute(seed, v1, stats)
 
-CALL scarf_io(n, v3, 'fim_unstruct_whole_3d', 3)
+  CALL watch_stop(tictoc)
 
-CALL watch_stop(tictoc)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-IF (rank .eq. 0) THEN
-  buffer = 'I/O time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *)
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *)
+    buffer = 'Statistics for current simulation'
+    WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
+    WRITE(stdout, *) '*************************************************'
+    buffer = 'Elapsed time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    buffer = '+ spectrum'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
+    buffer = '+ symmetry'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
+    buffer = '+ FFT'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(7), ' sec', '|'
+    buffer = '+ interpolation'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(8), ' sec', '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Domain too small?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
+    buffer = 'Grid-step too large?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Discrete standard deviation'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
+    buffer = 'Discrete mean value'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+  ENDIF
 
-CALL scarf_finalize()
+  CALL watch_start(tictoc)
 
-! ================================================================================================================================-
-! --------------------------------------------------------------------------------------------------------------------------------
-! tests SRM algorithm
-! --------------------------------------------------------------------------------------------------------------------------------
-! ================================================================================================================================-
+  CALL scarf_io(n, "x", n(1)/2, v3, "fim_unstruct_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "fim_unstruct_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "fim_unstruct_zslice")
+
+  CALL watch_stop(tictoc)
+
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time (slices)'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+  ENDIF
+
+  CALL watch_start(tictoc)
+
+  CALL scarf_io(n, v3, 'fim_unstruct_whole_3d', 3)
+
+  CALL watch_stop(tictoc)
+
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *)
+  ENDIF
+
+  CALL scarf_finalize()
+
+  ! ================================================================================================================================-
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! tests SRM algorithm
+  ! --------------------------------------------------------------------------------------------------------------------------------
+  ! ================================================================================================================================-
 
 #ifdef SPECTRAL
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *) ''
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *) '****** SRM algorithm, 3D, structured mesh *******'
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *) '****** SRM algorithm, 3D, structured mesh *******'
+  ENDIF
 
-CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst, beta = -20._f_real, poi=poi, taper=taper, mute=mute)
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst, beta = -20._f_real, poi=poi, taper=taper, mute=mute)
 
-CALL watch_start(tictoc)
+  CALL watch_start(tictoc)
 
-CALL scarf_execute(seed, v3, stats)
+  CALL scarf_execute(seed, v3, stats)
 
-CALL watch_stop(tictoc)
+  CALL watch_stop(tictoc)
 
-CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *)
-  buffer = 'Statistics for current simulation'
-  WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
-  WRITE(stdout, *) '*************************************************'
-  buffer = 'Elapsed time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  buffer = '+ CPU (main loop)'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
-  buffer = '+ GPU (main loop)'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Domain too small?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
-  buffer = 'Grid-step too large?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Discrete standard deviation'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
-  buffer = 'Discrete mean value'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *)
+    buffer = 'Statistics for current simulation'
+    WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
+    WRITE(stdout, *) '*************************************************'
+    buffer = 'Elapsed time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    buffer = '+ CPU (main loop)'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
+    buffer = '+ GPU (main loop)'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Domain too small?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
+    buffer = 'Grid-step too large?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Discrete standard deviation'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
+    buffer = 'Discrete mean value'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+  ENDIF
 
-CALL watch_start(tictoc)
+  CALL watch_start(tictoc)
 
-CALL scarf_io(n, v3, 'srm_struct_whole_3d', 3)
+  CALL scarf_io(n, "x", n(1)/2, v3, "srm_struct_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "srm_struct_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "srm_struct_zslice")
 
-CALL watch_stop(tictoc)
+  CALL watch_stop(tictoc)
 
-IF (rank .eq. 0) THEN
-  buffer = 'I/O time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *)
-ENDIF
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time (slices)'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+  ENDIF
 
-CALL scarf_finalize()
+  CALL watch_start(tictoc)
+
+  CALL scarf_io(n, v3, 'srm_struct_whole_3d', 3)
+
+  CALL watch_stop(tictoc)
+
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *)
+  ENDIF
+
+  CALL scarf_finalize()
 
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *)
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *) '***** SRM algorithm, 3D, unstructured mesh ******'
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *)
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *) '***** SRM algorithm, 3D, unstructured mesh ******'
+  ENDIF
 
-CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, beta = -20._f_real, poi = poi, taper = taper,  &
+  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, beta = -20._f_real, poi = poi, taper = taper,  &
                       mute = mute)
 
-CALL watch_start(tictoc)
+  CALL watch_start(tictoc)
 
-CALL scarf_execute(seed, v1, stats)
+  CALL scarf_execute(seed, v1, stats)
 
-CALL watch_stop(tictoc)
+  CALL watch_stop(tictoc)
 
-CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
+  CALL mpi_allreduce(mpi_in_place, stats, 8, mpi_real, mpi_max, mpi_comm_world, ierr)
 
-IF (rank .eq. 0) THEN
-  WRITE(stdout, *)
-  buffer = 'Statistics for current simulation'
-  WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
-  WRITE(stdout, *) '*************************************************'
-  buffer = 'Elapsed time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  buffer = '+ CPU (main loop)'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
-  buffer = '+ GPU (main loop)'
-  WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Domain too small?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
-  buffer = 'Grid-step too large?'
-  WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-  buffer = 'Discrete standard deviation'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
-  buffer = 'Discrete mean value'
-  WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
-  WRITE(stdout, *) '------------------------------|-----------------|'
-ENDIF
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *)
+    buffer = 'Statistics for current simulation'
+    WRITE(stdout, '(X, A35)') ADJUSTL(buffer)
+    WRITE(stdout, *) '*************************************************'
+    buffer = 'Elapsed time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    buffer = '+ CPU (main loop)'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(5), ' sec', '|'
+    buffer = '+ GPU (main loop)'
+    WRITE(stdout, '(4X, A27, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', stats(6), ' sec', '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Domain too small?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(1)), '|'
+    buffer = 'Grid-step too large?'
+    WRITE(stdout, '(X, A30, A, L12, T50, A)') ADJUSTL(buffer), '|', NINT(stats(2)), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+    buffer = 'Discrete standard deviation'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(3), '|'
+    buffer = 'Discrete mean value'
+    WRITE(stdout, '(X, A30, A, F12.5, T50, A)') ADJUSTL(buffer), '|', stats(4), '|'
+    WRITE(stdout, *) '------------------------------|-----------------|'
+  ENDIF
 
-CALL watch_start(tictoc)
+  CALL watch_start(tictoc)
 
-CALL scarf_io(n, v3, 'srm_unstruct_whole_3d', 3)
+  CALL scarf_io(n, "x", n(1)/2, v3, "srm_unstruct_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "srm_unstruct_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "srm_unstruct_zslice")
 
-CALL watch_stop(tictoc)
+  CALL watch_stop(tictoc)
 
-IF (rank .eq. 0) THEN
-  buffer = 'I/O time'
-  WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
-  WRITE(stdout, *) '*************************************************'
-  WRITE(stdout, *)
-ENDIF
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time (slices)'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+  ENDIF
 
-CALL scarf_finalize()
+  CALL watch_start(tictoc)
+
+  CALL scarf_io(n, v3, 'srm_unstruct_whole_3d', 3)
+
+  CALL watch_stop(tictoc)
+
+  IF (rank .eq. 0) THEN
+    buffer = 'I/O time'
+    WRITE(stdout, '(X, A30, A, F12.5, A, T50, A)') ADJUSTL(buffer), '|', tictoc, ' sec', '|'
+    WRITE(stdout, *) '*************************************************'
+    WRITE(stdout, *)
+  ENDIF
+
+  CALL scarf_finalize()
 
 #endif
 

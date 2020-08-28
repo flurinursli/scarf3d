@@ -55,6 +55,16 @@ int main(){
 
   const real hurst = 0.25;
 
+  // rotation angles
+  const real alpha = 30;
+  const real beta  = -10;
+
+  // number of POI
+  const int npoi = 2;
+
+  const real taper = 5000;
+  const real mute  = 1000;
+
   // I/O writers (only for PFS)
   const int nwriters[1] = {2};
 
@@ -63,7 +73,7 @@ int main(){
   int npts, nd;
   long c;
   real stats[8];
-  real *x, *y, *z, *field;
+  real *x, *y, *z, *field, *poi;
 
   struct scarf_opt options;
 
@@ -96,6 +106,13 @@ int main(){
 
   npts = dims[0] * dims[1];
 
+  poi = (real*) malloc(nd * npoi * sizeof(real));
+
+  poi[0] = 400 * ds;
+  poi[1] = 250 * ds;
+  poi[2] = 200 * ds;
+  poi[3] = 150 * ds;
+
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
   // tests FIM algorithm
@@ -111,7 +128,11 @@ int main(){
   scarf_opt_init(&options);
 
   options.hurst = hurst;
-  options.alpha = 30;
+  options.alpha = alpha;
+  options.npoi  = npoi;
+  options.poi   = poi;
+  options.taper = taper;
+  options.mute  = mute;
 
   scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
@@ -156,6 +177,15 @@ int main(){
     printf("***** FIM algorithm, 2D, unstructured mesh ******\n");
   }
 
+  scarf_opt_init(&options);
+
+  options.hurst = hurst;
+  options.alpha = alpha;
+  options.npoi  = npoi;
+  options.poi   = poi;
+  options.taper = taper;
+  options.mute  = mute;
+
   scarf_unstruct_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
@@ -198,6 +228,12 @@ int main(){
 
   scarf_opt_init(&options);
 
+  options.hurst  = hurst;
+  options.alpha  = alpha;
+  options.npoi   = npoi;
+  options.poi    = poi;
+  options.taper  = taper;
+  options.mute   = mute;
   options.solver = 1;
 
   scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
@@ -239,6 +275,16 @@ int main(){
     printf("****** SRM algorithm, 2D, structured mesh *******\n");
   }
 
+  scarf_opt_init(&options);
+
+  options.hurst  = hurst;
+  options.alpha  = alpha;
+  options.npoi   = npoi;
+  options.poi    = poi;
+  options.taper  = taper;
+  options.mute   = mute;
+  options.solver = 1;
+
   scarf_unstruct_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
@@ -268,6 +314,7 @@ int main(){
   free(x);
   free(y);
   free(field);
+  free(poi);
 
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
@@ -302,6 +349,15 @@ int main(){
 
   npts = dims[0] * dims[1] * dims[2];
 
+  poi = (real*) malloc(nd * npoi * sizeof(real));
+
+  poi[0] = 400 * ds;
+  poi[1] = 250 * ds;
+  poi[2] = 100 * ds;
+  poi[3] = 200 * ds;
+  poi[4] = 150 * ds;
+  poi[5] = 50 * ds;
+
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
   // tests FIM algorithm
@@ -316,9 +372,13 @@ int main(){
 
   scarf_opt_init(&options);
 
-  options.hurst = hurst;
-  options.alpha = 30;
-  options.beta  = 20;
+  options.hurst  = hurst;
+  options.alpha  = alpha;
+  options.beta   = beta;
+  options.npoi   = npoi;
+  options.poi    = poi;
+  options.taper  = taper;
+  options.mute   = mute;
 
   scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
@@ -373,6 +433,16 @@ int main(){
     printf("***** FIM algorithm, 3D, unstructured mesh ******\n");
   }
 
+  scarf_opt_init(&options);
+
+  options.hurst  = hurst;
+  options.alpha  = alpha;
+  options.beta   = beta;
+  options.npoi   = npoi;
+  options.poi    = poi;
+  options.taper  = taper;
+  options.mute   = mute;
+
   scarf_unstruct_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
@@ -415,6 +485,13 @@ int main(){
 
   scarf_opt_init(&options);
 
+  options.hurst  = hurst;
+  options.alpha  = alpha;
+  options.beta   = beta;
+  options.npoi   = npoi;
+  options.poi    = poi;
+  options.taper  = taper;
+  options.mute   = mute;
   options.solver = 1;
 
   scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
@@ -466,6 +543,17 @@ int main(){
     printf("****** SRM algorithm, 3D, structured mesh *******\n");
   }
 
+  scarf_opt_init(&options);
+
+  options.hurst  = hurst;
+  options.alpha  = alpha;
+  options.beta   = beta;
+  options.npoi   = npoi;
+  options.poi    = poi;
+  options.taper  = taper;
+  options.mute   = mute;
+  options.solver = 1;
+
   scarf_unstruct_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
@@ -496,6 +584,7 @@ int main(){
   free(y);
   free(z);
   free(field);
+  free(poi);
 
   MPI_Barrier(MPI_COMM_WORLD);
 
