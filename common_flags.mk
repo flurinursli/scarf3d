@@ -1,15 +1,13 @@
-# Users can modify lines below to update compiler flags
+# Lines below define good optimization flags for gcc, pgi and intel compiler suites.
+# Users can modify them for fine-tuning or to include other compilers.
 
-# optimization flags for each compiler
 ifeq ($(COMPILER),gcc)
   FFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
-  #CXXFLAGS = -O3 -funroll-loops -cpp
 	CFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
 	CXXFLAGS = -O3 -funroll-loops -fopenacc -foffload="-O3 -lm" -foffload=nvptx-none -fopt-info-optimized-omp -cpp
 	LDFLAGS = -lgfortran -lm
 else ifeq ($(COMPILER),pgi)
   FFLAGS = -fast -acc -ta=tesla:cc75 -cpp
-  #CXXFLAGS = -fast -cpp
 	CFLAGS = -fast -acc -ta=tesla:cc75 -cpp
 	CXXFLAGS = -fast -acc -ta=tesla:cc75 -cpp
 	LDFLAGS = -lpgf90 -lpgf90rtl
@@ -37,7 +35,8 @@ ifeq ($(DEBUG),yes)
   endif
 endif
 
-# please do NOT modify below this line!
+# PLEASE DO NOT MODIFY BELOW THIS LINE!
+# set common pre-processor directives
 #-------------------------------------------------------------------------------
 
 # name of library (for linking)
@@ -47,7 +46,6 @@ else
 	LIB_NAME = scarf3df
 endif
 
-# prepare preprocessor directives
 PP_FLAGS =
 
 ifeq ($(PRECISION),double)
@@ -56,6 +54,10 @@ endif
 
 ifeq ($(SPECTRAL),yes)
 	PP_FLAGS += -DSPECTRAL
+endif
+
+ifeq ($(DIP),yes)
+	PP_FLAGS += -DDIP
 endif
 
 ifeq ($(DEBUG),yes)

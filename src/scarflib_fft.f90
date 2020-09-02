@@ -190,7 +190,13 @@ MODULE m_scarflib_fim
       CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
 
       ! initialise variables
-      info(:) = 0._f_real
+      info(:)     = 0._f_real
+      bar(:)      = 0._f_real
+      matrix(:,:) = 0._f_real
+
+      DO i = 1, 3
+        matrix(i,i) = 1._f_real
+      ENDDO
 
 #ifdef DEBUG
       IF (world_rank .eq. 0) THEN
@@ -256,6 +262,7 @@ MODULE m_scarflib_fim
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
+#ifdef DIP
       ! angle about z-axis
       calpha = cos(alpha * pi / 180._f_real)
       salpha = sin(alpha * pi / 180._f_real)
@@ -282,6 +289,7 @@ MODULE m_scarflib_fim
       ! set new nc/fc
       min_extent(1:n) = bar(1:n) - diagonal
       max_extent(1:n) = bar(1:n) + diagonal
+#endif
 
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
@@ -328,6 +336,7 @@ MODULE m_scarflib_fim
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
       IF (ANY(dh .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
+#ifdef DIP
       ! translate baricenter to account position of first point
       bar(1:n) = bar(1:n) - off_axis(1:n)
 
@@ -336,6 +345,7 @@ MODULE m_scarflib_fim
 
       ! translation vector to rotate around baricenter in original reference frame
       bar = bar - obar
+#endif
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
@@ -359,6 +369,8 @@ MODULE m_scarflib_fim
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
+
+print*, world_rank, ' - ', ls, ' - ', le
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -653,7 +665,13 @@ MODULE m_scarflib_fim
       CALL mpi_comm_size(mpi_comm_world, world_size, ierr)
 
       ! initialise variables
-      info(:) = 0._f_real
+      info(:)     = 0._f_real
+      bar(:)      = 0._f_real
+      matrix(:,:) = 0._f_real
+
+      DO i = 1, 3
+        matrix(i,i) = 1._f_real
+      ENDDO
 
 #ifdef DEBUG
       IF (world_rank .eq. 0) THEN
@@ -722,6 +740,7 @@ MODULE m_scarflib_fim
       CALL mpi_allreduce(mpi_in_place, min_extent, 3, real_type, mpi_min, mpi_comm_world, ierr)
       CALL mpi_allreduce(mpi_in_place, max_extent, 3, real_type, mpi_max, mpi_comm_world, ierr)
 
+#ifdef DIP
       ! angle about z-axis
       calpha = cos(alpha * pi / 180._f_real)
       salpha = sin(alpha * pi / 180._f_real)
@@ -748,6 +767,7 @@ MODULE m_scarflib_fim
       ! set new nc/fc
       min_extent(1:n) = bar(1:n) - diagonal
       max_extent(1:n) = bar(1:n) + diagonal
+#endif
 
       ! cycle over the three main directions to determine the necessary model size (in number of points) and the absolute position
       ! of the first point to counteract fft periodicity
@@ -795,6 +815,7 @@ MODULE m_scarflib_fim
       ! ...and if internal grid-step is small enough to catch the upper part of the spectrum (high wavenumbers)
       IF (ANY(dh .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
 
+#ifdef DIP
       ! translate baricenter to account position of first point
       bar(1:n) = bar(1:n) - off_axis(1:n)
 
@@ -805,6 +826,7 @@ MODULE m_scarflib_fim
 
       ! translation vector to rotate around baricenter in original reference frame
       bar = bar - obar
+#endif
 
       ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * ---
       ! create regular mesh (for FFT) and associated cartesian topology: random field will be computed on this mesh and then interpolated
@@ -828,6 +850,8 @@ MODULE m_scarflib_fim
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
+
+print*, world_rank, ' - ', ls, ' - ', le
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -3016,43 +3040,43 @@ MODULE m_scarflib_fim
 
         ! nearest neighbor
         ! {
-!         i0 = NINT(i)
-!         j0 = NINT(j)
-!         k0 = NINT(k)
-!
-! !if (k .ne. 2.5_f_real) print*, 'K0 in interpolate ', k0, k , SIZE(delta, 3)    ! k0=2, SIZE(delta, 3) = 2
-!
-!         v(p) = delta(i0, j0, k0)
+        i0 = NINT(i)
+        j0 = NINT(j)
+        k0 = NINT(k)
+
+!if (k .ne. 2.5_f_real) print*, 'K0 in interpolate ', k0, k , SIZE(delta, 3)    ! k0=2, SIZE(delta, 3) = 2
+
+        v(p) = delta(i0, j0, k0)
         ! }
 
         ! bilinear
         ! {
-        i0 = FLOOR(i)
-        j0 = FLOOR(j)
-        k0 = FLOOR(k)
-
-        f(:, 1) = delta(i0:i0 + 1, j0, k0)
-        f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0)
-
-        px = i - i0
-        py = j - j0
-
-        ipx = (1._f_real - px)
-        ipy = (1._f_real - py)
-
-        ! bilinear interpolation at level 1
-        a = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
-
-        f(:, 1) = delta(i0:i0 + 1, j0, k0 + 1)
-        f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0 + 1)
-
-        ! bilinear interpolation at level 2
-        b = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
-
-        pz = k - k0
-
-        ! linear interpolated between level 1 and 2
-        v(p) = a * (1._f_real - pz) + b * pz
+        ! i0 = FLOOR(i)
+        ! j0 = FLOOR(j)
+        ! k0 = FLOOR(k)
+        !
+        ! f(:, 1) = delta(i0:i0 + 1, j0, k0)
+        ! f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0)
+        !
+        ! px = i - i0
+        ! py = j - j0
+        !
+        ! ipx = (1._f_real - px)
+        ! ipy = (1._f_real - py)
+        !
+        ! ! bilinear interpolation at level 1
+        ! a = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
+        !
+        ! f(:, 1) = delta(i0:i0 + 1, j0, k0 + 1)
+        ! f(:, 2) = delta(i0:i0 + 1, j0 + 1, k0 + 1)
+        !
+        ! ! bilinear interpolation at level 2
+        ! b = f(1, 1) * ipx * ipy + f(2, 1) * px * ipy + f(1, 2) * ipx * py + f(2, 2) * px * py
+        !
+        ! pz = k - k0
+        !
+        ! ! linear interpolated between level 1 and 2
+        ! v(p) = a * (1._f_real - pz) + b * pz
         ! }
 
       ENDDO

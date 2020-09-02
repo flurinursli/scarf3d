@@ -44,6 +44,15 @@ PROGRAM driver
 
   CALL mpi_barrier(mpi_comm_world, ierr)
 
+  IF (rank .eq. 0) THEN
+    WRITE(stdout, *) ''
+    WRITE(stdout, *) 'This program will compute small 2D and 3D random fields'
+    WRITE(stdout, *) 'using the FIM (and SRM - if selected at compile-time) algorithm(s).'
+    WRITE(stdout, *) 'Test should complete in a few minutes. Output can be inspected'
+    WRITE(stdout, *) 'with Matlab script "scarf3d.m" and "viz.m".'
+    WRITE(stdout, *) ''
+  ENDIF
+
   !---------------------------------------------------------------------------------------------------------------------------------
   ! input section
   !---------------------------------------------------------------------------------------------------------------------------------
@@ -60,7 +69,7 @@ PROGRAM driver
   acf = 0
 
   ! correlation length
-  cl = [2000._f_real, 500._f_real, 100._f_real]
+  cl = [2000._f_real, 500._f_real, 1000._f_real]
 
   ! standard deviation (sigma%/100)
   sigma = 0.05_f_real
@@ -76,10 +85,10 @@ PROGRAM driver
   poi(:, 2) = [200., 150.,  50.] * ds
 
   ! radius for muting (at poi), same units as "dh"
-  mute = 1000.
+  mute = 10 * ds
 
   ! radius for tapering (at poi + mute), same units as "dh"
-  taper = 5000.
+  taper = 50 * ds
 
   ! rescale to desired (continuous) sigma
   rescale = 0
@@ -411,8 +420,9 @@ PROGRAM driver
     WRITE(stdout, *) '****** FIM algorithm, 3D, structured mesh *******'
   ENDIF
 
-  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, alpha = alpha, beta = beta, poi = poi,   &
-                        taper = taper, mute = mute)
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst)
+  ! CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst, alpha = alpha, beta = beta, poi = poi,   &
+  !                       taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
@@ -484,8 +494,9 @@ PROGRAM driver
     WRITE(stdout, *) '***** FIM algorithm, 3D, unstructured mesh ******'
   ENDIF
 
-  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, alpha = alpha, beta = beta, poi = poi,  &
-                        taper = taper, mute = mute)
+  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst)
+  ! CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst, alpha = alpha, beta = beta, poi = poi,  &
+  !                       taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 
@@ -565,8 +576,9 @@ PROGRAM driver
     WRITE(stdout, *) '****** SRM algorithm, 3D, structured mesh *******'
   ENDIF
 
-  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst, alpha = alpha, beta = beta, poi=poi, taper=taper,  &
-                        mute=mute)
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst)
+  ! CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst, alpha = alpha, beta = beta, poi=poi, taper=taper,  &
+  !                       mute=mute)
 
   CALL watch_start(tictoc)
 
@@ -635,8 +647,9 @@ PROGRAM driver
     WRITE(stdout, *) '***** SRM algorithm, 3D, unstructured mesh ******'
   ENDIF
 
-  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, alpha = alpha, beta = beta, poi = poi,   &
-                        taper = taper, mute = mute)
+  CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst)
+  ! CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst, alpha = alpha, beta = beta, poi = poi,   &
+  !                       taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
 

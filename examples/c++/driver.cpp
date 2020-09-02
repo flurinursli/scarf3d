@@ -288,7 +288,7 @@ int main(){
       Scarf3D::options.taper = taper;
       Scarf3D::options.mute  = mute;
 
-      Scarf3D::Initialize<spec> S(nd, npts, x, y, z, ds, acf, cl, sigma);
+      Scarf3D::Initialize<spec> S(nd, npts, x, y, ds, acf, cl, sigma);
 
       watch_start(&tictoc);
       S.execute(seed, field, stats);
