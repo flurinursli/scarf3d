@@ -3,7 +3,7 @@
 ################################################################################
 
 include ../../Makefile.inc
-include ../../common_flags.mk
+include ../../common.mk
 
 # ifeq ($(PRECISION),double)
 # 	LIB_NAME = scarf3d

@@ -2,7 +2,7 @@
 # Makefile to build the SCARF3D library
 ################################################################################
 
-#SCARF3D_DIR = $(CURDIR)
+SCARF3D_DIR = $(CURDIR)
 
 # set default installation directory (overridden if defined by user)
 prefix ?= ~/scarf3d_test

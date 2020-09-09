@@ -3,7 +3,7 @@
 ################################################################################
 
 include ../../Makefile.inc
-include ../../common_flags.mk
+include ../../common.mk
 
 # list Fortran objects
 F90_OBJS = scarflib_aux.o

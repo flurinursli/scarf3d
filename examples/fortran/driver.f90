@@ -58,7 +58,7 @@ PROGRAM driver
   !---------------------------------------------------------------------------------------------------------------------------------
 
   ! number of points for whole model
-  n = [500, 450, 400]
+  n = [500, 500, 500]
 
   ! grid step
   ds = 50._f_real
@@ -69,13 +69,13 @@ PROGRAM driver
   acf = 0
 
   ! correlation length
-  cl = [2000._f_real, 500._f_real, 1000._f_real]
+  cl = [2000._f_real, 2000._f_real, 2000._f_real]
 
   ! standard deviation (sigma%/100)
   sigma = 0.05_f_real
 
   ! hurst exponent (not used for gaussian acf)
-  hurst = 0.25_f_real
+  hurst = 0.1_f_real
 
   ! seed number
   seed = 1235

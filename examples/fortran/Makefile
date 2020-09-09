@@ -3,7 +3,7 @@
 ################################################################################
 
 include ../../Makefile.inc
-include ../../common_flags.mk
+include ../../common.mk
 
 # list Fortran objects
 OBJS = driver.o scarflib_aux.o

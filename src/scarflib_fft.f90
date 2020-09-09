@@ -370,8 +370,6 @@ MODULE m_scarflib_fim
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
 
-print*, world_rank, ' - ', ls, ' - ', le
-
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, ge, 3, mpi_integer, mpi_comm_world, ierr)
@@ -850,8 +848,6 @@ print*, world_rank, ' - ', ls, ' - ', le
 
       gs(:, world_rank) = ls
       ge(:, world_rank) = le
-
-print*, world_rank, ' - ', ls, ' - ', le
 
       ! make all processes aware of global indices
       CALL mpi_allgather(mpi_in_place, 0, mpi_datatype_null, gs, 3, mpi_integer, mpi_comm_world, ierr)
@@ -3043,8 +3039,6 @@ print*, world_rank, ' - ', ls, ' - ', le
         i0 = NINT(i)
         j0 = NINT(j)
         k0 = NINT(k)
-
-!if (k .ne. 2.5_f_real) print*, 'K0 in interpolate ', k0, k , SIZE(delta, 3)    ! k0=2, SIZE(delta, 3) = 2
 
         v(p) = delta(i0, j0, k0)
         ! }

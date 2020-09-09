@@ -33,3 +33,6 @@ if ndim == 3
   set(gca,'ZDir', 'Reverse');
   zlabel('Z axis');
 end
+
+fprintf("%s %12.5f\n", 'Std.Dev. ', std(field(:)));
+fprintf("%s\n", '');

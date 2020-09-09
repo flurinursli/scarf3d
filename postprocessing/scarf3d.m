@@ -146,28 +146,30 @@ for dir = 1:ndim
         psdf(:, i) = pwr(corr(:, i));
     end
 
-    % theoretical 1D PSD using discrete resolution
+    % theoretical 1D PSD using discrete resolution ('PWR' double number of points)
     ks = 1 / dh;
     k  = 2 * pi * ks * (0:n-1) / (2*n - 1);
     dk = 2 * pi / (2*n - 1) / dh;
 
     if acf == 'gs'
         fun = sigma^2 * sqrt(pi) * cl * exp(-cl^2 * k.^2 / 4);
-        fun = fun / dh / n;
     elseif acf == 'vk'
         x   = (1 + cl(1)^2 * k.^2).^(cl(2) + 0.5);
         fun = 2 * sqrt(pi) * gamma(cl(2) + 0.5) / gamma(cl(2)) * sigma^2 * cl(1) ./ x;
-        fun = fun / dh / n;
     end
 
-    % continuous std.dev.
-    csig = sqrt(1/pi * sum(fun(2:end)) * dh * n * dk);
+    % continuous std.dev. (assume zero-mean), 1D-equivalent of eqs. 5-6 in Frenje & Juhlin
+    csig = sqrt(1/pi * sum(fun(2:end)) * dk);
 
     % average discrete PSDF
     dPSD = mean(psdf, 2);
 
     fprintf("%s%s%s %12.5f%s %12.5f%s\n", 'Std.Dev. ', direction, '-direction:', csig, '(cont.)', sqrt(sum(dPSD(2:end))), '(disc.)');
 
+    % normalise continuous PSD to compare with discrete PSD
+    fun = fun / dh / n;
+
+    % note that sqrt(sum(fun(2:end))) = csig above
 
     % now plot PSDFs
 

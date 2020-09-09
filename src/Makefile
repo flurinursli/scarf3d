@@ -3,7 +3,7 @@
 ################################################################################
 
 include ../Makefile.inc
-include ../common_flags.mk
+include ../common.mk
 
 # override "LIB_NAME" defined in "common_flags.mk"
 ifeq ($(PRECISION),double)
@@ -13,7 +13,7 @@ else
 endif
 
 # list Fortran objects
-F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o f_binding.o
+F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o f_binding.o quadpack.o
 
 # compile Fortran objects
 $(F90_OBJS) : %.o : %.f90

@@ -60,8 +60,19 @@ MODULE m_scarflib_srm
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
+  ! number of dimensions (2 or 3)
+  INTEGER(f_int)            :: ndim
+
   ! number of harmonics in spectral summation
   INTEGER(f_int), PARAMETER :: nharm = 10000
+
+  ! hurst exponent for Von Karman ACF
+  REAL(f_dble)              :: hurst_exponent
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  ! pointer to PSD function for integration
+  PROCEDURE(vk_psdf), POINTER :: fun
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -86,6 +97,7 @@ MODULE m_scarflib_srm
     !   04/05/20                  original version
     !   21/07/20                  rotation angles
     !   23/07/20                  2D fields
+    !   08/09/20                  sigma normalisation
     !
 
     REAL(f_real),                DIMENSION(3),   INTENT(IN)  :: nc, fc       !< min/max extent of external grid, control min wavenumber
@@ -268,6 +280,21 @@ MODULE m_scarflib_srm
     hurst_factor = hurst + 1._f_real
 
     IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
+
+    ! set parameter for integration of PSD function
+    ndim = n
+
+    ! set PSD function
+    IF (acf == 0) THEN
+      hurst_exponent = REAL(hurst_factor, f_real)
+      fun => vk_psdf
+    ELSE
+      fun => gs_psdf
+    ENDIF
+
+    ! update scaling factor, assuming that discrete sigma is always equal to continuous sigma if random field is not normalised.
+    ! Note that sigma_discr = sigma_cont * sqrt(intg(kmin,kmax) / intg(0, inf))
+    scaling = scaling * SQRT(intg(kmin, kmax)/intg())
 
     ! loop over harmonics
     ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
@@ -476,6 +503,7 @@ MODULE m_scarflib_srm
     !   04/05/20                  original version
     !   21/07/20                  rotation angles
     !   23/07/20                  2D fields
+    !   08/09/20                  sigma normalisation
     !
 
     REAL(f_real),                DIMENSION(3),     INTENT(IN)  :: nc, fc          !< min/max extent of external grid, control min wavenumber
@@ -660,7 +688,23 @@ MODULE m_scarflib_srm
     ! setup argument for gamma function
     hurst_factor = hurst + 1._f_real
 
+    ! update hurst exponent
     IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
+
+    ! set parameter for integration of PSD function
+    ndim = n
+
+    ! set PSD function
+    IF (acf == 0) THEN
+      hurst_exponent = REAL(hurst_factor, f_real)
+      fun => vk_psdf
+    ELSE
+      fun => gs_psdf
+    ENDIF
+
+    ! update scaling factor, assuming that discrete sigma is always equal to continuous sigma if random field is not normalised.
+    ! Note that sigma_discr = sigma_cont * sqrt(intg(kmin,kmax) / intg(0, inf))
+    scaling = scaling * SQRT(intg(kmin, kmax)/intg())
 
     ! loop over harmonics
     ! openacc: "field" is copied in&out, all the others are only copied in. "arg" is created locally on the accelerator
@@ -881,5 +925,96 @@ MODULE m_scarflib_srm
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
+  REAL(f_real) FUNCTION intg(k0, k1)
+
+    ! Purpose:
+    ! To evaluate a definite integrate of the PSD function. The actual integration algorithm is chosen depending on whether the
+    ! integral is improper (optional args not specified) or not. In the former case, integration endpoints are 0 and +inf.
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   08/09/20                  original version
+    !
+
+    REAL(f_real),                    OPTIONAL, INTENT(IN) :: k0, k1
+    REAL(f_dble)                                          :: kmin, kmax, solv
+    INTEGER(f_int)                                        :: neval, ierr, last, ierr
+    INTEGER(f_int),                  PARAMETER            :: limlst = 50, limit = 500, leniw = 2 * limit + limlst
+    INTEGER(f_int),                  PARAMETER            :: maxp1 = 21, lenw = leniw * 2 + maxp1 * 25
+    INTEGER(f_int), DIMENSION(leniw)                      :: iwork
+    REAL(f_dble)                                          :: abserr
+    REAL(f_dble),                    PARAMETER            :: epsabs = 1.e-08_f_dble, epsrel = 1.e-05_f_dble
+    REAL(f_dble),   DIMENSION(lenw)                       :: work
+
+    !-------------------------------------------------------------------------------------------------------------------------------
+
+    IF (PRESENT(k0) .and. PRESENT(k1)) THEN
+      kmin = REAL(k0, f_dble)
+      kmax = REAL(k1, f_dble)
+      CALL dqng(fun, kmin, kmax, epsabs, epsrel, solv, abserr, neval, ierr)
+    ELSE
+      CALL dqagi(fun, 0._f_dble, 1, epsabs, epsrel, solv, abserr, neval, ierr, limit, lenw, last, iwork, work)
+    ENDIF
+
+    intg = REAL(solv, f_real)
+
+  END FUNCTION intg
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+  !=================================================================================================================================
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  REAL(f_dble) FUNCTION vk_psdf(k)
+
+    ! Purpose:
+    ! To return values of the integrand for Von Karman PSD functions. It makes use of two variables (ndim, hurst_exponent) defined
+    ! at module level.
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   08/09/20                  original version
+    !
+
+    REAL(f_dble), INTENT(IN) :: k
+
+    !-------------------------------------------------------------------------------------------------------------------------------
+
+    vk_psdf = k / (1._f_dble + k**2)**hurst_exponent
+
+    IF (ndim .eq. 3) vk_psdf = vk_psdf * k
+
+  END FUNCTION vk_psdf
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+  !=================================================================================================================================
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  REAL(f_dble) FUNCTION gs_psdf(k)
+
+    ! Purpose:
+    ! To return values of the integrand for Gaussian PSD functions. It makes use of two variables (ndim, hurst_exponent) defined
+    ! at module level.
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   08/09/20                  original version
+    !
+
+    REAL(f_dble), INTENT(IN) :: k
+
+    !-------------------------------------------------------------------------------------------------------------------------------
+
+    gs_psdf = k * exp(-0.25_f_dble * k**2)
+
+    IF (ndim .eq. 3) gs_psdf = gs_psdf * k / sqrt(pi)
+
+  END FUNCTION gs_psdf
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+  !=================================================================================================================================
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
 END MODULE m_scarflib_srm
