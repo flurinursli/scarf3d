@@ -88,21 +88,21 @@ MODULE m_scarflib
       !   23/07/20                  handle 2D input params
       !
 
-      INTEGER(f_int), DIMENSION(:),             INTENT(IN) :: fs, fe         !< first/last index of external grid
-      REAL(f_real),                             INTENT(IN) :: ds             !< grid-step external grid (controls max resolvable wavenumber)
-      INTEGER(f_int),                           INTENT(IN) :: acf            !< autocorrelation function (0=von karman, 1=gaussian)
-      REAL(f_real),   DIMENSION(:),             INTENT(IN) :: cl             !< correlation length
-      REAL(f_real),                             INTENT(IN) :: sigma          !< standard deviation
-      INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: method         !< algorithm of choice (empty=0=fim, 1=srm)
-      REAL(f_real),                   OPTIONAL, INTENT(IN) :: hurst          !< hurst exponent (needed only for acf=0)
-      REAL(f_real),                   OPTIONAL, INTENT(IN) :: dh             !< min grid-step external grid (controls max absolute wavenumber)
+      INTEGER(f_int), DIMENSION(:),                     INTENT(IN) :: fs, fe         !< first/last index of external grid
+      REAL(f_real),                                     INTENT(IN) :: ds             !< grid-step external grid (controls max resolvable wavenumber)
+      INTEGER(f_int),                                   INTENT(IN) :: acf            !< autocorrelation function (0=von karman, 1=gaussian)
+      REAL(f_real),   DIMENSION(:),                     INTENT(IN) :: cl             !< correlation length
+      REAL(f_real),                                     INTENT(IN) :: sigma          !< standard deviation
+      INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: method         !< algorithm of choice (empty=0=fim, 1=srm)
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: hurst          !< hurst exponent (needed only for acf=0)
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: dh             !< min grid-step external grid (controls max absolute wavenumber)
       REAL(f_real),   DIMENSION(:,:), TARGET, OPTIONAL, INTENT(IN) :: poi            !< points where taper/muting should be applied
-      REAL(f_real),                   OPTIONAL, INTENT(IN) :: mute, taper    !< radius for taper/muting
-      INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: rescale        !< rescale discrete std.dev. to continuous one
-      INTEGER(f_int),                 OPTIONAL, INTENT(IN) :: pad            !< pad internal grid (fim only, empty=0=no, 1=yes)
-      REAL(f_real),   DIMENSION(:),   OPTIONAL, INTENT(IN) :: nc, fc         !< min/max extent external grid (empty = use fs,fe)
-      REAL(f_real),                   OPTIONAL, INTENT(IN) :: alpha, beta, gamma
-      INTEGER(f_int)                                       :: n
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: mute, taper    !< radius for taper/muting
+      INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: rescale        !< rescale discrete std.dev. to continuous one
+      INTEGER(f_int),                         OPTIONAL, INTENT(IN) :: pad            !< pad internal grid (fim only, empty=0=no, 1=yes)
+      REAL(f_real),   DIMENSION(:),           OPTIONAL, INTENT(IN) :: nc, fc         !< min/max extent external grid (empty = use fs,fe)
+      REAL(f_real),                           OPTIONAL, INTENT(IN) :: alpha, beta, gamma
+      INTEGER(f_int)                                               :: n
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -375,10 +375,10 @@ MODULE m_scarflib
       !   23/07/20                  handle 2D fields only and rotation angles
       !
 
-      INTEGER(f_int),                           INTENT(IN)  :: seed         !< seed number
+      INTEGER(f_int),                                       INTENT(IN)  :: seed         !< seed number
       REAL(f_real),   DIMENSION(:,:),   CONTIGUOUS, TARGET, INTENT(OUT) :: field        !< random field
-      REAL(f_real),   DIMENSION(8),             INTENT(OUT) :: stats        !< vector with accuracy (1:2), std.dev. (3), mean(4) and timing flags (5:6/8)
-      REAL(f_real),   DIMENSION(:,:,:), POINTER             :: f
+      REAL(f_real),   DIMENSION(8),                         INTENT(OUT) :: stats        !< vector with accuracy (1:2), std.dev. (3), mean(4) and timing flags (5:6/8)
+      REAL(f_real),   DIMENSION(:,:,:),             POINTER             :: f
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -577,12 +577,12 @@ MODULE m_scarflib
       !   23/07/20                  handle 2D fields only
       !
 
-      INTEGER(f_int),   DIMENSION(2),             INTENT(IN) :: n                     !< grid points in the global mesh
-      REAL(f_real),     DIMENSION(:,:), CONTIGUOUS,  TARGET, INTENT(IN) :: field                 !< random field
-      CHARACTER(len=*),                           INTENT(IN) :: filename              !< output file name
-      INTEGER(f_int),                   OPTIONAL, INTENT(IN) :: nwriters              !< number of concurrent I/O processes (empty = 1)
-      INTEGER(f_int)                                         :: rank, np, nw, ierr
-      REAL(f_real),     DIMENSION(:,:,:), POINTER            :: f
+      INTEGER(f_int),   DIMENSION(2),                                   INTENT(IN) :: n                     !< grid points in the global mesh
+      REAL(f_real),     DIMENSION(:,:),   CONTIGUOUS, TARGET,           INTENT(IN) :: field                 !< random field
+      CHARACTER(len=*),                                                 INTENT(IN) :: filename              !< output file name
+      INTEGER(f_int),                                         OPTIONAL, INTENT(IN) :: nwriters              !< number of concurrent I/O processes (empty = 1)
+      INTEGER(f_int)                                                               :: rank, np, nw, ierr
+      REAL(f_real),     DIMENSION(:,:,:),             POINTER                      :: f
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -608,8 +608,10 @@ MODULE m_scarflib
       ! default case is to USE one writer only
       nw = 1
 
+#ifdef PFS
       ! we cannot have more writers than available processes
       IF (PRESENT(nwriters)) nw = MIN(np, nwriters)
+#endif
 
       f(1:SIZE(field, 1), 1:SIZE(field, 2), 1:1) => field
 

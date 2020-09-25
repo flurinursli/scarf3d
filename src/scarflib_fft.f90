@@ -48,7 +48,7 @@ MODULE m_scarflib_fim
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! define a procedure pointer to compute spectrum according to selected ACF
-  PROCEDURE(vk_psdf), POINTER :: fun
+  ! PROCEDURE(vk_psdf), POINTER :: fun
 
   ! interface to C++ functions/subroutines
   INTERFACE
@@ -2378,6 +2378,8 @@ MODULE m_scarflib_fim
       !   23/07/20                  added 2D PSDFs
       !
 
+      USE, NON_INTRINSIC :: m_psdf, vk => fim_vk, gs => fim_gs, ud => fim_ud
+
       REAL(f_real),                                                    INTENT(IN)  :: ds
       INTEGER(f_int),  DIMENSION(3),                                   INTENT(IN)  :: ls, le                !< global indices
       REAL(f_real),                                                    INTENT(IN)  :: dh                    !< grid-step
@@ -2388,11 +2390,11 @@ MODULE m_scarflib_fim
       INTEGER(f_int),                                                  INTENT(IN)  :: seed                  !< initial seed number
       COMPLEX(f_real), DIMENSION(ls(1):le(1),ls(2):le(2),ls(3):le(3)), INTENT(OUT) :: spec                  !< spectrum
       REAL(f_real),    DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
-      INTEGER(f_int)                                                               :: i, j, k, n
+      INTEGER(f_int)                                                               :: i, j, k
       LOGICAL                                                                      :: filter
-      REAL(f_real)                                                                 :: butter, num, amp
+      PROCEDURE(vk),                                                   POINTER     :: fun
+      REAL(f_real)                                                                 :: butter, const, amp
       REAL(f_real)                                                                 :: kc, kr
-      REAL(f_real)                                                                 :: hurst_factor
       REAL(f_dble)                                                                 :: tictoc
       REAL(f_real),    DIMENSION(3)                                                :: dk
       REAL(f_real),    DIMENSION(npts(1))                                          :: kx
@@ -2404,11 +2406,11 @@ MODULE m_scarflib_fim
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! discriminate between 2D and 3D case
+      ! discriminate between 2D and 3D case, "d" is a variable from module "m_psdf"
       IF (cl(3) .gt. 0._f_real) THEN
-        n = 3
+        d = 3
       ELSE
-        n = 2
+        d = 2
       ENDIF
 
       time(:) = 0._f_real
@@ -2440,22 +2442,21 @@ MODULE m_scarflib_fim
       ky = [[(j * dk(2), j = 0, npts(2)/2)], [(j * dk(2), j = npts(2)/2-1, 1, -1)]]
       kz = [[(k * dk(3), k = 0, npts(3)/2)], [(k * dk(3), k = npts(3)/2-1, 1, -1)]]
 
-      IF (n .eq. 3) THEN
-        hurst_factor = hurst + 1.5_f_real
-      ELSE
-        hurst_factor = hurst + 1._f_real
-      ENDIF
+      ! define power term for vk psdf, "nu" is a variable from module "m_psdf"
+      nu = hurst + d / 2._f_real
 
-      ! compute part of power spectral density outside loop
-      IF (acf .eq. 0) THEN
-        num = 4._f_real * pi * GAMMA(hurst_factor) * sigma**2 * PRODUCT(cl(1:n)) / GAMMA(hurst)
-        IF (n .eq. 3) num = num * 2._f_real * SQRT(pi)
-        fun => vk_psdf
-      ELSEIF (acf .eq. 1) THEN
-        num = sigma**2 * PRODUCT(cl(1:n)) * pi
-        IF (n .eq. 3) num = num * SQRT(pi)
-        fun => gs_psdf
-      ENDIF
+      ! compute part of power spectral density outside loop, point to right function
+      SELECT CASE (acf)
+        CASE(0)
+          const = (2**d) * pi**(d / 2._f_real) * GAMMA(nu) * sigma**2 * PRODUCT(cl(1:d)) / GAMMA(hurst)
+          fun => vk
+        CASE(1)
+          const = pi**(d / 2._f_real) * sigma**2 * PRODUCT(cl(1:d))
+          fun => gs
+        CASE(2)
+          const = 1._f_real
+          fun => ud
+      END SELECT
 
       ! each process generate its set of random numbers
       cptr = prng(seed, ls, le, npts)
@@ -2481,11 +2482,12 @@ MODULE m_scarflib_fim
 
             IF (filter .and. (kr .gt. kc)) butter = 0._f_real
 
-            ! now "kr" is the product "k * cl"
+            ! prepare argument for "fun", i.e. product "k * cl"
             kr = (kx(i) * cl(1))**2 + (ky(j) * cl(2))**2 + (kz(k) * cl(3))**2
 
             ! complete power spectral density and go to amplitude spectrum
-            amp = SQRT(num / fun(kr, hurst_factor))
+            ! amp = SQRT(num / fun(kr, hurst_factor))
+            amp = SQRT(const * fun(kr))
 
             ! apply filter
             amp = amp * butter
@@ -2525,49 +2527,108 @@ MODULE m_scarflib_fim
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(f_real) FUNCTION vk_psdf(m, hurst_factor)
+    ! REAL(f_real) FUNCTION vk_psdf(m, hurst_factor)
+    !
+    !   ! Purpose:
+    !   ! To compute the denominator of Von Karman (or exponential, if hurst = 0.5) PSDFs.
+    !   !
+    !   ! Revisions:
+    !   !     Date                    Description of change
+    !   !     ====                    =====================
+    !   !   04/05/20                  original version
+    !   !
+    !
+    !   REAL(f_real), INTENT(IN) :: m                  !< quantity (wavenumber*cl)**2
+    !   REAL(f_real), INTENT(IN) :: hurst_factor       !< hurst exponent
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   vk_psdf = (1._f_real + m)**(hurst_factor)
+    !
+    ! END FUNCTION vk_psdf
 
-      ! Purpose:
-      ! To compute the denominator of Von Karman (or exponential, if hurst = 0.5) PSDFs.
-      !
-      ! Revisions:
-      !     Date                    Description of change
-      !     ====                    =====================
-      !   04/05/20                  original version
-      !
-
-      REAL(f_real), INTENT(IN) :: m                  !< quantity (wavenumber*cl)**2
-      REAL(f_real), INTENT(IN) :: hurst_factor       !< hurst exponent
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      vk_psdf = (1._f_real + m)**(hurst_factor)
-
-    END FUNCTION vk_psdf
+    ! REAL(f_real) FUNCTION vk_psdf(k, cl, nu, scalar)
+    !
+    !   ! Purpose:
+    !   ! To compute the denominator of Von Karman (or exponential, if hurst = 0.5) PSDFs.
+    !   !
+    !   ! Revisions:
+    !   !     Date                    Description of change
+    !   !     ====                    =====================
+    !   !   04/05/20                  original version
+    !   !
+    !
+    !   REAL(f_real), DIMENSION(3), INTENT(IN) :: k, cl
+    !   REAL(f_real),               INTENT(IN) :: nu, scalar
+    !   REAL(f_real)                           :: m
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   m = (k(1) * cl(1))**2 + (k(2) * cl(2))**2 + (k(3) * cl(3))**2
+    !
+    !   vk_psdf = scalar / (1._f_real + m)**nu
+    !
+    ! END FUNCTION vk_psdf
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    REAL(f_real) FUNCTION gs_psdf(m, void)
+    ! REAL(f_real) FUNCTION gs_psdf(m, void)
+    !
+    !   ! Purpose:
+    !   ! To compute the denominator of Gaussian PSDFs. Second argument is not used but is kept to allow generic procedure pointers.
+    !   !
+    !   ! Revisions:
+    !   !     Date                    Description of change
+    !   !     ====                    =====================
+    !   !   04/05/20                  original version
+    !   !
+    !
+    !   REAL(f_real), INTENT(IN) :: m                 !< quantity (wavenumber*cl)**2
+    !   REAL(f_real), INTENT(IN) :: void              !< this variable is not used
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   gs_psdf = EXP(0.25_f_real * m)
+    !
+    ! END FUNCTION gs_psdf
 
-      ! Purpose:
-      ! To compute the denominator of Gaussian PSDFs. Second argument is not used but is kept to allow generic procedure pointers.
-      !
-      ! Revisions:
-      !     Date                    Description of change
-      !     ====                    =====================
-      !   04/05/20                  original version
-      !
-
-      REAL(f_real), INTENT(IN) :: m                 !< quantity (wavenumber*cl)**2
-      REAL(f_real), INTENT(IN) :: void              !< this variable is not used
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      gs_psdf = EXP(0.25_f_real * m)
-
-    END FUNCTION gs_psdf
+    ! REAL(f_real) FUNCTION gs_psdf(k, cl, sigma, hurst)
+    !
+    !   ! Purpose:
+    !   ! To compute the denominator of Von Karman (or exponential, if hurst = 0.5) PSDFs.
+    !   !
+    !   ! Revisions:
+    !   !     Date                    Description of change
+    !   !     ====                    =====================
+    !   !   04/05/20                  original version
+    !   !
+    !
+    !   REAL(f_real), DIMENSION(3), INTENT(IN) :: k, cl
+    !   REAL(f_real),               INTENT(IN) :: sigma, hurst                   !< hurst exponent
+    !   INTEGER(f_int)                         :: d
+    !   REAL(f_real)                           :: num, m, nu
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   !d = 3
+    !
+    !   !if (cl(3) .eq. 0._f_real) d = 2
+    !
+    !   !nu = hurst + 1._f_real
+    !
+    !   !if (d .eq. 3) nu = nu + 0.5_f_real
+    !
+    !   !num = 4._f_real * pi * GAMMA(nu) * sigma**2 * PRODUCT(cl(1:d)) / GAMMA(hurst)
+    !
+    !   !IF (d .eq. 3) num = num * 2._f_real * SQRT(pi)
+    !
+    !   m = (k(1) * cl(1))**2 + (k(2) * cl(2))**2 + (k(3) * cl(3))**2
+    !
+    !   gs_psdf = num / (1._f_real + m)**nu
+    !
+    ! END FUNCTION gs_psdf
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

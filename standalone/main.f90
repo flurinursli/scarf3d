@@ -148,14 +148,14 @@ PROGRAM main
         READ(1, '(A100)', iostat = ios) buffer
 
         SELECT CASE(TRIM(buffer))
-          CASE('# number of points')
+          CASE('# npts')
             READ(1, *) n
           CASE('# poi')
             npoi = npoi + 1
             READ(1, *) poi(:, npoi)
-          CASE('# grid-step')
+          CASE('# ds')
             READ(1, *) ds
-          CASE('# correlation length')
+          CASE('# cl')
             READ(1, *) cl
           CASE('# sigma')
             READ(1, *) sigma

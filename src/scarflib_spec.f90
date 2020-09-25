@@ -16,6 +16,7 @@ MODULE m_scarflib_srm
   !
 
   USE, NON_INTRINSIC :: m_scarflib_common
+  USE, NON_INTRINSIC :: m_psdf, nd => d, vk => srm_vk, gs => srm_gs, ud => srm_ud
 
   IMPLICIT none
 
@@ -61,18 +62,18 @@ MODULE m_scarflib_srm
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! number of dimensions (2 or 3)
-  INTEGER(f_int)            :: ndim
+  !INTEGER(f_int)            :: ndim
 
   ! number of harmonics in spectral summation
   INTEGER(f_int), PARAMETER :: nharm = 10000
 
   ! hurst exponent for Von Karman ACF
-  REAL(f_dble)              :: hurst_exponent
+  !REAL(f_dble)              :: hurst_exponent
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! pointer to PSD function for integration
-  PROCEDURE(vk_psdf), POINTER :: fun
+  PROCEDURE(vk), POINTER :: fun
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -120,7 +121,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                DIMENSION(6),   INTENT(OUT) :: info         !< errors flags and TIMING for performance analysis
     CHARACTER(30)                                            :: string
     INTEGER(f_int)                                           :: i, l
-    INTEGER(f_int)                                           :: n, npts
+    INTEGER(f_int)                                           :: npts
     INTEGER(f_int)                                           :: ierr
     INTEGER(c_int)                                           :: c_seed
     INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                :: npoints
@@ -193,11 +194,11 @@ MODULE m_scarflib_srm
 
     info(:) = 0._f_real
 
-    ! discriminate between 2D and 3D case
+    ! discriminate between 2D and 3D case, "nd" (alias for "n") is a variable from module "m_psdf"
     IF (cl(3) .gt. 0._f_real) THEN
-      n = 3
+      nd = 3
     ELSE
-      n = 2
+      nd = 2
     ENDIF
 
     ! initialise random generator
@@ -221,12 +222,12 @@ MODULE m_scarflib_srm
     ! (global) effective grid size
     span = max_extent - min_extent
 
-    kmin = 2._f_real * pi * maxval(cl(1:n) / span(1:n))
+    kmin = 2._f_real * pi * maxval(cl(1:nd) / span(1:nd))
 
-    kmax = pi / dh * minval(cl(1:n))
+    kmax = pi / dh * minval(cl(1:nd))
 
     ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
-    kc = pi / ds * minval(cl(1:n))
+    kc = pi / ds * minval(cl(1:nd))
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! check if the following conditions for a correct wavenumber representation are violated:
@@ -234,9 +235,9 @@ MODULE m_scarflib_srm
     ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._f_real * pi / span(1:n) .ge. 1._f_real / cl(1:n))) info(1) = 1._f_real
+    IF (ANY(2._f_real * pi / span(1:nd) .ge. 1._f_real / cl(1:nd))) info(1) = 1._f_real
 
-    IF (ANY(ds .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
+    IF (ANY(ds .gt. cl(1:nd) / 2._f_real)) info(2) = 1._f_real
 
     ! set scaling factor
     scaling = sigma / SQRT(REAL(nharm, f_real))
@@ -276,21 +277,18 @@ MODULE m_scarflib_srm
     ! translation vector to rotate around baricenter in original reference frame
     bar = bar - obar
 
-    ! setup argument for gamma function
-    hurst_factor = hurst + 1._f_real
-
-    IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
-
-    ! set parameter for integration of PSD function
-    ndim = n
+    ! define power term for vk psdf, "nu" is a variable from module "m_psdf"
+    nu = hurst + nd / 2._f_real
 
     ! set PSD function
-    IF (acf == 0) THEN
-      hurst_exponent = REAL(hurst_factor, f_real)
-      fun => vk_psdf
-    ELSE
-      fun => gs_psdf
-    ENDIF
+    SELECT CASE (acf)
+      CASE(0)
+        fun => vk
+      CASE(1)
+        fun => gs
+      CASE(2)
+        fun => ud
+    END SELECT
 
     ! update scaling factor, assuming that discrete sigma is always equal to continuous sigma if random field is not normalised.
     ! Note that sigma_discr = sigma_cont * sqrt(intg(kmin,kmax) / intg(0, inf))
@@ -313,14 +311,8 @@ MODULE m_scarflib_srm
         ! random variable "k`" must span the range [kmin, kmax]
         k = r(1) * (kmax - kmin) + kmin
 
-        ! evaluate original pdf
-        IF (acf .eq. 0) THEN
-          d = k / (1._f_real + k**2)**hurst_factor
-          IF (n .eq. 3) d = d * k
-        ELSE
-          d = k * EXP(-0.25_f_real * k**2)
-          IF (n .eq. 3) d = d * k / SQRT(pi)
-        ENDIF
+        ! evaluate original pdf (require input in double precision)
+        d = fun(real(k, f_dble))
 
         ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
@@ -336,7 +328,7 @@ MODULE m_scarflib_srm
       ! compute azimuth and polar angles
       phi = r(1) * 2._f_real * pi
 
-      IF (n .eq. 3) THEN                                     !< spherical coordinates
+      IF (nd .eq. 3) THEN                                     !< spherical coordinates
         theta = ACOS(1._f_real - 2._f_real * r(2))
         v1    = k * SIN(phi) * SIN(theta) / cl(1)
         v2    = k * COS(phi) * SIN(theta) / cl(2)
@@ -476,7 +468,7 @@ MODULE m_scarflib_srm
     pt(:) = 0._f_real
 
     DO i = 1, SIZE(poi, 2)
-      pt(1:n) = poi(1:n, i)
+      pt(1:nd) = poi(1:nd, i)
       CALL tapering(x, y, z, field, pt, mute, taper)
     ENDDO
 
@@ -526,7 +518,7 @@ MODULE m_scarflib_srm
     REAL(f_real),                DIMENSION(6),     INTENT(OUT) :: info            !< errors flags and TIMING for performance analysis
     CHARACTER(30)                                              :: string
     INTEGER(f_int)                                             :: i, j, k, l
-    INTEGER(f_int)                                             :: n, ierr
+    INTEGER(f_int)                                             :: ierr
     INTEGER(c_int)                                             :: c_seed
     INTEGER(f_int),              DIMENSION(3)                  :: npts
     INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                  :: npoints
@@ -602,11 +594,11 @@ MODULE m_scarflib_srm
 
     info(:) = 0._f_real
 
-    ! discriminate between 2D and 3D case
+    ! discriminate between 2D and 3D case, "nd" (alias for "n") is a variable from module "m_psdf"
     IF (cl(3) .gt. 0._f_real) THEN
-      n = 3
+      nd = 3
     ELSE
-      n = 2
+      nd = 2
     ENDIF
 
     ! initialise random generator
@@ -630,12 +622,12 @@ MODULE m_scarflib_srm
     ! global effective grid size
     span = max_extent - min_extent
 
-    kmin = 2._f_real * pi * maxval(cl(1:n) / span(1:n))
+    kmin = 2._f_real * pi * maxval(cl(1:nd) / span(1:nd))
 
-    kmax = pi / dh * minval(cl(1:n))
+    kmax = pi / dh * minval(cl(1:nd))
 
     ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
-    kc = pi / ds * minval(cl(1:n))
+    kc = pi / ds * minval(cl(1:nd))
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! check if the following conditions for a correct wavenumber representation are violated:
@@ -643,9 +635,9 @@ MODULE m_scarflib_srm
     ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._f_real * pi / span(1:n) .ge. 1._f_real / cl(1:n))) info(1) = 1._f_real
+    IF (ANY(2._f_real * pi / span(1:nd) .ge. 1._f_real / cl(1:nd))) info(1) = 1._f_real
 
-    IF (ANY(ds .gt. cl(1:n) / 2._f_real)) info(2) = 1._f_real
+    IF (ANY(ds .gt. cl(1:nd) / 2._f_real)) info(2) = 1._f_real
 
     ! set scaling factor
     scaling = sigma / SQRT(REAL(nharm, f_real))
@@ -685,22 +677,18 @@ MODULE m_scarflib_srm
     ! translation vector to rotate around baricenter in original reference frame
     bar = bar - obar
 
-    ! setup argument for gamma function
-    hurst_factor = hurst + 1._f_real
-
-    ! update hurst exponent
-    IF (n .eq. 3) hurst_factor = hurst_factor + 0.5_f_real
-
-    ! set parameter for integration of PSD function
-    ndim = n
+    ! define power term for vk psdf, "nu" is a variable from module "m_psdf"
+    nu = hurst + nd / 2._f_real
 
     ! set PSD function
-    IF (acf == 0) THEN
-      hurst_exponent = REAL(hurst_factor, f_real)
-      fun => vk_psdf
-    ELSE
-      fun => gs_psdf
-    ENDIF
+    SELECT CASE (acf)
+      CASE(0)
+        fun => vk
+      CASE(1)
+        fun => gs
+      CASE(2)
+        fun => ud
+    END SELECT
 
     ! update scaling factor, assuming that discrete sigma is always equal to continuous sigma if random field is not normalised.
     ! Note that sigma_discr = sigma_cont * sqrt(intg(kmin,kmax) / intg(0, inf))
@@ -723,14 +711,8 @@ MODULE m_scarflib_srm
         ! random variable "k`" must span the range [kmin, kmax]
         u = r(1) * (kmax - kmin) + kmin
 
-        ! evaluate original pdf
-        IF (acf .eq. 0) THEN
-          d = u / (1._f_real + u**2)**hurst_factor
-          IF (n .eq. 3) d = d * u
-        ELSE
-          d = u * EXP(-0.25_f_real * u**2)
-          IF (n .eq. 3) d = d * u / SQRT(pi)
-        ENDIF
+        ! evaluate original pdf (require input in double precision)
+        d = fun(real(u, f_dble))
 
         ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
@@ -746,7 +728,7 @@ MODULE m_scarflib_srm
       ! compute azimuth and polar angles
       phi = r(1) * 2._f_real * pi
 
-      IF (n .eq. 3) THEN                                             !< spherical coordinates
+      IF (nd .eq. 3) THEN                                             !< spherical coordinates
         theta = ACOS(1._f_real - 2._f_real * r(2))
         v1    = u * SIN(phi) * SIN(theta) / cl(1)
         v2    = u * COS(phi) * SIN(theta) / cl(2)
@@ -913,7 +895,7 @@ MODULE m_scarflib_srm
     pt(:) = 0._f_real
 
     DO i = 1, SIZE(poi, 2)
-      pt(1:n) = poi(1:n, i)
+      pt(1:nd) = poi(1:nd, i)
       CALL tapering(ds, fs, fe, field, pt, mute, taper)
     ENDDO
 
@@ -939,7 +921,7 @@ MODULE m_scarflib_srm
 
     REAL(f_real),                    OPTIONAL, INTENT(IN) :: k0, k1
     REAL(f_dble)                                          :: kmin, kmax, solv
-    INTEGER(f_int)                                        :: neval, ierr, last, ierr
+    INTEGER(f_int)                                        :: neval, ierr, last
     INTEGER(f_int),                  PARAMETER            :: limlst = 50, limit = 500, leniw = 2 * limit + limlst
     INTEGER(f_int),                  PARAMETER            :: maxp1 = 21, lenw = leniw * 2 + maxp1 * 25
     INTEGER(f_int), DIMENSION(leniw)                      :: iwork
@@ -960,58 +942,6 @@ MODULE m_scarflib_srm
     intg = REAL(solv, f_real)
 
   END FUNCTION intg
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
-  !=================================================================================================================================
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
-
-  REAL(f_dble) FUNCTION vk_psdf(k)
-
-    ! Purpose:
-    ! To return values of the integrand for Von Karman PSD functions. It makes use of two variables (ndim, hurst_exponent) defined
-    ! at module level.
-    !
-    ! Revisions:
-    !     Date                    Description of change
-    !     ====                    =====================
-    !   08/09/20                  original version
-    !
-
-    REAL(f_dble), INTENT(IN) :: k
-
-    !-------------------------------------------------------------------------------------------------------------------------------
-
-    vk_psdf = k / (1._f_dble + k**2)**hurst_exponent
-
-    IF (ndim .eq. 3) vk_psdf = vk_psdf * k
-
-  END FUNCTION vk_psdf
-
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
-  !=================================================================================================================================
-  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
-
-  REAL(f_dble) FUNCTION gs_psdf(k)
-
-    ! Purpose:
-    ! To return values of the integrand for Gaussian PSD functions. It makes use of two variables (ndim, hurst_exponent) defined
-    ! at module level.
-    !
-    ! Revisions:
-    !     Date                    Description of change
-    !     ====                    =====================
-    !   08/09/20                  original version
-    !
-
-    REAL(f_dble), INTENT(IN) :: k
-
-    !-------------------------------------------------------------------------------------------------------------------------------
-
-    gs_psdf = k * exp(-0.25_f_dble * k**2)
-
-    IF (ndim .eq. 3) gs_psdf = gs_psdf * k / sqrt(pi)
-
-  END FUNCTION gs_psdf
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================
