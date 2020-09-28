@@ -13,7 +13,7 @@ else
 endif
 
 # list Fortran objects
-F90_OBJS = scarflib_common.o scarflib_fft.o scarflib_spec.o scarflib.o f_binding.o quadpack.o psdf.o
+F90_OBJS = scarflib_common.o scarflib_fim.o scarflib_srm.o scarflib.o f_binding.o quadpack.o psdf.o
 
 # compile Fortran objects
 $(F90_OBJS) : %.o : %.f90
@@ -65,7 +65,7 @@ clean:
 .PHONY: lib clean
 
 # # inter-module dependencies
-scarflib_fft.o scarflib_spec.o : psdf.o
+scarflib_fim.o scarflib_srm.o : psdf.o
 # scarflib_spec.o scarflib_fft.o : scarflib_common.o
 # scarflib.o: scarflib_common.o scarflib_spec.o scarflib_fft.o
 

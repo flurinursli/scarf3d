@@ -2378,7 +2378,7 @@ MODULE m_scarflib_fim
       !   23/07/20                  added 2D PSDFs
       !
 
-      USE, NON_INTRINSIC :: m_psdf, vk => fim_vk, gs => fim_gs, ud => fim_ud
+      USE, NON_INTRINSIC :: m_psdf
 
       REAL(f_real),                                                    INTENT(IN)  :: ds
       INTEGER(f_int),  DIMENSION(3),                                   INTENT(IN)  :: ls, le                !< global indices
@@ -2392,7 +2392,7 @@ MODULE m_scarflib_fim
       REAL(f_real),    DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
       INTEGER(f_int)                                                               :: i, j, k, n
       LOGICAL                                                                      :: filter
-      PROCEDURE(vk),                                                   POINTER     :: fun
+      PROCEDURE(fn_vk),                                                POINTER     :: fun
       REAL(f_real)                                                                 :: butter, const, amp
       REAL(f_real)                                                                 :: kc, kr
       REAL(f_dble)                                                                 :: tictoc
@@ -2449,13 +2449,13 @@ MODULE m_scarflib_fim
       SELECT CASE (acf)
         CASE(0)
           const = (2**n) * pi**(n / 2._f_real) * GAMMA(nu) * sigma**2 * PRODUCT(cl(1:n)) / GAMMA(hurst)
-          fun => vk
+          fun => fn_vk
         CASE(1)
           const = pi**(n / 2._f_real) * sigma**2 * PRODUCT(cl(1:n))
-          fun => gs
+          fun => fn_gs
         CASE(2)
           const = 1._f_real
-          fun => ud
+          fun => fn_ud
       END SELECT
 
       ! each process generate its set of random numbers

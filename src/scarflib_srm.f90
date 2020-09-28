@@ -16,7 +16,7 @@ MODULE m_scarflib_srm
   !
 
   USE, NON_INTRINSIC :: m_scarflib_common
-  USE, NON_INTRINSIC :: m_psdf, vk => srm_vk, gs => srm_gs, ud => srm_ud
+  USE, NON_INTRINSIC :: m_psdf
 
   IMPLICIT none
 
@@ -70,7 +70,7 @@ MODULE m_scarflib_srm
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! pointer to PSD function for integration
-  PROCEDURE(vk), POINTER :: fun
+  PROCEDURE(fn_vk), POINTER :: fun
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -281,13 +281,13 @@ MODULE m_scarflib_srm
     SELECT CASE (acf)
       CASE(0)
         const = 1._f_real
-        fun => vk
+        fun => fn_vk
       CASE(1)
         IF (ndim .eq. 3) const = 1._f_real / SQRT(pi)                         !< scaling factor to be below unity
-        fun => gs
+        fun => fn_gs
       CASE(2)
         const = 1._f_real
-        fun => ud
+        fun => fn_ud
     END SELECT
 
     ! update scaling factor, assuming that discrete sigma is always equal to continuous sigma if random field is not normalised.
@@ -312,7 +312,7 @@ MODULE m_scarflib_srm
         k = r(1) * (kmax - kmin) + kmin
 
         ! evaluate original pdf (require input in double precision)
-        d = srm_fun(real(k, f_dble)) * const
+        d = srm_fn(real(k, f_dble)) * const
 
         ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
@@ -683,14 +683,14 @@ MODULE m_scarflib_srm
     ! set PSD function
     SELECT CASE (acf)
       CASE(0)
-        cont = 1._f_real
-        fun => vk
+        const = 1._f_real
+        fun => fn_vk
       CASE(1)
         IF (ndim .eq. 3) const = 1._f_real / SQRT(pi)                         !< scaling factor to be below unity
-        fun => gs
+        fun => fn_gs
       CASE(2)
         const = 1._f_real
-        fun => ud
+        fun => fn_ud
     END SELECT
 
     ! update scaling factor, assuming that discrete sigma is always equal to continuous sigma if random field is not normalised.
@@ -715,7 +715,7 @@ MODULE m_scarflib_srm
         u = r(1) * (kmax - kmin) + kmin
 
         ! evaluate original pdf (require input in double precision)
-        d = srm_fun(real(u, f_dble)) * const
+        d = srm_fn(real(u, f_dble)) * const
 
         ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
@@ -937,9 +937,9 @@ MODULE m_scarflib_srm
     IF (PRESENT(k0) .and. PRESENT(k1)) THEN
       kmin = REAL(k0, f_dble)
       kmax = REAL(k1, f_dble)
-      CALL dqng(srm_fun, kmin, kmax, epsabs, epsrel, solv, abserr, neval, ierr)
+      CALL dqng(srm_fn, kmin, kmax, epsabs, epsrel, solv, abserr, neval, ierr)
     ELSE
-      CALL dqagi(srm_fun, 0._f_dble, 1, epsabs, epsrel, solv, abserr, neval, ierr, limit, lenw, last, iwork, work)
+      CALL dqagi(srm_fn, 0._f_dble, 1, epsabs, epsrel, solv, abserr, neval, ierr, limit, lenw, last, iwork, work)
     ENDIF
 
     intg = REAL(solv, f_real)
@@ -950,7 +950,7 @@ MODULE m_scarflib_srm
   !=================================================================================================================================
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  REAL(f_dble) FUNCTION srm_fun(x)
+  REAL(f_dble) FUNCTION srm_fn(x)
 
     ! Purpose:
     ! To compute 2D and 3D Gaussian PSDF for the SRM. Input and result must be in double precision as requested by numerical
@@ -966,11 +966,11 @@ MODULE m_scarflib_srm
 
     !-----------------------------------------------------------------------------------------------------------------------------
 
-    srm_fun = x * fun(REAL(x**2, f_real))
+    srm_fn = x * fun(REAL(x**2, f_real))
 
-    IF (ndim .eq. 3) srm_fun = srm_fun * x
+    IF (ndim .eq. 3) srm_fn = srm_fn * x
 
-  END FUNCTION srm_fun
+  END FUNCTION srm_fn
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================
