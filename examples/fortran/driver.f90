@@ -1,5 +1,26 @@
 PROGRAM driver
 
+  ! This file is part of SCARF3D, version: 2.4
+  !
+  ! SCARF3D is free software: you can redistribute it and/or modify
+  ! it under the terms of the GNU General Public License as published by
+  ! the Free Software Foundation, either version 3 of the License, or
+  ! (at your option) any later version.
+  !
+  ! SCARF3D is distributed in the hope that it will be useful,
+  ! but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ! GNU General Public License for more details.
+  !
+  ! Purpose:
+  !   To a sample FORTRAN driver program for the SCARF3D library
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !
+
   USE, INTRINSIC     :: iso_fortran_env, stdout => output_unit
   USE, NON_INTRINSIC :: mpi
   USE, NON_INTRINSIC :: m_scarflib
@@ -75,7 +96,7 @@ PROGRAM driver
   sigma = 0.05_f_real
 
   ! hurst exponent (not used for gaussian acf)
-  hurst = 0.1_f_real
+  hurst = 0.25_f_real
 
   ! seed number
   seed = 1235

@@ -1,5 +1,26 @@
 MODULE m_psdf
 
+  ! This file is part of SCARF3D, version: 2.4
+  !
+  ! SCARF3D is free software: you can redistribute it and/or modify
+  ! it under the terms of the GNU General Public License as published by
+  ! the Free Software Foundation, either version 3 of the License, or
+  ! (at your option) any later version.
+  !
+  ! SCARF3D is distributed in the hope that it will be useful,
+  ! but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ! GNU General Public License for more details.
+  !
+  ! Purpose:
+  !   To define power spectral density functions for the SCARF3D library.
+  !
+  ! Revisions:
+  !     Date                    Description of change
+  !     ====                    =====================
+  !   04/05/20                  original version
+  !
+
   USE, NON_INTRINSIC :: m_scarflib_common, only: f_int, f_real, f_dble, pi
 
   IMPLICIT NONE
@@ -8,7 +29,8 @@ MODULE m_psdf
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
-  REAL(f_real)   :: nu
+  ! this variable represents the hurst exponent term "nu + D/2"
+  REAL(f_real) :: nu
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -21,7 +43,7 @@ MODULE m_psdf
     REAL(f_real) FUNCTION fn_vk(x)
 
       ! Purpose:
-      ! To compute the Von Karman (or exponential, if hurst = 0.5) PSDF for the FIM
+      ! To compute the Von Karman (or exponential, if hurst = 0.5) PSDF
       !
       ! Revisions:
       !     Date                    Description of change
@@ -29,7 +51,7 @@ MODULE m_psdf
       !   04/05/20                  original version
       !
 
-      REAL(f_real), INTENT(IN) :: x
+      REAL(f_real), INTENT(IN) :: x                !< "k" or "sqrt(sum_{i=1}{D} k_i^2 * a_i^2)"
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -44,7 +66,7 @@ MODULE m_psdf
     REAL(f_real) FUNCTION fn_gs(x)
 
       ! Purpose:
-      ! To compute the Gaussian PSDF for the FIM
+      ! To compute the Gaussian PSDF
       !
       ! Revisions:
       !     Date                    Description of change
@@ -52,7 +74,7 @@ MODULE m_psdf
       !   04/05/20                  original version
       !
 
-      REAL(f_real), INTENT(IN) :: x
+      REAL(f_real), INTENT(IN) :: x               !< "k" or "sqrt(sum_{i=1}{D} k_i^2 * a_i^2)"
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -67,7 +89,7 @@ MODULE m_psdf
     REAL(f_real) FUNCTION fn_ud(x)
 
       ! Purpose:
-      ! To compute a user-defined PSDF for the FIM
+      ! To compute a user-defined PSDF
       !
       ! Revisions:
       !     Date                    Description of change
@@ -75,7 +97,7 @@ MODULE m_psdf
       !   04/05/20                  original version
       !
 
-      REAL(f_real), INTENT(IN) :: x
+      REAL(f_real), INTENT(IN) :: x               !< "k" or "sqrt(sum_{i=1}{D} k_i^2 * a_i^2)"
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
@@ -86,93 +108,5 @@ MODULE m_psdf
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
-    ! REAL(f_dble) FUNCTION srm_vk(x)
-    !
-    !   ! Purpose:
-    !   ! To compute Von Karman (or exponential, if hurst = 0.5) PSDF for the SRM. Input and result must be in double precision as
-    !   ! requested by numerical integration routines.
-    !   !
-    !   ! Revisions:
-    !   !     Date                    Description of change
-    !   !     ====                    =====================
-    !   !   04/05/20                  original version
-    !   !
-    !
-    !   REAL(f_dble), INTENT(IN) :: x
-    !   REAL(f_real)             :: z
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   z = x**2
-    !
-    !   srm_vk = x * fn_vk(z)
-    !
-    !   IF (d .eq. 3) srm_vk = srm_vk * x
-    !
-    ! END FUNCTION srm_vk
-    !
-    ! ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! !===============================================================================================================================
-    ! ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !
-    ! REAL(f_dble) FUNCTION srm_gs(x)
-    !
-    !   ! Purpose:
-    !   ! To compute 2D and 3D Gaussian PSDF for the SRM. Input and result must be in double precision as requested by numerical
-    !   ! integration routines.
-    !   !
-    !   ! Revisions:
-    !   !     Date                    Description of change
-    !   !     ====                    =====================
-    !   !   04/05/20                  original version
-    !   !
-    !
-    !   REAL(f_dble), INTENT(IN) :: x
-    !   REAL(f_real)             :: z
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   z = x**2
-    !
-    !   srm_gs = x * fn_gs(z)
-    !
-    !   ! sqrt(pi) is introduced in order to have srm always < 1
-    !   IF (d .eq. 3) srm_gs = srm_gs * x / sqrt(pi)
-    !
-    ! END FUNCTION srm_gs
-    !
-    ! ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    ! !===============================================================================================================================
-    ! ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !
-    ! REAL(f_dble) FUNCTION srm_ud(x)
-    !
-    !   ! Purpose:
-    !   ! To compute 2D and 3D user-defined PSDF for the SRM. Input and result must be in double precision as requested by numerical
-    !   ! integration routines.
-    !   !
-    !   ! Revisions:
-    !   !     Date                    Description of change
-    !   !     ====                    =====================
-    !   !   04/05/20                  original version
-    !   !
-    !
-    !   REAL(f_dble), INTENT(IN) :: x
-    !
-    !   !-----------------------------------------------------------------------------------------------------------------------------
-    !
-    !   ! here we may use the PSDF form defined for the FIM
-    !   !srm_ud = ...
-    !
-    !   ! a scaling factor may be introduced such that psdf always < 1
-    !   !IF (d .eq. 3) srm_ud = srm_ud * ...
-    !
-    ! END FUNCTION srm_ud
-
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-    !===============================================================================================================================
-    ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
-
 
 END MODULE m_psdf

@@ -1,5 +1,20 @@
 MODULE m_scarflib_srm
 
+  ! This file is part of SCARF3D, version: 2.4
+  !
+  ! SCARF3D is free software: you can redistribute it and/or modify
+  ! it under the terms of the GNU General Public License as published by
+  ! the Free Software Foundation, either version 3 of the License, or
+  ! (at your option) any later version.
+  !
+  ! SCARF3D is distributed in the hope that it will be useful,
+  ! but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ! GNU General Public License for more details.
+  !
+  ! You should have received a copy of the GNU General Public License
+  ! along with SCARF3D.  If not, see <https://www.gnu.org/licenses/>.
+  !
   ! Purpose:
   !   To compute a random field according to the Spectral Representation Method (SRM). Subprograms rely on the TRNG (version 4) library
   !   to generate random numbers.
@@ -736,7 +751,7 @@ MODULE m_scarflib_srm
         v1    = u * SIN(phi) * SIN(theta) / cl(1)
         v2    = u * COS(phi) * SIN(theta) / cl(2)
         v3    = u * COS(theta)            / cl(3)
-      ELSE                                                           !< polar coordinates
+      ELSE                                                              !< polar coordinates
         v1 = u * COS(phi) / cl(1)
         v2 = u * SIN(phi) / cl(2)
         v3 = 0._f_real
@@ -966,7 +981,7 @@ MODULE m_scarflib_srm
 
     !-----------------------------------------------------------------------------------------------------------------------------
 
-    srm_fn = x * fun(REAL(x**2, f_real))
+    srm_fn = x * fun(REAL(x, f_real))
 
     IF (ndim .eq. 3) srm_fn = srm_fn * x
 
