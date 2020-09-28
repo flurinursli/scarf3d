@@ -2390,7 +2390,7 @@ MODULE m_scarflib_fim
       INTEGER(f_int),                                                  INTENT(IN)  :: seed                  !< initial seed number
       COMPLEX(f_real), DIMENSION(ls(1):le(1),ls(2):le(2),ls(3):le(3)), INTENT(OUT) :: spec                  !< spectrum
       REAL(f_real),    DIMENSION(2),                                   INTENT(OUT) :: time                  !< elapsed time
-      INTEGER(f_int)                                                               :: i, j, k
+      INTEGER(f_int)                                                               :: i, j, k, n
       LOGICAL                                                                      :: filter
       PROCEDURE(vk),                                                   POINTER     :: fun
       REAL(f_real)                                                                 :: butter, const, amp
@@ -2406,11 +2406,11 @@ MODULE m_scarflib_fim
 
       !-----------------------------------------------------------------------------------------------------------------------------
 
-      ! discriminate between 2D and 3D case, "d" is a variable from module "m_psdf"
+      ! discriminate between 2D and 3D case
       IF (cl(3) .gt. 0._f_real) THEN
-        d = 3
+        n = 3
       ELSE
-        d = 2
+        n = 2
       ENDIF
 
       time(:) = 0._f_real
@@ -2443,15 +2443,15 @@ MODULE m_scarflib_fim
       kz = [[(k * dk(3), k = 0, npts(3)/2)], [(k * dk(3), k = npts(3)/2-1, 1, -1)]]
 
       ! define power term for vk psdf, "nu" is a variable from module "m_psdf"
-      nu = hurst + d / 2._f_real
+      nu = hurst + n / 2._f_real
 
       ! compute part of power spectral density outside loop, point to right function
       SELECT CASE (acf)
         CASE(0)
-          const = (2**d) * pi**(d / 2._f_real) * GAMMA(nu) * sigma**2 * PRODUCT(cl(1:d)) / GAMMA(hurst)
+          const = (2**n) * pi**(n / 2._f_real) * GAMMA(nu) * sigma**2 * PRODUCT(cl(1:n)) / GAMMA(hurst)
           fun => vk
         CASE(1)
-          const = pi**(d / 2._f_real) * sigma**2 * PRODUCT(cl(1:d))
+          const = pi**(n / 2._f_real) * sigma**2 * PRODUCT(cl(1:n))
           fun => gs
         CASE(2)
           const = 1._f_real
@@ -2482,8 +2482,9 @@ MODULE m_scarflib_fim
 
             IF (filter .and. (kr .gt. kc)) butter = 0._f_real
 
-            ! prepare argument for "fun", i.e. product "k * cl"
-            kr = (kx(i) * cl(1))**2 + (ky(j) * cl(2))**2 + (kz(k) * cl(3))**2
+            ! prepare argument for "fun", i.e. product "k * cl". We apply sqrt now and power of two to kr in fun for flexibility,
+            ! but this degredes performance a bit
+            kr = SQRT( (kx(i) * cl(1))**2 + (ky(j) * cl(2))**2 + (kz(k) * cl(3))**2 )
 
             ! complete power spectral density and go to amplitude spectrum
             ! amp = SQRT(num / fun(kr, hurst_factor))

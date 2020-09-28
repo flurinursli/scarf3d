@@ -16,7 +16,7 @@ MODULE m_scarflib_srm
   !
 
   USE, NON_INTRINSIC :: m_scarflib_common
-  USE, NON_INTRINSIC :: m_psdf, nd => d, vk => srm_vk, gs => srm_gs, ud => srm_ud
+  USE, NON_INTRINSIC :: m_psdf, vk => srm_vk, gs => srm_gs, ud => srm_ud
 
   IMPLICIT none
 
@@ -62,13 +62,10 @@ MODULE m_scarflib_srm
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
   ! number of dimensions (2 or 3)
-  !INTEGER(f_int)            :: ndim
+  INTEGER(f_int)            :: ndim
 
   ! number of harmonics in spectral summation
   INTEGER(f_int), PARAMETER :: nharm = 10000
-
-  ! hurst exponent for Von Karman ACF
-  !REAL(f_dble)              :: hurst_exponent
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
 
@@ -127,7 +124,7 @@ MODULE m_scarflib_srm
     INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                :: npoints
     REAL(f_real)                                             :: scaling
     REAL(f_real)                                             :: kmax, kmin, kc
-    REAL(f_real)                                             :: k, d
+    REAL(f_real)                                             :: k, d, const
     REAL(f_real)                                             :: phi, theta
     REAL(f_real)                                             :: v1, v2, v3
     REAL(f_real)                                             :: a, b, arg
@@ -194,11 +191,11 @@ MODULE m_scarflib_srm
 
     info(:) = 0._f_real
 
-    ! discriminate between 2D and 3D case, "nd" (alias for "n") is a variable from module "m_psdf"
+    ! discriminate between 2D and 3D case
     IF (cl(3) .gt. 0._f_real) THEN
-      nd = 3
+      ndim = 3
     ELSE
-      nd = 2
+      ndim = 2
     ENDIF
 
     ! initialise random generator
@@ -222,12 +219,12 @@ MODULE m_scarflib_srm
     ! (global) effective grid size
     span = max_extent - min_extent
 
-    kmin = 2._f_real * pi * maxval(cl(1:nd) / span(1:nd))
+    kmin = 2._f_real * pi * maxval(cl(1:ndim) / span(1:ndim))
 
-    kmax = pi / dh * minval(cl(1:nd))
+    kmax = pi / dh * minval(cl(1:ndim))
 
     ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
-    kc = pi / ds * minval(cl(1:nd))
+    kc = pi / ds * minval(cl(1:ndim))
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! check if the following conditions for a correct wavenumber representation are violated:
@@ -235,9 +232,9 @@ MODULE m_scarflib_srm
     ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._f_real * pi / span(1:nd) .ge. 1._f_real / cl(1:nd))) info(1) = 1._f_real
+    IF (ANY(2._f_real * pi / span(1:ndim) .ge. 1._f_real / cl(1:ndim))) info(1) = 1._f_real
 
-    IF (ANY(ds .gt. cl(1:nd) / 2._f_real)) info(2) = 1._f_real
+    IF (ANY(ds .gt. cl(1:ndim) / 2._f_real)) info(2) = 1._f_real
 
     ! set scaling factor
     scaling = sigma / SQRT(REAL(nharm, f_real))
@@ -278,15 +275,18 @@ MODULE m_scarflib_srm
     bar = bar - obar
 
     ! define power term for vk psdf, "nu" is a variable from module "m_psdf"
-    nu = hurst + nd / 2._f_real
+    nu = hurst + ndim / 2._f_real
 
     ! set PSD function
     SELECT CASE (acf)
       CASE(0)
+        const = 1._f_real
         fun => vk
       CASE(1)
+        IF (ndim .eq. 3) const = 1._f_real / SQRT(pi)                         !< scaling factor to be below unity
         fun => gs
       CASE(2)
+        const = 1._f_real
         fun => ud
     END SELECT
 
@@ -312,7 +312,7 @@ MODULE m_scarflib_srm
         k = r(1) * (kmax - kmin) + kmin
 
         ! evaluate original pdf (require input in double precision)
-        d = fun(real(k, f_dble))
+        d = srm_fun(real(k, f_dble)) * const
 
         ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
@@ -328,7 +328,7 @@ MODULE m_scarflib_srm
       ! compute azimuth and polar angles
       phi = r(1) * 2._f_real * pi
 
-      IF (nd .eq. 3) THEN                                     !< spherical coordinates
+      IF (ndim .eq. 3) THEN                                     !< spherical coordinates
         theta = ACOS(1._f_real - 2._f_real * r(2))
         v1    = k * SIN(phi) * SIN(theta) / cl(1)
         v2    = k * COS(phi) * SIN(theta) / cl(2)
@@ -468,7 +468,7 @@ MODULE m_scarflib_srm
     pt(:) = 0._f_real
 
     DO i = 1, SIZE(poi, 2)
-      pt(1:nd) = poi(1:nd, i)
+      pt(1:ndim) = poi(1:ndim, i)
       CALL tapering(x, y, z, field, pt, mute, taper)
     ENDDO
 
@@ -524,7 +524,7 @@ MODULE m_scarflib_srm
     INTEGER(f_int), ALLOCATABLE, DIMENSION(:)                  :: npoints
     REAL(f_real)                                               :: scaling
     REAL(f_real)                                               :: kmax, kmin, kc
-    REAL(f_real)                                               :: u, d
+    REAL(f_real)                                               :: u, d, const
     REAL(f_real)                                               :: phi, theta
     REAL(f_real)                                               :: v1, v2, v3
     REAL(f_real)                                               :: a, b, arg
@@ -596,9 +596,9 @@ MODULE m_scarflib_srm
 
     ! discriminate between 2D and 3D case, "nd" (alias for "n") is a variable from module "m_psdf"
     IF (cl(3) .gt. 0._f_real) THEN
-      nd = 3
+      ndim = 3
     ELSE
-      nd = 2
+      ndim = 2
     ENDIF
 
     ! initialise random generator
@@ -622,12 +622,12 @@ MODULE m_scarflib_srm
     ! global effective grid size
     span = max_extent - min_extent
 
-    kmin = 2._f_real * pi * maxval(cl(1:nd) / span(1:nd))
+    kmin = 2._f_real * pi * maxval(cl(1:ndim) / span(1:ndim))
 
-    kmax = pi / dh * minval(cl(1:nd))
+    kmax = pi / dh * minval(cl(1:ndim))
 
     ! corner wavenumber for filtering spectrum is controlled by external mesh grid-step
-    kc = pi / ds * minval(cl(1:nd))
+    kc = pi / ds * minval(cl(1:ndim))
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     ! check if the following conditions for a correct wavenumber representation are violated:
@@ -635,9 +635,9 @@ MODULE m_scarflib_srm
     ! 2) kmax > 1/cl, or ds <= cl / 2 (frenje & juhlin, 2000)
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    IF (ANY(2._f_real * pi / span(1:nd) .ge. 1._f_real / cl(1:nd))) info(1) = 1._f_real
+    IF (ANY(2._f_real * pi / span(1:ndim) .ge. 1._f_real / cl(1:ndim))) info(1) = 1._f_real
 
-    IF (ANY(ds .gt. cl(1:nd) / 2._f_real)) info(2) = 1._f_real
+    IF (ANY(ds .gt. cl(1:ndim) / 2._f_real)) info(2) = 1._f_real
 
     ! set scaling factor
     scaling = sigma / SQRT(REAL(nharm, f_real))
@@ -678,15 +678,18 @@ MODULE m_scarflib_srm
     bar = bar - obar
 
     ! define power term for vk psdf, "nu" is a variable from module "m_psdf"
-    nu = hurst + nd / 2._f_real
+    nu = hurst + ndim / 2._f_real
 
     ! set PSD function
     SELECT CASE (acf)
       CASE(0)
+        cont = 1._f_real
         fun => vk
       CASE(1)
+        IF (ndim .eq. 3) const = 1._f_real / SQRT(pi)                         !< scaling factor to be below unity
         fun => gs
       CASE(2)
+        const = 1._f_real
         fun => ud
     END SELECT
 
@@ -712,7 +715,7 @@ MODULE m_scarflib_srm
         u = r(1) * (kmax - kmin) + kmin
 
         ! evaluate original pdf (require input in double precision)
-        d = fun(real(u, f_dble))
+        d = srm_fun(real(u, f_dble)) * const
 
         ! take "k" and exit if inequality r < d is verified
         IF (r(2) .lt. d) EXIT
@@ -728,7 +731,7 @@ MODULE m_scarflib_srm
       ! compute azimuth and polar angles
       phi = r(1) * 2._f_real * pi
 
-      IF (nd .eq. 3) THEN                                             !< spherical coordinates
+      IF (ndim .eq. 3) THEN                                             !< spherical coordinates
         theta = ACOS(1._f_real - 2._f_real * r(2))
         v1    = u * SIN(phi) * SIN(theta) / cl(1)
         v2    = u * COS(phi) * SIN(theta) / cl(2)
@@ -895,7 +898,7 @@ MODULE m_scarflib_srm
     pt(:) = 0._f_real
 
     DO i = 1, SIZE(poi, 2)
-      pt(1:nd) = poi(1:nd, i)
+      pt(1:ndim) = poi(1:ndim, i)
       CALL tapering(ds, fs, fe, field, pt, mute, taper)
     ENDDO
 
@@ -934,14 +937,40 @@ MODULE m_scarflib_srm
     IF (PRESENT(k0) .and. PRESENT(k1)) THEN
       kmin = REAL(k0, f_dble)
       kmax = REAL(k1, f_dble)
-      CALL dqng(fun, kmin, kmax, epsabs, epsrel, solv, abserr, neval, ierr)
+      CALL dqng(srm_fun, kmin, kmax, epsabs, epsrel, solv, abserr, neval, ierr)
     ELSE
-      CALL dqagi(fun, 0._f_dble, 1, epsabs, epsrel, solv, abserr, neval, ierr, limit, lenw, last, iwork, work)
+      CALL dqagi(srm_fun, 0._f_dble, 1, epsabs, epsrel, solv, abserr, neval, ierr, limit, lenw, last, iwork, work)
     ENDIF
 
     intg = REAL(solv, f_real)
 
   END FUNCTION intg
+
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+  !=================================================================================================================================
+  ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
+
+  REAL(f_dble) FUNCTION srm_fun(x)
+
+    ! Purpose:
+    ! To compute 2D and 3D Gaussian PSDF for the SRM. Input and result must be in double precision as requested by numerical
+    ! integration routines.
+    !
+    ! Revisions:
+    !     Date                    Description of change
+    !     ====                    =====================
+    !   04/05/20                  original version
+    !
+
+    REAL(f_dble), INTENT(IN) :: x
+
+    !-----------------------------------------------------------------------------------------------------------------------------
+
+    srm_fun = x * fun(REAL(x**2, f_real))
+
+    IF (ndim .eq. 3) srm_fun = srm_fun * x
+
+  END FUNCTION srm_fun
 
   ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --
   !=================================================================================================================================
