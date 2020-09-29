@@ -1,4 +1,11 @@
 /*
+Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+
+Written by:
+Walter Imperatori (walter.imperatori@sed.ethz.ch)
+
+All rights reserved.
+
 This file is part of SCARF3D, version: 2.4
 
 SCARF3D is free software: you can redistribute it and/or modify
@@ -32,12 +39,12 @@ along with SCARF3D.  If not, see <https://www.gnu.org/licenses/>.
 
 // declare FORTRAN subroutines
 extern void struct_initialize(const int* nd, const int fs[], const int fe[], const real* ds, const int* acf, const real cl[], const real* sigma,
-                              const int* solver, const real* hurst, const real* dh, real** poi, const int* npoi, const real* mute,
+                              const int* method, const real* hurst, const real* dh, real** poi, const int* npoi, const real* mute,
                               const real* taper, const int* rescale, const int* pad, const real nc[], const real fc[], const real* alpha,
                               const real* beta, const real* gamma);
 
 extern void unstruct_initialize(const int* nd, const int* npts, const real* dh, const int* acf, const real cl[], const real* sigma, const real* x, const real* y, const real* z,
-                                const int* solver, const real* hurst, const real* ds, real** poi, const int* npoi, const real* mute, const real* taper,
+                                const int* method, const real* hurst, const real* ds, real** poi, const int* npoi, const real* mute, const real* taper,
                                 const int* rescale, const int* pad, const real nc[], const real fc[], const real* alpha, const real* beta, const real* gamma);
 
 extern void execute(const int* seed, real** field, real stats[]);
@@ -54,7 +61,7 @@ extern void io_slice(const int* npts, const char axis[], const int* plane, const
 
 void scarf_opt_init(struct scarf_opt * var){
 
-  var -> solver  = 0;
+  var -> method  = 0;
   var -> hurst   = 0;
   var -> dh      = 0;
   var -> ds      = 0;
@@ -73,14 +80,14 @@ void scarf_opt_init(struct scarf_opt * var){
 }
 
 // Note: many arguments are defined as pointers because they are optional on the FORTRAN side.
-void scarf_struct_initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
+void scarf_cart_initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
 
-   int *solver = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
+   int *method = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
    real *hurst = NULL, *dh = NULL, **poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
    real *alpha = NULL, *beta = NULL, *gamma = NULL;
 
    if (var){
-     if (var->solver == 1) solver = &var->solver;
+     if (var->method == 1) method = &var->method;
      if (var->hurst > 0) hurst = &var->hurst;
      if (var->dh > 0) dh = &var->dh;
      if (var->poi) poi = &var->poi;
@@ -96,18 +103,18 @@ void scarf_struct_initialize(const int nd, const int fs[], const int fe[], const
    }
 
    // call FORTRAN subroutine
-   struct_initialize(&nd, fs, fe, &ds, &acf, cl, &sigma, solver, hurst, dh, poi, npoi, mute, taper, rescale, pad, nc, fc, alpha, beta, gamma);
+   struct_initialize(&nd, fs, fe, &ds, &acf, cl, &sigma, method, hurst, dh, poi, npoi, mute, taper, rescale, pad, nc, fc, alpha, beta, gamma);
 
 }
 
-void scarf_unstruct_initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
+void scarf_nocart_initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var){
 
-  int *solver = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
+  int *method = NULL, *npoi = NULL, *rescale = NULL, *pad = NULL;
   real *hurst = NULL, *ds = NULL, **poi = NULL, *taper = NULL, *mute = NULL, *nc = NULL, *fc = NULL;
   real *alpha = NULL, *beta = NULL, *gamma = NULL;
 
   if (var){
-    if (var->solver == 1) solver = &var->solver;
+    if (var->method == 1) method = &var->method;
     if (var->hurst > 0) hurst = &var->hurst;
     if (var->ds > 0) ds = &var->ds;
     if (var->poi) poi = &var->poi;
@@ -123,8 +130,8 @@ void scarf_unstruct_initialize(const int nd, const int npts, const real* x, cons
   }
 
    // call FORTRAN subroutine
-   //unstruct_initialize(&nd, &npts, x, y, z, &dh, &acf, cl, &sigma, solver, hurst, ds, poi, npoi, mute, taper, rescale, pad, nc, fc, alpha, beta, gamma);
-   unstruct_initialize(&nd, &npts, &dh, &acf, cl, &sigma, x, y, z, solver, hurst, ds, poi, npoi, mute, taper, rescale, pad, nc, fc, alpha, beta, gamma);
+   //unstruct_initialize(&nd, &npts, x, y, z, &dh, &acf, cl, &sigma, method, hurst, ds, poi, npoi, mute, taper, rescale, pad, nc, fc, alpha, beta, gamma);
+   unstruct_initialize(&nd, &npts, &dh, &acf, cl, &sigma, x, y, z, method, hurst, ds, poi, npoi, mute, taper, rescale, pad, nc, fc, alpha, beta, gamma);
 
 }
 

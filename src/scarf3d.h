@@ -1,4 +1,11 @@
 /*
+Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+
+Written by:
+Walter Imperatori (walter.imperatori@sed.ethz.ch)
+
+All rights reserved.
+
 This file is part of SCARF3D, version: 2.4
 
 SCARF3D is free software: you can redistribute it and/or modify
@@ -42,10 +49,10 @@ typedef float real;
 extern "C"{
 #endif
 
-enum algorithm {fft, spec};
+enum algorithm {fim, srm};
 
 struct scarf_opt{
-  int solver;
+  int method;
   real hurst;
   real dh;
   real ds;
@@ -65,9 +72,9 @@ struct scarf_opt{
 // declare C functions
 void scarf_opt_init(struct scarf_opt * var);
 
-void scarf_struct_initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
+void scarf_cart_initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
 
-void scarf_unstruct_initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
+void scarf_nocart_initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma, struct scarf_opt *var);
 
 void scarf_execute(const int seed, real* field, real stats[]);
 
@@ -97,9 +104,9 @@ namespace Scarf3D
       Initialize(const int nd, const int fs[], const int fe[], const real ds, const int acf, const real cl[], const real sigma)
       {
 
-        if (method == spec) options.solver = 1;
+        if (method == srm) options.method = 1;
 
-        scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+        scarf_cart_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
       };
 
@@ -107,18 +114,18 @@ namespace Scarf3D
       Initialize(const int nd, const int npts, const real* x, const real* y, const real* z, const real dh, const int acf, const real cl[], const real sigma)
       {
 
-        if (method == spec) options.solver = 1;
+        if (method == srm) options.method = 1;
 
-        scarf_unstruct_initialize(nd, npts, x, y, z, dh, acf, cl, sigma, &options);
+        scarf_nocart_initialize(nd, npts, x, y, z, dh, acf, cl, sigma, &options);
 
       };
 
       Initialize(const int nd, const int npts, const real* x, const real* y, const real dh, const int acf, const real cl[], const real sigma)
       {
 
-        if (method == spec) options.solver = 1;
+        if (method == srm) options.method = 1;
 
-        scarf_unstruct_initialize(nd, npts, x, y, nullptr, dh, acf, cl, sigma, &options);
+        scarf_nocart_initialize(nd, npts, x, y, nullptr, dh, acf, cl, sigma, &options);
 
       };
 

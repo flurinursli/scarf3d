@@ -1,5 +1,12 @@
 MODULE m_scarflib_common
 
+  ! Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+  !
+  ! Written by:
+  ! Walter Imperatori (walter.imperatori@sed.ethz.ch)
+  !
+  ! All rights reserved.
+  !
   ! This file is part of SCARF3D, version: 2.4
   !
   ! SCARF3D is free software: you can redistribute it and/or modify
@@ -184,52 +191,52 @@ MODULE m_scarflib_common
     !===============================================================================================================================
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
 
-    SUBROUTINE write_single(v, filename, nwriters)
-
-      ! Purpose:
-      !   To allow each MPI process writes its own file with data. Only 'nwriters' files at most are written at the same time. This
-      !   subroutine works for structured meshes only
-      !
-      ! Revisions:
-      !     Date                    Description of change
-      !     ====                    =====================
-      !   04/05/20                  original version
-      !
-
-      REAL(f_real),               DIMENSION(:,:,:),          INTENT(IN) :: v                !< random field
-      CHARACTER(LEN=*),                                         INTENT(IN) :: filename         !< base-name of output file
-      INTEGER(f_int),                                        INTENT(IN) :: nwriters         !< number of concurrent files written
-      CHARACTER(:),      ALLOCATABLE                                       :: myname
-      INTEGER(f_int)                                                    :: i, n
-      INTEGER(f_int)                                                    :: fh, ierr
-      INTEGER(f_int),             DIMENSION(mpi_status_size)            :: status
-
-      !-----------------------------------------------------------------------------------------------------------------------------
-
-      DO i = 0, world_size - 1, nwriters
-
-        n = i + nwriters
-
-        ! only processes in the range [i, i + nwriters), i.e. max "nwriters", enter this block every time
-        IF ( (world_rank .ge. i) .and. (world_rank .lt. n) ) THEN
-
-          myname = filename // '_x=' // num2str(gs(1, world_rank)) // '_' // num2str(ge(1, world_rank)) //    &
-                               '_y=' // num2str(gs(2, world_rank)) // '_' // num2str(ge(2, world_rank)) //    &
-                               '_z=' // num2str(gs(3, world_rank)) // '_' // num2str(ge(3, world_rank))
-
-          CALL mpi_file_open(mpi_comm_self, myname, mpi_mode_create + mpi_mode_wronly, mpi_info_null, fh, ierr)
-
-          CALL mpi_file_write(fh, v, SIZE(v), real_type, status, ierr)
-
-          CALL mpi_file_close(fh, ierr)
-
-        ENDIF
-
-        CALL mpi_barrier(mpi_comm_world, ierr)
-
-      ENDDO
-
-    END SUBROUTINE write_single
+    ! SUBROUTINE write_single(v, filename, nwriters)
+    !
+    !   ! Purpose:
+    !   !   To allow each MPI process writes its own file with data. Only 'nwriters' files at most are written at the same time. This
+    !   !   subroutine works for structured meshes only
+    !   !
+    !   ! Revisions:
+    !   !     Date                    Description of change
+    !   !     ====                    =====================
+    !   !   04/05/20                  original version
+    !   !
+    !
+    !   REAL(f_real),               DIMENSION(:,:,:),          INTENT(IN) :: v                !< random field
+    !   CHARACTER(LEN=*),                                         INTENT(IN) :: filename         !< base-name of output file
+    !   INTEGER(f_int),                                        INTENT(IN) :: nwriters         !< number of concurrent files written
+    !   CHARACTER(:),      ALLOCATABLE                                       :: myname
+    !   INTEGER(f_int)                                                    :: i, n
+    !   INTEGER(f_int)                                                    :: fh, ierr
+    !   INTEGER(f_int),             DIMENSION(mpi_status_size)            :: status
+    !
+    !   !-----------------------------------------------------------------------------------------------------------------------------
+    !
+    !   DO i = 0, world_size - 1, nwriters
+    !
+    !     n = i + nwriters
+    !
+    !     ! only processes in the range [i, i + nwriters), i.e. max "nwriters", enter this block every time
+    !     IF ( (world_rank .ge. i) .and. (world_rank .lt. n) ) THEN
+    !
+    !       myname = filename // '_x=' // num2str(gs(1, world_rank)) // '_' // num2str(ge(1, world_rank)) //    &
+    !                            '_y=' // num2str(gs(2, world_rank)) // '_' // num2str(ge(2, world_rank)) //    &
+    !                            '_z=' // num2str(gs(3, world_rank)) // '_' // num2str(ge(3, world_rank))
+    !
+    !       CALL mpi_file_open(mpi_comm_self, myname, mpi_mode_create + mpi_mode_wronly, mpi_info_null, fh, ierr)
+    !
+    !       CALL mpi_file_write(fh, v, SIZE(v), real_type, status, ierr)
+    !
+    !       CALL mpi_file_close(fh, ierr)
+    !
+    !     ENDIF
+    !
+    !     CALL mpi_barrier(mpi_comm_world, ierr)
+    !
+    !   ENDDO
+    !
+    ! END SUBROUTINE write_single
 
     ! --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- * --- *
     !===============================================================================================================================

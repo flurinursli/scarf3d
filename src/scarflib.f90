@@ -1,5 +1,12 @@
 MODULE m_scarflib
 
+  ! Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+  !
+  ! Written by:
+  ! Walter Imperatori (walter.imperatori@sed.ethz.ch)
+  !
+  ! All rights reserved. 
+  !
   ! This file is part of SCARF3D, version: 2.4
   !
   ! SCARF3D is free software: you can redistribute it and/or modify
@@ -26,7 +33,6 @@ MODULE m_scarflib
   !   23/07/20                  handle 2D fields
   !
 
-  !USE, NON_INTRINSIC :: mpi                     !< this is included in common???
   USE, NON_INTRINSIC :: m_scarflib_common
   USE, NON_INTRINSIC :: m_scarflib_fim
   USE, NON_INTRINSIC :: m_scarflib_srm

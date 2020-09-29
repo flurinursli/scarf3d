@@ -1,5 +1,12 @@
 PROGRAM driver
 
+  ! Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+  !
+  ! Written by:
+  ! Walter Imperatori (walter.imperatori@sed.ethz.ch)
+  !
+  ! All rights reserved.
+  !
   ! This file is part of SCARF3D, version: 2.4
   !
   ! SCARF3D is free software: you can redistribute it and/or modify
@@ -13,7 +20,7 @@ PROGRAM driver
   ! GNU General Public License for more details.
   !
   ! Purpose:
-  !   To a sample FORTRAN driver program for the SCARF3D library
+  !   To provide a sample FORTRAN driver program for the SCARF3D library
   !
   ! Revisions:
   !     Date                    Description of change
@@ -70,7 +77,7 @@ PROGRAM driver
     WRITE(stdout, *) 'This program will compute small 2D and 3D random fields'
     WRITE(stdout, *) 'using the FIM (and SRM - if selected at compile-time) algorithm(s).'
     WRITE(stdout, *) 'Test should complete in a few minutes. Output can be inspected'
-    WRITE(stdout, *) 'with Matlab script "scarf3d.m" and "viz.m".'
+    WRITE(stdout, *) 'with Matlab/Octave script "scarf3d.m" and "vizme.m".'
     WRITE(stdout, *) ''
   ENDIF
 
@@ -86,13 +93,13 @@ PROGRAM driver
 
   dh = 50._f_real
 
-  ! autocorrelation (0=von karman/exponential, 1=gaussian)
+  ! autocorrelation (0=von karman/exponential, 1=gaussian, 2=user-defined)
   acf = 0
 
   ! correlation length
   cl = [2000._f_real, 2000._f_real, 2000._f_real]
 
-  ! standard deviation (sigma%/100)
+  ! standard deviation (sigma(%)/100)
   sigma = 0.05_f_real
 
   ! hurst exponent (not used for gaussian acf)
@@ -200,7 +207,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n(1:2), v2, 'fim_struct_whole_2d', 3)
+  CALL scarf_io(n(1:2), v2, 'fim_cart_whole_2d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -260,7 +267,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n(1:2), v2, 'fim_unstruct_whole_2d', 3)
+  CALL scarf_io(n(1:2), v2, 'fim_nocart_whole_2d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -325,7 +332,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n(1:2), v2, 'srm_struct_whole_2d', 3)
+  CALL scarf_io(n(1:2), v2, 'srm_cart_whole_2d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -383,7 +390,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n(1:2), v2, 'srm_unstruct_whole_2d', 3)
+  CALL scarf_io(n(1:2), v2, 'srm_nocart_whole_2d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -483,9 +490,9 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, "x", n(1)/2, v3, "fim_struct_xslice")
-  CALL scarf_io(n, "y", n(2)/2, v3, "fim_struct_yslice")
-  CALL scarf_io(n, "z", n(3)/2, v3, "fim_struct_zslice")
+  CALL scarf_io(n, "x", n(1)/2, v3, "fim_cart_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "fim_cart_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "fim_cart_zslice")
 
   CALL watch_stop(tictoc)
 
@@ -496,7 +503,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, v3, 'fim_struct_whole_3d', 3)
+  CALL scarf_io(n, v3, 'fim_cart_whole_3d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -557,9 +564,9 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, "x", n(1)/2, v3, "fim_unstruct_xslice")
-  CALL scarf_io(n, "y", n(2)/2, v3, "fim_unstruct_yslice")
-  CALL scarf_io(n, "z", n(3)/2, v3, "fim_unstruct_zslice")
+  CALL scarf_io(n, "x", n(1)/2, v3, "fim_nocart_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "fim_nocart_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "fim_nocart_zslice")
 
   CALL watch_stop(tictoc)
 
@@ -570,7 +577,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, v3, 'fim_unstruct_whole_3d', 3)
+  CALL scarf_io(n, v3, 'fim_nocart_whole_3d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -635,9 +642,9 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, "x", n(1)/2, v3, "srm_struct_xslice")
-  CALL scarf_io(n, "y", n(2)/2, v3, "srm_struct_yslice")
-  CALL scarf_io(n, "z", n(3)/2, v3, "srm_struct_zslice")
+  CALL scarf_io(n, "x", n(1)/2, v3, "srm_cart_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "srm_cart_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "srm_cart_zslice")
 
   CALL watch_stop(tictoc)
 
@@ -648,7 +655,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, v3, 'srm_struct_whole_3d', 3)
+  CALL scarf_io(n, v3, 'srm_cart_whole_3d', 2)
 
   CALL watch_stop(tictoc)
 
@@ -706,9 +713,9 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, "x", n(1)/2, v3, "srm_unstruct_xslice")
-  CALL scarf_io(n, "y", n(2)/2, v3, "srm_unstruct_yslice")
-  CALL scarf_io(n, "z", n(3)/2, v3, "srm_unstruct_zslice")
+  CALL scarf_io(n, "x", n(1)/2, v3, "srm_nocart_xslice")
+  CALL scarf_io(n, "y", n(2)/2, v3, "srm_nocart_yslice")
+  CALL scarf_io(n, "z", n(3)/2, v3, "srm_nocart_zslice")
 
   CALL watch_stop(tictoc)
 
@@ -719,7 +726,7 @@ PROGRAM driver
 
   CALL watch_start(tictoc)
 
-  CALL scarf_io(n, v3, 'srm_unstruct_whole_3d', 3)
+  CALL scarf_io(n, v3, 'srm_nocart_whole_3d', 2)
 
   CALL watch_stop(tictoc)
 

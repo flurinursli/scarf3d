@@ -1,4 +1,11 @@
 /*
+Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+
+Written by:
+Walter Imperatori (walter.imperatori@sed.ethz.ch)
+
+All rights reserved.
+
 This file is part of SCARF3D, version: 2.4
 
 SCARF3D is free software: you can redistribute it and/or modify
@@ -17,7 +24,7 @@ along with SCARF3D.  If not, see <https://www.gnu.org/licenses/>.
 
 /*
  Purpose:
-   To a sample C++ driver program for the SCARF3D library
+   To provide a sample C++ driver program for the SCARF3D library
 
  Revisions:
      Date                    Description of change
@@ -53,21 +60,31 @@ int main(){
   int world_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
+  if (world_rank == 0){
+    std::cout << ""                                                                    << std::endl;
+    std::cout << "This program will compute small 2D and 3D random fields"             << std::endl;
+    std::cout << "using the FIM (and SRM - if selected at compile-time) algorithm(s)." << std::endl;
+    std::cout << "Test should complete in a few minutes. Output can be inspected"      << std::endl;
+    std::cout << "with Matlab/Octave script 'scarf3d.m' and 'vizme.m'."                << std::endl;
+    std::cout << ""                                                                    << std::endl;
+  }
+
   MPI_Barrier(MPI_COMM_WORLD);
 
-  // Set mandatory parameters
+  // Set parameters
 
   // number of grid points in model
-  const int n[3] = {500, 450, 400};
+  const int n[3] = {500, 500, 500};
 
   // grid-step
   const real ds = 50.;
+  const real dh = 50.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const real cl[3] = {2000., 500., 100.};
+  const real cl[3] = {2000., 2000., 2000.};
 
   // standard deviation
   const real sigma = 0.05;
@@ -78,18 +95,17 @@ int main(){
   // hurst exponent
   const real hurst = 0.25;
 
+  // number of POI
+  const int npoi = 2;
+
+  const real taper = 2500;
+  const real mute  = 500;
+
   // rotation angles
   const real alpha = 30;
   const real beta  = -10;
 
-  // number of POI
-  const int npoi = 2;
-
-  const real taper = 5000;
-  const real mute  = 1000;
-
-  // I/O writers (only for PFS)
-  const int nwriters[1] = {2};
+  const int nwriters = 2;
 
   // other variables used throughout the code
   double tictoc;
@@ -159,7 +175,7 @@ int main(){
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
 
-    Scarf3D::Initialize<fft> S(nd, fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fim> S(nd, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -184,7 +200,7 @@ int main(){
     }
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "fim_struct_whole_2d", nwriters);
+    S.io(nd, n, field, "fim_struct_whole_2d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -211,7 +227,7 @@ int main(){
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
 
-    Scarf3D::Initialize<fft> S(nd, npts, x, y, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fim> S(nd, npts, x, y, dh, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -264,7 +280,7 @@ int main(){
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
 
-    Scarf3D::Initialize<spec> S(nd, fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<srm> S(nd, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -288,7 +304,7 @@ int main(){
 
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "srm_struct_whole_2d", nwriters);
+    S.io(nd, n, field, "srm_struct_whole_2d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -315,7 +331,7 @@ int main(){
       Scarf3D::options.taper = taper;
       Scarf3D::options.mute  = mute;
 
-      Scarf3D::Initialize<spec> S(nd, npts, x, y, ds, acf, cl, sigma);
+      Scarf3D::Initialize<srm> S(nd, npts, x, y, dh, acf, cl, sigma);
 
       watch_start(&tictoc);
       S.execute(seed, field, stats);
@@ -404,14 +420,16 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    /*
     Scarf3D::options.alpha = alpha;
     Scarf3D::options.beta  = beta;
     Scarf3D::options.npoi  = npoi;
     Scarf3D::options.poi   = poi;
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
+    */
 
-    Scarf3D::Initialize<fft> S(nd, fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fim> S(nd, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -447,7 +465,7 @@ int main(){
     }
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "fim_struct_whole_3d", nwriters);
+    S.io(nd, n, field, "fim_struct_whole_3d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -468,14 +486,16 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    /*
     Scarf3D::options.alpha = alpha;
     Scarf3D::options.beta  = beta;
     Scarf3D::options.npoi  = npoi;
     Scarf3D::options.poi   = poi;
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
+    */
 
-    Scarf3D::Initialize<fft> S(nd, npts, x, y, z, ds, acf, cl, sigma);
+    Scarf3D::Initialize<fim> S(nd, npts, x, y, z, dh, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -521,14 +541,16 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    /*
     Scarf3D::options.alpha = alpha;
     Scarf3D::options.beta  = beta;
     Scarf3D::options.npoi  = npoi;
     Scarf3D::options.poi   = poi;
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
+    */
 
-    Scarf3D::Initialize<spec> S(nd, fs, fe, ds, acf, cl, sigma);
+    Scarf3D::Initialize<srm> S(nd, fs, fe, ds, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);
@@ -562,7 +584,7 @@ int main(){
     }
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "srm_struct_whole", nwriters);
+    S.io(nd, n, field, "srm_struct_whole", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -583,14 +605,16 @@ int main(){
   {
 
     Scarf3D::options.hurst = hurst;
+    /*
     Scarf3D::options.alpha = alpha;
     Scarf3D::options.beta  = beta;
     Scarf3D::options.npoi  = npoi;
     Scarf3D::options.poi   = poi;
     Scarf3D::options.taper = taper;
     Scarf3D::options.mute  = mute;
+    */
 
-    Scarf3D::Initialize<spec> S(nd, npts, x, y, z, ds, acf, cl, sigma);
+    Scarf3D::Initialize<srm> S(nd, npts, x, y, z, dh, acf, cl, sigma);
 
     watch_start(&tictoc);
     S.execute(seed, field, stats);

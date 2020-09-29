@@ -1,4 +1,11 @@
 /*
+Copyright (c) 2020, Eidgenoessische Technische Hochschule Zurich, ETHZ.
+
+Written by:
+Walter Imperatori (walter.imperatori@sed.ethz.ch)
+
+All rights reserved.
+
 This file is part of SCARF3D, version: 2.4
 
 SCARF3D is free software: you can redistribute it and/or modify
@@ -52,6 +59,15 @@ int main(){
   int world_rank;
   MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
+  if (world_rank == 0){
+    printf("\n");
+    printf("This program will compute small 2D and 3D random fields\n");
+    printf("using the FIM (and SRM - if selected at compile-time) algorithm(s).\n");
+    printf("Test should complete in a few minutes. Output can be inspected\n");
+    printf("with Matlab/Octave script 'scarf3d.m' and 'vizme.m'.\n");
+    printf("\n");
+  }
+
   MPI_Barrier(MPI_COMM_WORLD);
 
   // ===========================================================================
@@ -59,16 +75,17 @@ int main(){
   // Set mandatory parameters
 
   // number of grid points in model
-  const int n[3] = {500, 450, 400};
+  const int n[3] = {500, 500, 500};
 
   // grid-step
   const real ds = 50.;
+  const real dh = 50.;
 
   // autocorrelation function (0=von karman/exponential, 1=gaussian)
   const int acf = 0;
 
   // correlation length
-  const real cl[3] = {2000., 500., 100.};
+  const real cl[3] = {2000., 2000., 2000.};
 
   // standard deviation
   const real sigma = 0.05;
@@ -89,8 +106,8 @@ int main(){
   // number of POI
   const int npoi = 2;
 
-  const real taper = 5000;
-  const real mute  = 1000;
+  const real taper = 2500;
+  const real mute  = 500;
 
   // I/O writers (only for PFS)
   const int nwriters[1] = {2};
@@ -161,7 +178,7 @@ int main(){
   options.taper = taper;
   options.mute  = mute;
 
-  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+  scarf_cart_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -186,7 +203,7 @@ int main(){
   }
 
   watch_start(&tictoc);
-  scarf_io_one(nd, n, field, "fim_struct_whole_2d", nwriters);
+  scarf_io_one(nd, n, field, "fim_cart_whole_2d", nwriters);
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -213,7 +230,7 @@ int main(){
   options.taper = taper;
   options.mute  = mute;
 
-  scarf_unstruct_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
+  scarf_nocart_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -261,9 +278,9 @@ int main(){
   options.poi    = poi;
   options.taper  = taper;
   options.mute   = mute;
-  options.solver = 1;
+  options.method = 1;
 
-  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+  scarf_cart_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -286,7 +303,7 @@ int main(){
   }
 
   watch_start(&tictoc);
-  scarf_io_one(nd, n, field, "srm_struct_whole_2d", nwriters);
+  scarf_io_one(nd, n, field, "srm_cart_whole_2d", nwriters);
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -310,9 +327,9 @@ int main(){
   options.poi    = poi;
   options.taper  = taper;
   options.mute   = mute;
-  options.solver = 1;
+  options.method = 1;
 
-  scarf_unstruct_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
+  scarf_nocart_initialize(nd, npts, x, y, NULL, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -400,14 +417,16 @@ int main(){
   scarf_opt_init(&options);
 
   options.hurst  = hurst;
+  /*
   options.alpha  = alpha;
   options.beta   = beta;
   options.npoi   = npoi;
   options.poi    = poi;
   options.taper  = taper;
   options.mute   = mute;
+  */
 
-  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+  scarf_cart_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -432,9 +451,9 @@ int main(){
   }
 
   watch_start(&tictoc);
-  scarf_io_slice(n, "x", n[0]/2, field, "fim_struct_xslice");
-  scarf_io_slice(n, "y", n[1]/2, field, "fim_struct_yslice");
-  scarf_io_slice(n, "z", n[2]/2, field, "fim_struct_zslice");
+  scarf_io_slice(n, "x", n[0]/2, field, "fim_cart_xslice");
+  scarf_io_slice(n, "y", n[1]/2, field, "fim_cart_yslice");
+  scarf_io_slice(n, "z", n[2]/2, field, "fim_cart_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -442,7 +461,7 @@ int main(){
   }
 
   watch_start(&tictoc);
-  scarf_io_one(nd, n, field, "fim_struct_whole_3d", nwriters);
+  scarf_io_one(nd, n, field, "fim_cart_whole_3d", nwriters);
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -463,14 +482,16 @@ int main(){
   scarf_opt_init(&options);
 
   options.hurst  = hurst;
+  /*
   options.alpha  = alpha;
   options.beta   = beta;
   options.npoi   = npoi;
   options.poi    = poi;
   options.taper  = taper;
   options.mute   = mute;
+  */
 
-  scarf_unstruct_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
+  scarf_nocart_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -513,15 +534,17 @@ int main(){
   scarf_opt_init(&options);
 
   options.hurst  = hurst;
+  /*
   options.alpha  = alpha;
   options.beta   = beta;
   options.npoi   = npoi;
   options.poi    = poi;
   options.taper  = taper;
   options.mute   = mute;
-  options.solver = 1;
+  options.method = 1;
+  */
 
-  scarf_struct_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
+  scarf_cart_initialize(nd, fs, fe, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
@@ -544,9 +567,9 @@ int main(){
   }
 
   watch_start(&tictoc);
-  scarf_io_slice(n, "x", n[0]/2, field, "srm_struct_xslice");
-  scarf_io_slice(n, "y", n[1]/2, field, "srm_struct_yslice");
-  scarf_io_slice(n, "z", n[2]/2, field, "srm_struct_zslice");
+  scarf_io_slice(n, "x", n[0]/2, field, "srm_cart_xslice");
+  scarf_io_slice(n, "y", n[1]/2, field, "srm_cart_yslice");
+  scarf_io_slice(n, "z", n[2]/2, field, "srm_cart_zslice");
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -554,7 +577,7 @@ int main(){
   }
 
   watch_start(&tictoc);
-  scarf_io_one(nd, n, field, "srm_struct_whole_3d", nwriters);
+  scarf_io_one(nd, n, field, "srm_cart_whole_3d", nwriters);
   watch_stop(&tictoc);
 
   if (world_rank == 0) {
@@ -573,15 +596,17 @@ int main(){
   scarf_opt_init(&options);
 
   options.hurst  = hurst;
+  /*
   options.alpha  = alpha;
   options.beta   = beta;
   options.npoi   = npoi;
   options.poi    = poi;
   options.taper  = taper;
   options.mute   = mute;
-  options.solver = 1;
+  options.method = 1;
+  */
 
-  scarf_unstruct_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
+  scarf_nocart_initialize(nd, npts, x, y, z, ds, acf, cl, sigma, &options);
 
   watch_start(&tictoc);
   scarf_execute(seed, field, stats);
