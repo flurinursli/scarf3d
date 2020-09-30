@@ -133,7 +133,7 @@ PROGRAM driver
 
   ! ================================================================================================================================
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! create sample structured mesh: 2D case
+  ! create sample cartesian mesh: 2D case
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================
 
@@ -163,7 +163,7 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *) ''
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '****** FIM algorithm, 2D, structured mesh *******'
+    WRITE(stdout, *) '****** FIM algorithm, 2D, cartesian mesh *******'
   ENDIF
 
   CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 0, hurst = hurst, alpha = alpha,     &
@@ -223,7 +223,7 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *) ''
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '***** FIM algorithm, 2D, unstructured mesh ******'
+    WRITE(stdout, *) '***** FIM algorithm, 2D, non-cartesian mesh ******'
   ENDIF
 
   CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1, y1, method = 0,  &
@@ -291,10 +291,10 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *) ''
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '****** SRM algorithm, 2D, structured mesh *******'
+    WRITE(stdout, *) '****** SRM algorithm, 2D, cartesian mesh *******'
   ENDIF
 
-  ! structured mesh test
+  ! cartesian mesh test
   CALL scarf_initialize(fs(1:2), fe(1:2), ds, acf, cl(1:2), sigma, method = 1, hurst = hurst, alpha = alpha,    &
                         poi = poi, taper = taper, mute = mute)
 
@@ -349,10 +349,10 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *)
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '***** SRM algorithm, 2D, unstructured mesh ******'
+    WRITE(stdout, *) '***** SRM algorithm, 2D, non-cartesian mesh ******'
   ENDIF
 
-  ! unstructured mesh test
+  ! non-cartesian mesh test
   CALL scarf_initialize(dh, acf, cl(1:2), sigma, x1, y1, method = 1,  &
                         hurst = hurst, alpha = alpha, poi = poi(1:2,:), taper = taper, mute = mute)
 
@@ -411,7 +411,7 @@ PROGRAM driver
 
   ! ================================================================================================================================
   ! --------------------------------------------------------------------------------------------------------------------------------
-  ! create sample structured mesh: 3D case
+  ! create sample cartesian mesh: 3D case
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================
 
@@ -445,7 +445,7 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *) ''
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '****** FIM algorithm, 3D, structured mesh *******'
+    WRITE(stdout, *) '****** FIM algorithm, 3D, cartesian mesh *******'
   ENDIF
 
   CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 0, hurst = hurst)
@@ -519,7 +519,7 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *) ''
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '***** FIM algorithm, 3D, unstructured mesh ******'
+    WRITE(stdout, *) '***** FIM algorithm, 3D, non-cartesian mesh ******'
   ENDIF
 
   CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 0, hurst = hurst)
@@ -601,7 +601,7 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *) ''
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '****** SRM algorithm, 3D, structured mesh *******'
+    WRITE(stdout, *) '****** SRM algorithm, 3D, cartesian mesh *******'
   ENDIF
 
   CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = 1, hurst = hurst)
@@ -672,7 +672,7 @@ PROGRAM driver
   IF (rank .eq. 0) THEN
     WRITE(stdout, *)
     WRITE(stdout, *) '*************************************************'
-    WRITE(stdout, *) '***** SRM algorithm, 3D, unstructured mesh ******'
+    WRITE(stdout, *) '***** SRM algorithm, 3D, non-cartesian mesh ******'
   ENDIF
 
   CALL scarf_initialize(dh, acf, cl, sigma, x1, y1, z1, method = 1, hurst = hurst)

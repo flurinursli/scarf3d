@@ -121,7 +121,7 @@ int main(){
 
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
-  // create sample structured mesh: 2D case
+  // create sample cartesian mesh: 2D case
   // --------------------------------------------------------------------------------------------------------------------------------
   // ================================================================================================================================
 
@@ -163,7 +163,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "****** FIM algorithm, 2D, structured mesh *******" << std::endl;
+    std::cout << "****** FIM algorithm, 2D, cartesian mesh *******" << std::endl;
   }
 
   {
@@ -200,7 +200,7 @@ int main(){
     }
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "fim_struct_whole_2d", &nwriters);
+    S.io(nd, n, field, "fim_cart_whole_2d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -215,7 +215,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "***** FIM algorithm, 2D, unstructured mesh ******" << std::endl;
+    std::cout << "***** FIM algorithm, 2D, non-cartesian mesh ******" << std::endl;
   }
 
   {
@@ -251,7 +251,7 @@ int main(){
       std::cout << "*************************************************"                                      << std::endl;
     }
 
-    // I/O not possible for unstructured mesh because "fs" and "fe" are not defined
+    // I/O not possible for non-cartesian mesh because "fs" and "fe" are not defined
 
     // call destructor explicitly
     //S.~Initialize();
@@ -268,7 +268,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "****** SRM algorithm, 2D, structured mesh *******" << std::endl;
+    std::cout << "****** SRM algorithm, 2D, cartesian mesh *******" << std::endl;
   }
 
   {
@@ -304,7 +304,7 @@ int main(){
 
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "srm_struct_whole_2d", &nwriters);
+    S.io(nd, n, field, "srm_cart_whole_2d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -319,7 +319,7 @@ int main(){
     if (world_rank == 0){
       std::cout << ""                                                  << std::endl;
       std::cout << "*************************************************" << std::endl;
-      std::cout << "***** SRM algorithm, 2D, unstructured mesh ******" << std::endl;
+      std::cout << "***** SRM algorithm, 2D, non-cartesian mesh ******" << std::endl;
     }
 
     {
@@ -367,7 +367,7 @@ int main(){
 
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
-  // create sample structured mesh: 3D case
+  // create sample cartesian mesh: 3D case
   // --------------------------------------------------------------------------------------------------------------------------------
   // ================================================================================================================================
   nd = 3;
@@ -414,7 +414,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "****** FIM algorithm, 3D, structured mesh *******" << std::endl;
+    std::cout << "****** FIM algorithm, 3D, cartesian mesh *******" << std::endl;
   }
 
   {
@@ -455,9 +455,9 @@ int main(){
 
     // IO
     watch_start(&tictoc);
-    S.io(n, "x", n[0]/2, field, "fim_struct_xslice");
-    S.io(n, "y", n[1]/2, field, "fim_struct_yslice");
-    S.io(n, "z", n[2]/2, field, "fim_struct_zslice");
+    S.io(n, "x", n[0]/2, field, "fim_cart_xslice");
+    S.io(n, "y", n[1]/2, field, "fim_cart_yslice");
+    S.io(n, "z", n[2]/2, field, "fim_cart_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -465,7 +465,7 @@ int main(){
     }
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "fim_struct_whole_3d", &nwriters);
+    S.io(nd, n, field, "fim_cart_whole_3d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -480,7 +480,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "***** FIM algorithm, 3D, unstructured mesh ******" << std::endl;
+    std::cout << "***** FIM algorithm, 3D, non-cartesian mesh ******" << std::endl;
   }
 
   {
@@ -535,7 +535,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "****** SRM algorithm, 3D, structured mesh *******" << std::endl;
+    std::cout << "****** SRM algorithm, 3D, cartesian mesh *******" << std::endl;
   }
 
   {
@@ -574,9 +574,9 @@ int main(){
 
     // IO
     watch_start(&tictoc);
-    S.io(n, "x", n[0]/2, field, "spec_struct_xslice");
-    S.io(n, "y", n[1]/2, field, "spec_struct_yslice");
-    S.io(n, "z", n[2]/2, field, "spec_struct_zslice");
+    S.io(n, "x", n[0]/2, field, "srm_cart_xslice");
+    S.io(n, "y", n[1]/2, field, "srm_cart_yslice");
+    S.io(n, "z", n[2]/2, field, "srm_cart_zslice");
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -584,7 +584,7 @@ int main(){
     }
 
     watch_start(&tictoc);
-    S.io(nd, n, field, "srm_struct_whole", &nwriters);
+    S.io(nd, n, field, "srm_cart_whole_3d", &nwriters);
     watch_stop(&tictoc);
 
     if (world_rank == 0) {
@@ -599,7 +599,7 @@ int main(){
   if (world_rank == 0){
     std::cout << ""                                                  << std::endl;
     std::cout << "*************************************************" << std::endl;
-    std::cout << "***** SRM algorithm, 3D, unstructured mesh ******" << std::endl;
+    std::cout << "***** SRM algorithm, 3D, non-cartesian mesh ******" << std::endl;
   }
 
   {

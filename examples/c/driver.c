@@ -123,7 +123,7 @@ int main(){
 
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
-  // create sample structured mesh: 2D case
+  // create sample cartesian mesh: 2D case
   // --------------------------------------------------------------------------------------------------------------------------------
   // ================================================================================================================================
 
@@ -166,7 +166,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("****** FIM algorithm, 2D, structured mesh *******\n");
+    printf("****** FIM algorithm, 2D, cartesian mesh *******\n");
   }
 
   scarf_opt_init(&options);
@@ -218,7 +218,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("***** FIM algorithm, 2D, unstructured mesh ******\n");
+    printf("***** FIM algorithm, 2D, non-cartesian mesh ******\n");
   }
 
   scarf_opt_init(&options);
@@ -267,7 +267,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("****** SRM algorithm, 2D, structured mesh *******\n");
+    printf("****** SRM algorithm, 2D, cartesian mesh *******\n");
   }
 
   scarf_opt_init(&options);
@@ -316,7 +316,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("****** SRM algorithm, 2D, structured mesh *******\n");
+    printf("****** SRM algorithm, 2D, cartesian mesh *******\n");
   }
 
   scarf_opt_init(&options);
@@ -362,7 +362,7 @@ int main(){
 
   // ================================================================================================================================
   // --------------------------------------------------------------------------------------------------------------------------------
-  // create sample structured mesh: 3D case
+  // create sample cartesian mesh: 3D case
   // --------------------------------------------------------------------------------------------------------------------------------
   // ================================================================================================================================
 
@@ -411,7 +411,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("****** FIM algorithm, 3D, structured mesh *******\n");
+    printf("****** FIM algorithm, 3D, cartesian mesh *******\n");
   }
 
   scarf_opt_init(&options);
@@ -476,7 +476,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("***** FIM algorithm, 3D, unstructured mesh ******\n");
+    printf("***** FIM algorithm, 3D, non-cartesian mesh ******\n");
   }
 
   scarf_opt_init(&options);
@@ -528,7 +528,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("****** SRM algorithm, 3D, structured mesh *******\n");
+    printf("****** SRM algorithm, 3D, cartesian mesh *******\n");
   }
 
   scarf_opt_init(&options);
@@ -590,7 +590,7 @@ int main(){
   if (world_rank == 0){
     printf("\n");
     printf("*************************************************\n");
-    printf("****** SRM algorithm, 3D, structured mesh *******\n");
+    printf("****** SRM algorithm, 3D, non-cartesian mesh *******\n");
   }
 
   scarf_opt_init(&options);
