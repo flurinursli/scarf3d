@@ -389,7 +389,7 @@ PROGRAM main
     WRITE(stdout, '(X, A26, A, F12.3, T65, A)') ADJUSTL(buffer), '|', gamma, '|'
     WRITE(stdout, *) '--------------------------|------------------------------------|'
 
-    buffer = 'Number of MPI processes for I/O'
+    buffer = 'MPI processes for I/O'
     WRITE(stdout, '(X, A26, A, I12, T65, A)') ADJUSTL(buffer), '|', nwriters, '|'
 
     WRITE(stdout, *) '****************************************************************'
