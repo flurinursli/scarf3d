@@ -10,7 +10,7 @@ OBJS = driver.o scarflib_aux.o
 
 # default target: link to create "driver.exe"
 fortran: $(OBJS)
-	$(FC) $(FFLAGS) -o driver.exe $(OBJS) $(LIB_LINK_FLAGS)
+	$(FC) $(FFLAGS) -o driverF.exe $(OBJS) $(LIB_LINK_FLAGS)
 
 # list dependencies
 driver.o : scarflib_aux.o

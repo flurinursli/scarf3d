@@ -62,8 +62,8 @@ PROGRAM main
   CHARACTER(1)                                  :: num2str
   CHARACTER(256)                                :: buffer
   CHARACTER(:),   ALLOCATABLE                   :: fmt
-  INTEGER(f_int)                                :: ierr, rank, ntasks, ndim, npoi
-  INTEGER(f_int)                                :: acf, seed, argc, rescale, pad, ios, algorithm
+  INTEGER(f_int)                                :: ierr, rank, ntasks, ndim, npoi, nwriters
+  INTEGER(f_int)                                :: acf, seed, argc, rescale, pad, ios, method
   INTEGER(f_int), ALLOCATABLE, DIMENSION(:)     :: n, fs, fe
   REAL(f_real)                                  :: ds, sigma, hurst, mute, taper, alpha, beta, gamma
   REAL(f_dble)                                  :: tictoc
@@ -101,14 +101,15 @@ PROGRAM main
   seed  = 0
 
   ! set value for optional parameters
-  mute      = 0._f_real
-  taper     = 0._f_real
-  rescale   = 0
-  pad       = 0
-  alpha     = 0._f_real
-  beta      = 0._f_real
-  gamma     = 0._f_real
-  algorithm = 0
+  mute     = 0._f_real
+  taper    = 0._f_real
+  rescale  = 0
+  pad      = 0
+  alpha    = 0._f_real
+  beta     = 0._f_real
+  gamma    = 0._f_real
+  method   = 0
+  nwriters = 2
 
   ! ================================================================================================================================
   ! --------------------------------------------------------------------------------------------------------------------------------
@@ -208,8 +209,10 @@ PROGRAM main
             READ(1, *) beta
           CASE('# gamma')
             READ(1, *) gamma
-          CASE('# algorithm')
-            READ(1, *) algorithm
+          CASE('# method')
+            READ(1, *) method
+          CASE('# nwriters')
+            READ(1, *) nwriters
         END SELECT
 
       ENDDO
@@ -237,7 +240,8 @@ PROGRAM main
 
   ! broadcast remaining parameters
   CALL mpi_bcast(n, ndim, mpi_integer, 0, mpi_comm_world, ierr)
-  CALL mpi_bcast(algorithm, 1, mpi_integer, 0, mpi_comm_world, ierr)
+  CALL mpi_bcast(method, 1, mpi_integer, 0, mpi_comm_world, ierr)
+  CALL mpi_bcast(nwriters, 1, mpi_integer, 0, mpi_comm_world, ierr)
   CALL mpi_bcast(acf, 1, mpi_integer, 0, mpi_comm_world, ierr)
   CALL mpi_bcast(seed, 1, mpi_integer, 0, mpi_comm_world, ierr)
   CALL mpi_bcast(rescale, 1, mpi_integer, 0, mpi_comm_world, ierr)
@@ -294,6 +298,12 @@ PROGRAM main
     CALL mpi_abort(mpi_comm_world, 1, ierr)
   ENDIF
 
+  IF (nwriters .le. 0) THEN
+    IF (rank .eq. 0) WRITE(stdout, *) 'Error: nwriters parameter can be only larger than zero'
+    CALL mpi_barrier(mpi_comm_world, ierr)
+    CALL mpi_abort(mpi_comm_world, 1, ierr)
+  ENDIF
+
   IF (sigma .le. 0._f_real) THEN
     IF (rank .eq. 0) WRITE(stdout, *) 'Error: standard deviation (sigma) must be larger than zero'
     CALL mpi_barrier(mpi_comm_world, ierr)
@@ -313,7 +323,7 @@ PROGRAM main
   ENDIF
 
   IF (seed .eq. 0) THEN
-    IF (rank .eq. 0) WRITE(stdout, *) 'Error: seed number not specified'
+    IF (rank .eq. 0) WRITE(stdout, *) 'Error: seed number (any integer not equal zero) not specified'
     CALL mpi_barrier(mpi_comm_world, ierr)
     CALL mpi_abort(mpi_comm_world, 1, ierr)
     STOP
@@ -332,8 +342,8 @@ PROGRAM main
     buffer = 'Number of dimensions'
     WRITE(stdout, '(X, A26, A, I12, T65, A)') ADJUSTL(buffer), '|', ndim,      '|'
     WRITE(stdout, *) '--------------------------|------------------------------------|'
-    buffer = 'Algorithm'
-    WRITE(stdout, '(X, A26, A, I12, T65, A)') ADJUSTL(buffer), '|', algorithm, '|'
+    buffer = 'method'
+    WRITE(stdout, '(X, A26, A, I12, T65, A)') ADJUSTL(buffer), '|', method, '|'
     WRITE(stdout, *) '--------------------------|------------------------------------|'
     WRITE(num2str, '(I0)') ndim; fmt = '(X, A26, A, ' // num2str // 'I12, T65, A)'
     buffer = 'Number of points'
@@ -377,6 +387,10 @@ PROGRAM main
     WRITE(stdout, '(X, A26, A, F12.3, T65, A)') ADJUSTL(buffer), '|', beta,  '|'
     buffer = 'Gamma angle'
     WRITE(stdout, '(X, A26, A, F12.3, T65, A)') ADJUSTL(buffer), '|', gamma, '|'
+    WRITE(stdout, *) '--------------------------|------------------------------------|'
+
+    buffer = 'Number of MPI processes for I/O'
+    WRITE(stdout, '(X, A26, A, I12, T65, A)') ADJUSTL(buffer), '|', nwriters, '|'
 
     WRITE(stdout, *) '****************************************************************'
     WRITE(stdout, *)
@@ -409,7 +423,7 @@ PROGRAM main
   ! --------------------------------------------------------------------------------------------------------------------------------
   ! ================================================================================================================================
 
-  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = algorithm, hurst = hurst, alpha = alpha, beta = beta, gamma = gamma, &
+  CALL scarf_initialize(fs, fe, ds, acf, cl, sigma, method = method, hurst = hurst, alpha = alpha, beta = beta, gamma = gamma, &
                         poi = poi, taper = taper, mute = mute)
 
   CALL watch_start(tictoc)
@@ -453,9 +467,9 @@ PROGRAM main
   CALL watch_start(tictoc)
 
   IF (ndim .eq. 2) THEN
-    CALL scarf_io(n, field2d, 'random_field.bin', 3)
+    CALL scarf_io(n, field2d, 'random_field.bin', nwriters)
   ELSE
-    CALL scarf_io(n, field3d, 'random_field.bin', 3)
+    CALL scarf_io(n, field3d, 'random_field.bin', nwriters)
   ENDIF
 
   CALL watch_stop(tictoc)
